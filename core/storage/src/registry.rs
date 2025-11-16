@@ -110,6 +110,13 @@ pub fn create_default_registry() -> ProviderRegistry {
         }))
         .expect("Failed to register local provider");
 
+    // Register Google Drive provider
+    registry
+        .register("gdrive", Box::new(|config| {
+            crate::gdrive::create_gdrive_provider(config)
+        }))
+        .expect("Failed to register gdrive provider");
+
     registry
 }
 

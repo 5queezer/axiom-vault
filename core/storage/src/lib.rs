@@ -14,8 +14,10 @@ pub mod provider;
 pub mod registry;
 pub mod memory;
 pub mod local;
+pub mod gdrive;
 
 pub use provider::{StorageProvider, Metadata, ConflictResolution};
 pub use registry::{ProviderRegistry, ProviderFactory, create_default_registry};
 pub use memory::MemoryProvider;
 pub use local::LocalProvider;
+pub use gdrive::{GDriveProvider, GDriveConfig};
