@@ -1,0 +1,22 @@
+# Build artifacts
+/target/
+**/*.rs.bk
+*.pdb
+
+# Cargo.lock for applications
+Cargo.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test vaults (don't commit test data)
+/test_vaults/
+*.vault/

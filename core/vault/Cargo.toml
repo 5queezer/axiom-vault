@@ -1,0 +1,23 @@
+[package]
+name = "axiomvault-vault"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+axiomvault-common = { path = "../common" }
+axiomvault-crypto = { path = "../crypto" }
+axiomvault-storage = { path = "../storage" }
+
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+async-trait.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+base64.workspace = true
+tracing.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
