@@ -50,7 +50,7 @@ impl MasterKey {
         use blake2::{Blake2b, Digest};
 
         let mut hasher = Blake2b::<U32>::new();
-        hasher.update(&self.key);
+        hasher.update(self.key);
         hasher.update(file_id);
         hasher.update(b"filekey");
 
@@ -66,7 +66,7 @@ impl MasterKey {
         use blake2::{Blake2b, Digest};
 
         let mut hasher = Blake2b::<U32>::new();
-        hasher.update(&self.key);
+        hasher.update(self.key);
         hasher.update(dir_id);
         hasher.update(b"dirkey");
 
