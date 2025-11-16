@@ -697,8 +697,6 @@ struct SingleSyncResult {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     // Tests would require a mock StorageProvider
     // See integration tests for full testing
 }
