@@ -53,7 +53,7 @@ uuid = { version = "1.0", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 
 # HTTP client and OAuth2
-reqwest = { version = "0.11", features = ["json", "stream"] }
+reqwest = { version = "0.11", default-features = false, features = ["json", "stream", "rustls-tls"] }
 oauth2 = "4.4"
 url = "2.5"
 tokio-util = { version = "0.7", features = ["io"] }
