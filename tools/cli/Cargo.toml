@@ -12,6 +12,7 @@ axiomvault-common = { path = "../../core/common" }
 axiomvault-crypto = { path = "../../core/crypto" }
 axiomvault-storage = { path = "../../core/storage" }
 axiomvault-vault = { path = "../../core/vault" }
+axiomvault-sync = { path = "../../core/sync" }
 
 clap.workspace = true
 tokio.workspace = true
@@ -19,4 +20,5 @@ serde_json.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 anyhow.workspace = true
+chrono.workspace = true
 rpassword = "7.0"
