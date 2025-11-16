@@ -1,0 +1,52 @@
+[package]
+name = "axiom-ffi"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "FFI bindings for AxiomVault core"
+
+[lib]
+name = "axiom_vault"
+crate-type = ["staticlib", "cdylib"]
+
+[dependencies]
+axiomvault-vault = { path = "../vault" }
+axiomvault-crypto = { path = "../crypto" }
+axiomvault-storage = { path = "../storage" }
+axiomvault-common = { path = "../common" }
+axiomvault-sync = { path = "../sync" }
+
+# Runtime
+tokio = { workspace = true }
+async-trait.workspace = true
+futures.workspace = true
+
+# Serialization
+serde.workspace = true
+serde_json.workspace = true
+
+# Error handling
+thiserror.workspace = true
+anyhow.workspace = true
+
+# Utils
+uuid.workspace = true
+chrono.workspace = true
+base64.workspace = true
+
+# Logging
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+# For C FFI
+libc = "0.2"
+once_cell = "1.18"
+
+[build-dependencies]
+cbindgen = "0.26"
+
+[features]
+default = []
+ios = []
+android = []
