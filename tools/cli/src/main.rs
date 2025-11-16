@@ -6,8 +6,11 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use std::path::{Path, PathBuf};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
 use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
+use url::Url;
 
 use axiomvault_common::{VaultId, VaultPath};
 use axiomvault_crypto::KdfParams;
@@ -666,25 +669,112 @@ async fn cmd_gdrive_auth(
 
     let auth_manager = AuthManager::new(auth_config).context("Failed to create auth manager")?;
 
-    let (auth_url, _csrf_token) = auth_manager.authorization_url();
+    let (auth_url, csrf_token) = auth_manager.authorization_url();
 
-    println!("Please visit this URL to authorize AxiomVault:");
-    println!();
-    println!("  {}", auth_url);
-    println!();
-    println!("After authorization, you will be redirected to a URL like:");
-    println!("  http://localhost:8080/callback?code=AUTHORIZATION_CODE&state=...");
-    println!();
-    println!("Copy the 'code' parameter value from the URL.");
-    println!();
+    // Start local HTTP server to capture the OAuth callback
+    let listener = TcpListener::bind("127.0.0.1:8080")
+        .await
+        .context("Failed to start local server on port 8080. Is another process using this port?")?;
 
-    let code = rpassword::prompt_password("Enter the authorization code: ")
-        .context("Failed to read code")?;
+    println!("Starting Google Drive authentication...");
+    println!();
+    println!("Opening your browser to authorize AxiomVault...");
 
-    info!("Exchanging authorization code for tokens");
+    // Try to open the browser automatically
+    let browser_opened = open::that(&auth_url).is_ok();
+
+    if browser_opened {
+        println!("Browser opened successfully!");
+    } else {
+        println!("Could not open browser automatically.");
+        println!("Please visit this URL to authorize:");
+        println!();
+        println!("  {}", auth_url);
+    }
+
+    println!();
+    println!("Waiting for authorization... (Press Ctrl+C to cancel)");
+
+    // Wait for the OAuth callback
+    let (mut socket, _) = listener
+        .accept()
+        .await
+        .context("Failed to accept connection")?;
+
+    // Read the HTTP request
+    let mut buffer = vec![0u8; 4096];
+    let n = socket
+        .read(&mut buffer)
+        .await
+        .context("Failed to read request")?;
+    let request = String::from_utf8_lossy(&buffer[..n]);
+
+    // Parse the request to extract the authorization code
+    let first_line = request.lines().next().unwrap_or("");
+    let path = first_line.split_whitespace().nth(1).unwrap_or("/");
+
+    // Extract code and state from the callback URL
+    let callback_url = format!("http://localhost:8080{}", path);
+    let parsed_url = Url::parse(&callback_url).context("Failed to parse callback URL")?;
+
+    let mut code = None;
+    let mut state = None;
+
+    for (key, value) in parsed_url.query_pairs() {
+        match key.as_ref() {
+            "code" => code = Some(value.to_string()),
+            "state" => state = Some(value.to_string()),
+            _ => {}
+        }
+    }
+
+    let auth_code = code.ok_or_else(|| anyhow::anyhow!("No authorization code received"))?;
+    let received_state = state.ok_or_else(|| anyhow::anyhow!("No state parameter received"))?;
+
+    // Verify CSRF token
+    if received_state != csrf_token {
+        // Send error response
+        let error_html = r#"<!DOCTYPE html>
+<html>
+<head><title>Authentication Failed</title></head>
+<body style="font-family: sans-serif; text-align: center; padding: 50px;">
+<h1 style="color: #d32f2f;">Authentication Failed</h1>
+<p>Security validation failed. Please try again.</p>
+</body>
+</html>"#;
+        let response = format!(
+            "HTTP/1.1 400 Bad Request\r\nContent-Type: text/html\r\nContent-Length: {}\r\n\r\n{}",
+            error_html.len(),
+            error_html
+        );
+        socket.write_all(response.as_bytes()).await.ok();
+        anyhow::bail!("CSRF token mismatch - possible security issue");
+    }
+
+    // Send success response to browser
+    let success_html = r#"<!DOCTYPE html>
+<html>
+<head><title>Authentication Successful</title></head>
+<body style="font-family: sans-serif; text-align: center; padding: 50px;">
+<h1 style="color: #4caf50;">Authentication Successful!</h1>
+<p>You have successfully authorized AxiomVault to access your Google Drive.</p>
+<p>You can close this window and return to the terminal.</p>
+</body>
+</html>"#;
+
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\n\r\n{}",
+        success_html.len(),
+        success_html
+    );
+    socket.write_all(response.as_bytes()).await.ok();
+
+    info!("Authorization code received, exchanging for tokens");
+    println!();
+    println!("Authorization received! Exchanging for access tokens...");
 
     let tokens = auth_manager
-        .exchange_code(&code)
+        .exchange_code(&auth_code)
         .await
         .context("Failed to exchange authorization code")?;
 
@@ -696,9 +786,12 @@ async fn cmd_gdrive_auth(
         .await
         .context("Failed to write tokens file")?;
 
+    println!();
     println!("Authentication successful!");
     println!("  Tokens saved to: {}", output.display());
     println!("  Expires at: {}", tokens.expires_at);
+    println!();
+    println!("You can now use 'axiomvault gdrive-create' or 'axiomvault gdrive-open'");
 
     Ok(())
 }
