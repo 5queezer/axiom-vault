@@ -4,12 +4,12 @@
 //! with a 24-byte nonce that is safe for random generation.
 
 use chacha20poly1305::{
-    aead::{Aead, AeadCore, KeyInit, OsRng, generic_array::GenericArray},
+    aead::{generic_array::GenericArray, Aead, AeadCore, KeyInit, OsRng},
     XChaCha20Poly1305,
 };
 
-use axiomvault_common::{Error, Result};
 use crate::keys::KEY_LENGTH;
+use axiomvault_common::{Error, Result};
 
 /// Nonce size for XChaCha20-Poly1305 (24 bytes).
 pub const NONCE_SIZE: usize = 24;
@@ -113,7 +113,11 @@ pub fn decrypt(key: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>> {
 ///
 /// # Security
 /// - Caller is responsible for nonce uniqueness
-pub fn encrypt_with_nonce(key: &[u8], nonce: &[u8; NONCE_SIZE], plaintext: &[u8]) -> Result<Vec<u8>> {
+pub fn encrypt_with_nonce(
+    key: &[u8],
+    nonce: &[u8; NONCE_SIZE],
+    plaintext: &[u8],
+) -> Result<Vec<u8>> {
     if key.len() != KEY_LENGTH {
         return Err(Error::Crypto(format!(
             "Invalid key length: expected {}, got {}",
@@ -131,7 +135,11 @@ pub fn encrypt_with_nonce(key: &[u8], nonce: &[u8; NONCE_SIZE], plaintext: &[u8]
 }
 
 /// Decrypt ciphertext with a specific nonce.
-pub fn decrypt_with_nonce(key: &[u8], nonce: &[u8; NONCE_SIZE], ciphertext: &[u8]) -> Result<Vec<u8>> {
+pub fn decrypt_with_nonce(
+    key: &[u8],
+    nonce: &[u8; NONCE_SIZE],
+    ciphertext: &[u8],
+) -> Result<Vec<u8>> {
     if key.len() != KEY_LENGTH {
         return Err(Error::Crypto(format!(
             "Invalid key length: expected {}, got {}",
@@ -175,10 +183,7 @@ mod tests {
         let ciphertext = encrypt(&key, plaintext).unwrap();
 
         // Size should be nonce + plaintext + tag
-        assert_eq!(
-            ciphertext.len(),
-            NONCE_SIZE + plaintext.len() + TAG_SIZE
-        );
+        assert_eq!(ciphertext.len(), NONCE_SIZE + plaintext.len() + TAG_SIZE);
     }
 
     #[test]

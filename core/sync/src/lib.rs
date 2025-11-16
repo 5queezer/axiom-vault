@@ -17,7 +17,7 @@ pub mod state;
 // Re-export main types
 pub use conflict::{ConflictInfo, ConflictResolver, ConflictStrategy, ResolutionResult};
 pub use engine::{SyncConfig, SyncEngine};
-pub use retry::{RetryConfig, RetryExecutor, retry, retry_with_config};
+pub use retry::{retry, retry_with_config, RetryConfig, RetryExecutor};
 pub use scheduler::{SyncMode, SyncRequest, SyncResult, SyncScheduler, SyncSchedulerHandle};
 pub use staging::{ChangeType, StagedChange, StagingArea};
 pub use state::{SyncEntry, SyncState, SyncStatus};

@@ -3,9 +3,9 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
-use tracing::{debug, info, warn, error};
+use tracing::{debug, error, info, warn};
 
-use axiomvault_common::{Result, Error, VaultPath};
+use axiomvault_common::{Error, Result, VaultPath};
 use axiomvault_storage::StorageProvider;
 
 use crate::conflict::{ConflictInfo, ConflictResolver, ConflictStrategy, ResolutionResult};
@@ -292,18 +292,25 @@ impl<P: StorageProvider + ?Sized + 'static> SyncEngine<P> {
                 continue;
             };
 
-            debug!("Processing staged change: {} for {}", change_id, change.vault_path);
+            debug!(
+                "Processing staged change: {} for {}",
+                change_id, change.vault_path
+            );
 
             match change.change_type {
                 ChangeType::Create | ChangeType::Update => {
-                    match self.upload_staged_file(&change_id, &change.vault_path).await {
+                    match self
+                        .upload_staged_file(&change_id, &change.vault_path)
+                        .await
+                    {
                         Ok(has_conflict) => {
                             if has_conflict {
                                 conflicts += 1;
                             } else {
                                 synced += 1;
                                 // Commit the change
-                                if let Err(e) = self.staging.write().await.commit(&change_id).await {
+                                if let Err(e) = self.staging.write().await.commit(&change_id).await
+                                {
                                     warn!("Failed to commit staged change: {}", e);
                                 }
                             }
@@ -314,20 +321,18 @@ impl<P: StorageProvider + ?Sized + 'static> SyncEngine<P> {
                         }
                     }
                 }
-                ChangeType::Delete => {
-                    match self.delete_remote_file(&change.vault_path).await {
-                        Ok(_) => {
-                            synced += 1;
-                            if let Err(e) = self.staging.write().await.commit(&change_id).await {
-                                warn!("Failed to commit staged change: {}", e);
-                            }
-                        }
-                        Err(e) => {
-                            error!("Failed to delete {}: {}", change.vault_path, e);
-                            failed += 1;
+                ChangeType::Delete => match self.delete_remote_file(&change.vault_path).await {
+                    Ok(_) => {
+                        synced += 1;
+                        if let Err(e) = self.staging.write().await.commit(&change_id).await {
+                            warn!("Failed to commit staged change: {}", e);
                         }
                     }
-                }
+                    Err(e) => {
+                        error!("Failed to delete {}: {}", change.vault_path, e);
+                        failed += 1;
+                    }
+                },
             }
         }
 
@@ -368,8 +373,7 @@ impl<P: StorageProvider + ?Sized + 'static> SyncEngine<P> {
                     entry.remote_etag.as_deref(),
                 ) {
                     // Conflict detected
-                    let conflict_info =
-                        ConflictInfo::from_entry_and_remote(entry, &remote)?;
+                    let conflict_info = ConflictInfo::from_entry_and_remote(entry, &remote)?;
 
                     if self.config.auto_resolve_conflicts {
                         let result = self
@@ -557,7 +561,11 @@ impl<P: StorageProvider + ?Sized + 'static> SyncEngine<P> {
     async fn sync_single_path(&self, path: &VaultPath) -> Result<SingleSyncResult> {
         let change_ids: Vec<String> = {
             let staging = self.staging.read().await;
-            staging.changes_for_path(path).iter().map(|c| c.id.clone()).collect()
+            staging
+                .changes_for_path(path)
+                .iter()
+                .map(|c| c.id.clone())
+                .collect()
         };
 
         if !change_ids.is_empty() {
@@ -591,7 +599,9 @@ impl<P: StorageProvider + ?Sized + 'static> SyncEngine<P> {
             }
         }
 
-        Ok(SingleSyncResult { has_conflict: false })
+        Ok(SingleSyncResult {
+            has_conflict: false,
+        })
     }
 
     /// Handle the result of conflict resolution.

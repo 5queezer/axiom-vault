@@ -1,11 +1,11 @@
 //! Provider registry for dynamic provider resolution.
 
+use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
-use serde_json::Value;
 
-use axiomvault_common::{Error, Result};
 use crate::provider::StorageProvider;
+use axiomvault_common::{Error, Result};
 
 /// Factory function type for creating providers.
 pub type ProviderFactory = Box<dyn Fn(Value) -> Result<Arc<dyn StorageProvider>> + Send + Sync>;
@@ -36,11 +36,7 @@ impl ProviderRegistry {
     ///
     /// # Errors
     /// - Returns error if name is already registered
-    pub fn register(
-        &mut self,
-        name: impl Into<String>,
-        factory: ProviderFactory,
-    ) -> Result<()> {
+    pub fn register(&mut self, name: impl Into<String>, factory: ProviderFactory) -> Result<()> {
         let name = name.into();
         if self.factories.contains_key(&name) {
             return Err(Error::AlreadyExists(format!(
@@ -65,9 +61,10 @@ impl ProviderRegistry {
     /// - Provider not found
     /// - Configuration invalid
     pub fn resolve(&self, name: &str, config: Value) -> Result<Arc<dyn StorageProvider>> {
-        let factory = self.factories.get(name).ok_or_else(|| {
-            Error::NotFound(format!("Provider '{}' is not registered", name))
-        })?;
+        let factory = self
+            .factories
+            .get(name)
+            .ok_or_else(|| Error::NotFound(format!("Provider '{}' is not registered", name)))?;
         factory(config)
     }
 
@@ -94,27 +91,31 @@ pub fn create_default_registry() -> ProviderRegistry {
 
     // Register memory provider (for testing)
     registry
-        .register("memory", Box::new(|_config| {
-            Ok(Arc::new(crate::memory::MemoryProvider::new()))
-        }))
+        .register(
+            "memory",
+            Box::new(|_config| Ok(Arc::new(crate::memory::MemoryProvider::new()))),
+        )
         .expect("Failed to register memory provider");
 
     // Register local filesystem provider
     registry
-        .register("local", Box::new(|config| {
-            let root = config
-                .get("root")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| Error::InvalidInput("Local provider requires 'root' path".to_string()))?;
-            Ok(Arc::new(crate::local::LocalProvider::new(root)?))
-        }))
+        .register(
+            "local",
+            Box::new(|config| {
+                let root = config.get("root").and_then(|v| v.as_str()).ok_or_else(|| {
+                    Error::InvalidInput("Local provider requires 'root' path".to_string())
+                })?;
+                Ok(Arc::new(crate::local::LocalProvider::new(root)?))
+            }),
+        )
         .expect("Failed to register local provider");
 
     // Register Google Drive provider
     registry
-        .register("gdrive", Box::new(|config| {
-            crate::gdrive::create_gdrive_provider(config)
-        }))
+        .register(
+            "gdrive",
+            Box::new(|config| crate::gdrive::create_gdrive_provider(config)),
+        )
         .expect("Failed to register gdrive provider");
 
     registry

@@ -292,9 +292,7 @@ async fn main() -> Result<()> {
             strength,
         } => cmd_gdrive_create(&name, &folder_id, &tokens, &strength).await,
 
-        Commands::GdriveOpen { folder_id, tokens } => {
-            cmd_gdrive_open(&folder_id, &tokens).await
-        }
+        Commands::GdriveOpen { folder_id, tokens } => cmd_gdrive_open(&folder_id, &tokens).await,
 
         Commands::Sync {
             vault_path,
@@ -467,7 +465,11 @@ async fn cmd_add(vault_path: &PathBuf, source: &PathBuf, dest: &str) -> Result<(
         .await
         .context("Failed to add file")?;
 
-    println!("File added successfully: {} ({} bytes)", dest, content.len());
+    println!(
+        "File added successfully: {} ({} bytes)",
+        dest,
+        content.len()
+    );
 
     Ok(())
 }
@@ -589,7 +591,10 @@ async fn cmd_info(path: &PathBuf) -> Result<()> {
 
     println!("Vault Information:");
     println!("  ID: {}", config.id);
-    println!("  Version: {}.{}", config.version.major, config.version.minor);
+    println!(
+        "  Version: {}.{}",
+        config.version.major, config.version.minor
+    );
     println!("  Provider: {}", config.provider_type);
     println!("  Created: {}", config.created_at);
     println!("  Modified: {}", config.modified_at);
@@ -803,9 +808,7 @@ fn parse_conflict_strategy(strategy: &str) -> Result<ConflictStrategy> {
         "keep-both" => Ok(ConflictStrategy::KeepBoth),
         "prefer-local" => Ok(ConflictStrategy::PreferLocal),
         "prefer-remote" => Ok(ConflictStrategy::PreferRemote),
-        _ => anyhow::bail!(
-            "Invalid strategy. Use: keep-both, prefer-local, or prefer-remote"
-        ),
+        _ => anyhow::bail!("Invalid strategy. Use: keep-both, prefer-local, or prefer-remote"),
     }
 }
 
@@ -815,17 +818,15 @@ fn parse_sync_mode(mode: &str, interval: Option<u64>) -> Result<SyncMode> {
         "manual" => Ok(SyncMode::Manual),
         "on-demand" => Ok(SyncMode::OnDemand),
         "periodic" => {
-            let secs = interval.ok_or_else(|| {
-                anyhow::anyhow!("Interval required for periodic mode")
-            })?;
+            let secs =
+                interval.ok_or_else(|| anyhow::anyhow!("Interval required for periodic mode"))?;
             Ok(SyncMode::Periodic {
                 interval: std::time::Duration::from_secs(secs),
             })
         }
         "hybrid" => {
-            let secs = interval.ok_or_else(|| {
-                anyhow::anyhow!("Interval required for hybrid mode")
-            })?;
+            let secs =
+                interval.ok_or_else(|| anyhow::anyhow!("Interval required for hybrid mode"))?;
             Ok(SyncMode::Hybrid {
                 interval: std::time::Duration::from_secs(secs),
             })
@@ -865,10 +866,7 @@ async fn cmd_sync(vault_path: &PathBuf, strategy: &str) -> Result<()> {
             .context("Failed to create sync engine")?;
 
     println!("Starting sync...");
-    let result = sync_engine
-        .sync_full()
-        .await
-        .context("Sync failed")?;
+    let result = sync_engine.sync_full().await.context("Sync failed")?;
 
     println!("Sync completed!");
     println!("  Files synced: {}", result.files_synced);
@@ -1012,7 +1010,10 @@ async fn cmd_sync_resolve(vault_path: &PathBuf, file: &str, strategy: &str) -> R
         .await
         .context("Failed to resolve conflict")?;
 
-    println!("Conflict resolved for {} using strategy: {}", file, strategy);
+    println!(
+        "Conflict resolved for {} using strategy: {}",
+        file, strategy
+    );
 
     Ok(())
 }

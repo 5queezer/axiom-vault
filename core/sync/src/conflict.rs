@@ -185,11 +185,7 @@ mod tests {
         let resolver = ConflictResolver::default();
 
         // Same etag = no conflict
-        assert!(!resolver.detect_conflict(
-            Some("etag1"),
-            Some("etag1"),
-            Some("etag1")
-        ));
+        assert!(!resolver.detect_conflict(Some("etag1"), Some("etag1"), Some("etag1")));
 
         // Both none = no conflict
         assert!(!resolver.detect_conflict(None, None, None));
@@ -207,11 +203,7 @@ mod tests {
         ));
 
         // Different etags without baseline
-        assert!(resolver.detect_conflict(
-            Some("local_etag"),
-            Some("remote_etag"),
-            None
-        ));
+        assert!(resolver.detect_conflict(Some("local_etag"), Some("remote_etag"), None));
     }
 
     #[test]

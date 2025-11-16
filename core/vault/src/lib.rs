@@ -11,13 +11,13 @@
 //! handling all encryption/decryption operations transparently.
 
 pub mod config;
+pub mod manager;
+pub mod operations;
 pub mod session;
 pub mod tree;
-pub mod operations;
-pub mod manager;
 
 pub use config::{VaultConfig, VaultVersion};
-pub use session::{VaultSession, SessionHandle};
-pub use tree::{VaultTree, TreeNode, NodeType};
 pub use manager::VaultManager;
 pub use operations::VaultOperations;
+pub use session::{SessionHandle, VaultSession};
+pub use tree::{NodeType, TreeNode, VaultTree};

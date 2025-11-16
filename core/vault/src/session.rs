@@ -7,11 +7,11 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
-use axiomvault_common::{Result, Error, VaultId};
-use axiomvault_crypto::{MasterKey, derive_key};
-use axiomvault_storage::StorageProvider;
 use crate::config::VaultConfig;
 use crate::tree::VaultTree;
+use axiomvault_common::{Error, Result, VaultId};
+use axiomvault_crypto::{derive_key, MasterKey};
+use axiomvault_storage::StorageProvider;
 
 /// Session handle for tracking active sessions.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -147,9 +147,7 @@ impl VaultSession {
                 .master_key
                 .as_ref()
                 .ok_or_else(|| Error::Vault("Master key not available".to_string())),
-            SessionState::Locked => {
-                Err(Error::NotPermitted("Session is locked".to_string()))
-            }
+            SessionState::Locked => Err(Error::NotPermitted("Session is locked".to_string())),
         }
     }
 
@@ -192,11 +190,7 @@ impl VaultSession {
     /// - Session is locked
     /// - Old password incorrect
     /// - New password empty
-    pub fn change_password(
-        &mut self,
-        old_password: &[u8],
-        new_password: &[u8],
-    ) -> Result<()> {
+    pub fn change_password(&mut self, old_password: &[u8], new_password: &[u8]) -> Result<()> {
         if self.state != SessionState::Active {
             return Err(Error::NotPermitted("Session is locked".to_string()));
         }
@@ -242,13 +236,8 @@ mod tests {
         let id = VaultId::new("test").unwrap();
         let password = b"test-password";
         let params = axiomvault_crypto::KdfParams::moderate();
-        let config = VaultConfig::new(
-            id,
-            password,
-            "memory",
-            serde_json::Value::Null,
-            params,
-        ).unwrap();
+        let config =
+            VaultConfig::new(id, password, "memory", serde_json::Value::Null, params).unwrap();
 
         let provider = Arc::new(MemoryProvider::new());
         let session = VaultSession::unlock(config.clone(), password, provider).unwrap();
@@ -278,13 +267,8 @@ mod tests {
         let id = VaultId::new("test").unwrap();
         let password = b"correct";
         let params = axiomvault_crypto::KdfParams::moderate();
-        let config = VaultConfig::new(
-            id,
-            password,
-            "memory",
-            serde_json::Value::Null,
-            params,
-        ).unwrap();
+        let config =
+            VaultConfig::new(id, password, "memory", serde_json::Value::Null, params).unwrap();
 
         let provider = Arc::new(MemoryProvider::new());
         let result = VaultSession::unlock(config, b"wrong", provider);

@@ -1,12 +1,12 @@
 //! Vault file operations with encryption/decryption.
 
-use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use tracing::{info, debug};
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use tracing::{debug, info};
 
-use axiomvault_common::{Result, Error, VaultPath};
-use axiomvault_crypto::{encrypt, decrypt};
-use crate::session::VaultSession;
 use crate::config::DATA_DIRNAME;
+use crate::session::VaultSession;
+use axiomvault_common::{Error, Result, VaultPath};
+use axiomvault_crypto::{decrypt, encrypt};
 
 /// Vault operations handler.
 ///
@@ -245,7 +245,10 @@ impl<'a> VaultOperations<'a> {
     ///
     /// # Returns
     /// List of (name, is_directory, size) tuples.
-    pub async fn list_directory(&self, path: &VaultPath) -> Result<Vec<(String, bool, Option<u64>)>> {
+    pub async fn list_directory(
+        &self,
+        path: &VaultPath,
+    ) -> Result<Vec<(String, bool, Option<u64>)>> {
         let tree = self.session.tree().read().await;
         let contents = tree.list(path)?;
 
@@ -310,28 +313,26 @@ impl<'a> VaultOperations<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
     use crate::config::VaultConfig;
-    use axiomvault_storage::{MemoryProvider, StorageProvider};
-    use axiomvault_crypto::KdfParams;
     use axiomvault_common::VaultId;
+    use axiomvault_crypto::KdfParams;
+    use axiomvault_storage::{MemoryProvider, StorageProvider};
+    use std::sync::Arc;
 
     async fn create_test_session() -> VaultSession {
         let id = VaultId::new("test").unwrap();
         let password = b"test-password";
         let params = KdfParams::moderate();
-        let config = VaultConfig::new(
-            id,
-            password,
-            "memory",
-            serde_json::Value::Null,
-            params,
-        ).unwrap();
+        let config =
+            VaultConfig::new(id, password, "memory", serde_json::Value::Null, params).unwrap();
 
         let provider = Arc::new(MemoryProvider::new());
 
         // Create data directory
-        provider.create_dir(&VaultPath::parse("/d").unwrap()).await.unwrap();
+        provider
+            .create_dir(&VaultPath::parse("/d").unwrap())
+            .await
+            .unwrap();
 
         VaultSession::unlock(config, password, provider).unwrap()
     }
@@ -394,11 +395,20 @@ mod tests {
         let session = create_test_session().await;
         let ops = VaultOperations::new(&session).unwrap();
 
-        ops.create_directory(&VaultPath::parse("/dir").unwrap()).await.unwrap();
-        ops.create_file(&VaultPath::parse("/dir/a.txt").unwrap(), b"a").await.unwrap();
-        ops.create_file(&VaultPath::parse("/dir/b.txt").unwrap(), b"b").await.unwrap();
+        ops.create_directory(&VaultPath::parse("/dir").unwrap())
+            .await
+            .unwrap();
+        ops.create_file(&VaultPath::parse("/dir/a.txt").unwrap(), b"a")
+            .await
+            .unwrap();
+        ops.create_file(&VaultPath::parse("/dir/b.txt").unwrap(), b"b")
+            .await
+            .unwrap();
 
-        let contents = ops.list_directory(&VaultPath::parse("/dir").unwrap()).await.unwrap();
+        let contents = ops
+            .list_directory(&VaultPath::parse("/dir").unwrap())
+            .await
+            .unwrap();
         assert_eq!(contents.len(), 2);
     }
 }

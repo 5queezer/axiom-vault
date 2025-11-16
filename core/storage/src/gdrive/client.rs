@@ -105,7 +105,10 @@ impl DriveClient {
             .http
             .get(&url)
             .header(header::AUTHORIZATION, auth)
-            .query(&[("fields", "id,name,mimeType,size,createdTime,modifiedTime,parents,md5Checksum,trashed")])
+            .query(&[(
+                "fields",
+                "id,name,mimeType,size,createdTime,modifiedTime,parents,md5Checksum,trashed",
+            )])
             .send()
             .await
             .map_err(|e| Error::Network(format!("Failed to get file: {}", e)))?;
@@ -132,7 +135,10 @@ impl DriveClient {
             .post(&url)
             .header(header::AUTHORIZATION, auth)
             .header(header::CONTENT_TYPE, "application/json")
-            .query(&[("fields", "id,name,mimeType,size,createdTime,modifiedTime,parents,md5Checksum,trashed")])
+            .query(&[(
+                "fields",
+                "id,name,mimeType,size,createdTime,modifiedTime,parents,md5Checksum,trashed",
+            )])
             .json(&metadata)
             .send()
             .await
@@ -256,7 +262,10 @@ impl DriveClient {
                 header::CONTENT_TYPE,
                 format!("multipart/related; boundary={}", boundary),
             )
-            .query(&[("fields", "id,name,mimeType,size,createdTime,modifiedTime,parents,md5Checksum,trashed")])
+            .query(&[(
+                "fields",
+                "id,name,mimeType,size,createdTime,modifiedTime,parents,md5Checksum,trashed",
+            )])
             .body(body)
             .send()
             .await
@@ -267,10 +276,7 @@ impl DriveClient {
 
     /// Update an existing file.
     pub async fn update_file(&self, file_id: &str, data: Vec<u8>) -> Result<DriveFile> {
-        let url = format!(
-            "{}/files/{}?uploadType=media",
-            DRIVE_UPLOAD_BASE, file_id
-        );
+        let url = format!("{}/files/{}?uploadType=media", DRIVE_UPLOAD_BASE, file_id);
         let auth = self.auth_header().await?;
 
         let response = self
@@ -278,7 +284,10 @@ impl DriveClient {
             .patch(&url)
             .header(header::AUTHORIZATION, auth)
             .header(header::CONTENT_TYPE, "application/octet-stream")
-            .query(&[("fields", "id,name,mimeType,size,createdTime,modifiedTime,parents,md5Checksum,trashed")])
+            .query(&[(
+                "fields",
+                "id,name,mimeType,size,createdTime,modifiedTime,parents,md5Checksum,trashed",
+            )])
             .body(data)
             .send()
             .await
@@ -386,7 +395,9 @@ impl DriveClient {
         mut stream: Pin<Box<dyn Stream<Item = Result<Vec<u8>>> + Send>>,
         total_size: u64,
     ) -> Result<DriveFile> {
-        let upload_uri = self.start_resumable_upload(name, parent_id, total_size).await?;
+        let upload_uri = self
+            .start_resumable_upload(name, parent_id, total_size)
+            .await?;
 
         let mut bytes_uploaded = 0u64;
         let mut buffer = Vec::with_capacity(CHUNK_SIZE);
@@ -480,9 +491,9 @@ impl DriveClient {
             )));
         }
 
-        let stream = response.bytes_stream().map(|result| {
-            result.map_err(|e| Error::Network(format!("Stream read error: {}", e)))
-        });
+        let stream = response
+            .bytes_stream()
+            .map(|result| result.map_err(|e| Error::Network(format!("Stream read error: {}", e))));
 
         Ok(Box::pin(stream))
     }
@@ -533,7 +544,10 @@ impl DriveClient {
             .patch(&url)
             .header(header::AUTHORIZATION, auth)
             .header(header::CONTENT_TYPE, "application/json")
-            .query(&[("fields", "id,name,mimeType,size,createdTime,modifiedTime,parents,md5Checksum,trashed")]);
+            .query(&[(
+                "fields",
+                "id,name,mimeType,size,createdTime,modifiedTime,parents,md5Checksum,trashed",
+            )]);
 
         // Handle parent change
         if let Some(new_parent_id) = new_parent {
@@ -553,7 +567,12 @@ impl DriveClient {
     }
 
     /// Copy a file.
-    pub async fn copy_file(&self, file_id: &str, new_name: &str, parent_id: &str) -> Result<DriveFile> {
+    pub async fn copy_file(
+        &self,
+        file_id: &str,
+        new_name: &str,
+        parent_id: &str,
+    ) -> Result<DriveFile> {
         let url = format!("{}/files/{}/copy", DRIVE_API_BASE, file_id);
         let auth = self.auth_header().await?;
 
@@ -567,7 +586,10 @@ impl DriveClient {
             .post(&url)
             .header(header::AUTHORIZATION, auth)
             .header(header::CONTENT_TYPE, "application/json")
-            .query(&[("fields", "id,name,mimeType,size,createdTime,modifiedTime,parents,md5Checksum,trashed")])
+            .query(&[(
+                "fields",
+                "id,name,mimeType,size,createdTime,modifiedTime,parents,md5Checksum,trashed",
+            )])
             .json(&metadata)
             .send()
             .await
@@ -591,7 +613,9 @@ impl DriveClient {
         } else if status == StatusCode::NOT_FOUND {
             Err(Error::NotFound("Resource not found".to_string()))
         } else if status == StatusCode::UNAUTHORIZED {
-            Err(Error::Authentication("Invalid or expired token".to_string()))
+            Err(Error::Authentication(
+                "Invalid or expired token".to_string(),
+            ))
         } else if status == StatusCode::FORBIDDEN {
             Err(Error::PermissionDenied("Access denied".to_string()))
         } else {

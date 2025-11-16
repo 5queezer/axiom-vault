@@ -2,24 +2,19 @@
 
 use async_trait::async_trait;
 use chrono::Utc;
+use futures::stream;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
-use futures::stream;
 use uuid::Uuid;
 
-use axiomvault_common::{Error, Result, VaultPath};
 use crate::provider::{ByteStream, Metadata, StorageProvider};
+use axiomvault_common::{Error, Result, VaultPath};
 
 /// In-memory storage entry.
 #[derive(Debug, Clone)]
 enum Entry {
-    File {
-        data: Vec<u8>,
-        metadata: Metadata,
-    },
-    Directory {
-        metadata: Metadata,
-    },
+    File { data: Vec<u8>, metadata: Metadata },
+    Directory { metadata: Metadata },
 }
 
 /// In-memory storage provider.
@@ -46,10 +41,12 @@ impl MemoryProvider {
             provider_data: None,
         };
 
-        storage
-            .write()
-            .unwrap()
-            .insert("/".to_string(), Entry::Directory { metadata: root_meta });
+        storage.write().unwrap().insert(
+            "/".to_string(),
+            Entry::Directory {
+                metadata: root_meta,
+            },
+        );
 
         Self { storage }
     }
@@ -153,9 +150,9 @@ impl StorageProvider for MemoryProvider {
                 storage.remove(&key);
                 Ok(())
             }
-            Some(Entry::Directory { .. }) => {
-                Err(Error::InvalidInput("Use delete_dir for directories".to_string()))
-            }
+            Some(Entry::Directory { .. }) => Err(Error::InvalidInput(
+                "Use delete_dir for directories".to_string(),
+            )),
             None => Err(Error::NotFound(format!("File not found: {}", path))),
         }
     }
@@ -253,7 +250,12 @@ impl StorageProvider for MemoryProvider {
             provider_data: None,
         };
 
-        storage.insert(key, Entry::Directory { metadata: metadata.clone() });
+        storage.insert(
+            key,
+            Entry::Directory {
+                metadata: metadata.clone(),
+            },
+        );
 
         Ok(metadata)
     }
@@ -273,9 +275,7 @@ impl StorageProvider for MemoryProvider {
                 storage.remove(&key);
                 Ok(())
             }
-            Some(Entry::File { .. }) => {
-                Err(Error::InvalidInput("Not a directory".to_string()))
-            }
+            Some(Entry::File { .. }) => Err(Error::InvalidInput("Not a directory".to_string())),
             None => Err(Error::NotFound(format!("Directory not found: {}", path))),
         }
     }
@@ -435,11 +435,23 @@ mod tests {
     async fn test_list() {
         let provider = MemoryProvider::new();
 
-        provider.create_dir(&VaultPath::parse("/dir").unwrap()).await.unwrap();
-        provider.upload(&VaultPath::parse("/dir/file1.txt").unwrap(), vec![1]).await.unwrap();
-        provider.upload(&VaultPath::parse("/dir/file2.txt").unwrap(), vec![2]).await.unwrap();
+        provider
+            .create_dir(&VaultPath::parse("/dir").unwrap())
+            .await
+            .unwrap();
+        provider
+            .upload(&VaultPath::parse("/dir/file1.txt").unwrap(), vec![1])
+            .await
+            .unwrap();
+        provider
+            .upload(&VaultPath::parse("/dir/file2.txt").unwrap(), vec![2])
+            .await
+            .unwrap();
 
-        let contents = provider.list(&VaultPath::parse("/dir").unwrap()).await.unwrap();
+        let contents = provider
+            .list(&VaultPath::parse("/dir").unwrap())
+            .await
+            .unwrap();
         assert_eq!(contents.len(), 2);
     }
 

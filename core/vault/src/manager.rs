@@ -2,11 +2,11 @@
 
 use std::sync::Arc;
 
-use axiomvault_common::{Result, Error, VaultId, VaultPath};
-use axiomvault_crypto::KdfParams;
-use axiomvault_storage::{StorageProvider, ProviderRegistry, create_default_registry};
 use crate::config::{VaultConfig, CONFIG_FILENAME, DATA_DIRNAME, META_DIRNAME};
 use crate::session::VaultSession;
+use axiomvault_common::{Error, Result, VaultId, VaultPath};
+use axiomvault_crypto::KdfParams;
+use axiomvault_storage::{create_default_registry, ProviderRegistry, StorageProvider};
 
 /// Vault manager for creating and opening vaults.
 pub struct VaultManager {
@@ -61,7 +61,9 @@ impl VaultManager {
         kdf_params: KdfParams,
     ) -> Result<VaultSession> {
         // Resolve provider
-        let provider = self.registry.resolve(provider_type, provider_config.clone())?;
+        let provider = self
+            .registry
+            .resolve(provider_type, provider_config.clone())?;
 
         // Create vault config
         let config = VaultConfig::new(
@@ -155,7 +157,10 @@ impl VaultManager {
     pub async fn save_config(&self, session: &VaultSession) -> Result<()> {
         let config_path = VaultPath::parse(CONFIG_FILENAME)?;
         let config_bytes = session.config().to_bytes()?;
-        session.provider().upload(&config_path, config_bytes).await?;
+        session
+            .provider()
+            .upload(&config_path, config_bytes)
+            .await?;
         Ok(())
     }
 }

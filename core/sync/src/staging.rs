@@ -1,13 +1,13 @@
 //! Local staging area for atomic writes.
 
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use tokio::fs;
 use uuid::Uuid;
 
-use axiomvault_common::{Result, Error, VaultPath};
+use axiomvault_common::{Error, Result, VaultPath};
 
 /// A staged change waiting to be committed.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -127,9 +127,10 @@ impl StagingArea {
 
     /// Get staged data by change ID.
     pub async fn get_staged_data(&self, change_id: &str) -> Result<Vec<u8>> {
-        let change = self.changes.get(change_id).ok_or_else(|| {
-            Error::NotFound(format!("Staged change not found: {}", change_id))
-        })?;
+        let change = self
+            .changes
+            .get(change_id)
+            .ok_or_else(|| Error::NotFound(format!("Staged change not found: {}", change_id)))?;
 
         let staging_file = change.staging_file.as_ref().ok_or_else(|| {
             Error::InvalidInput("No staging file for this change type".to_string())
@@ -158,9 +159,10 @@ impl StagingArea {
 
     /// Commit (remove) a staged change after successful sync.
     pub async fn commit(&mut self, change_id: &str) -> Result<()> {
-        let change = self.changes.remove(change_id).ok_or_else(|| {
-            Error::NotFound(format!("Staged change not found: {}", change_id))
-        })?;
+        let change = self
+            .changes
+            .remove(change_id)
+            .ok_or_else(|| Error::NotFound(format!("Staged change not found: {}", change_id)))?;
 
         // Delete the staging file if present
         if let Some(staging_file) = &change.staging_file {

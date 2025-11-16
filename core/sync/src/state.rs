@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use axiomvault_common::{Result, Error, VaultPath};
+use axiomvault_common::{Error, Result, VaultPath};
 
 /// Sync status for a single file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -193,7 +193,10 @@ impl SyncState {
 
     /// Get entries with a specific status.
     pub fn entries_with_status(&self, status: SyncStatus) -> Vec<&SyncEntry> {
-        self.entries.values().filter(|e| e.status == status).collect()
+        self.entries
+            .values()
+            .filter(|e| e.status == status)
+            .collect()
     }
 
     /// Get all paths.

@@ -122,7 +122,9 @@ impl GDriveProvider {
                 .client
                 .find_file(component, &current_id)
                 .await?
-                .ok_or_else(|| Error::NotFound(format!("Path component not found: {}", component)))?;
+                .ok_or_else(|| {
+                    Error::NotFound(format!("Path component not found: {}", component))
+                })?;
 
             current_id = file.id.clone();
 
@@ -136,9 +138,9 @@ impl GDriveProvider {
 
     /// Resolve parent path and return (parent_id, name).
     async fn resolve_parent(&self, path: &VaultPath) -> Result<(String, String)> {
-        let parent = path.parent().ok_or_else(|| {
-            Error::InvalidInput("Cannot get parent of root path".to_string())
-        })?;
+        let parent = path
+            .parent()
+            .ok_or_else(|| Error::InvalidInput("Cannot get parent of root path".to_string()))?;
 
         let name = path
             .name()
@@ -382,7 +384,10 @@ impl StorageProvider for GDriveProvider {
             )));
         }
 
-        let file = self.client.copy_file(&from_id, &to_name, &to_parent_id).await?;
+        let file = self
+            .client
+            .copy_file(&from_id, &to_name, &to_parent_id)
+            .await?;
         self.cache_path(to, &file.id).await;
 
         Ok(self.to_metadata(file, to))

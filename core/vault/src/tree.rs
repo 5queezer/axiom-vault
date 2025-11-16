@@ -3,12 +3,12 @@
 //! The vault tree maintains the logical structure of files and directories
 //! independent of the underlying storage provider.
 
-use std::collections::HashMap;
-use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use uuid::Uuid;
 
-use axiomvault_common::{Result, Error, VaultPath};
+use axiomvault_common::{Error, Result, VaultPath};
 
 /// Type of tree node.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -273,14 +273,12 @@ impl VaultTree {
 
     /// Serialize tree to JSON.
     pub fn to_json(&self) -> Result<String> {
-        serde_json::to_string_pretty(self)
-            .map_err(|e| Error::Serialization(e.to_string()))
+        serde_json::to_string_pretty(self).map_err(|e| Error::Serialization(e.to_string()))
     }
 
     /// Deserialize tree from JSON.
     pub fn from_json(json: &str) -> Result<Self> {
-        serde_json::from_str(json)
-            .map_err(|e| Error::Serialization(e.to_string()))
+        serde_json::from_str(json).map_err(|e| Error::Serialization(e.to_string()))
     }
 }
 
@@ -329,8 +327,10 @@ mod tests {
     fn test_nested_structure() {
         let mut tree = VaultTree::new();
 
-        tree.create_directory(&VaultPath::parse("/dir").unwrap(), "d1").unwrap();
-        tree.create_file(&VaultPath::parse("/dir/file.txt").unwrap(), "f1", 50).unwrap();
+        tree.create_directory(&VaultPath::parse("/dir").unwrap(), "d1")
+            .unwrap();
+        tree.create_file(&VaultPath::parse("/dir/file.txt").unwrap(), "f1", 50)
+            .unwrap();
 
         let contents = tree.list(&VaultPath::parse("/dir").unwrap()).unwrap();
         assert_eq!(contents.len(), 1);
@@ -352,8 +352,10 @@ mod tests {
     #[test]
     fn test_tree_serialization() {
         let mut tree = VaultTree::new();
-        tree.create_directory(&VaultPath::parse("/dir").unwrap(), "d").unwrap();
-        tree.create_file(&VaultPath::parse("/dir/f").unwrap(), "e", 10).unwrap();
+        tree.create_directory(&VaultPath::parse("/dir").unwrap(), "d")
+            .unwrap();
+        tree.create_file(&VaultPath::parse("/dir/f").unwrap(), "e", 10)
+            .unwrap();
 
         let json = tree.to_json().unwrap();
         let restored = VaultTree::from_json(&json).unwrap();

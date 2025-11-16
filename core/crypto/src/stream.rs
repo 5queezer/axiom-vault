@@ -5,9 +5,9 @@
 
 use std::io::{Read, Write};
 
-use axiomvault_common::{Error, Result};
-use crate::aead::{encrypt, decrypt, NONCE_SIZE, TAG_SIZE};
+use crate::aead::{decrypt, encrypt, NONCE_SIZE, TAG_SIZE};
 use crate::keys::KEY_LENGTH;
+use axiomvault_common::{Error, Result};
 
 /// Default chunk size for streaming encryption (64 KiB).
 pub const DEFAULT_CHUNK_SIZE: usize = 64 * 1024;
@@ -61,11 +61,7 @@ impl<'a> EncryptingStream<'a> {
     /// # Errors
     /// - I/O errors from reader/writer
     /// - Encryption errors
-    pub fn encrypt_stream<R: Read, W: Write>(
-        &self,
-        mut reader: R,
-        mut writer: W,
-    ) -> Result<u64> {
+    pub fn encrypt_stream<R: Read, W: Write>(&self, mut reader: R, mut writer: W) -> Result<u64> {
         let mut buffer = vec![0u8; self.chunk_size];
         let mut chunks = Vec::new();
         let mut total_bytes = 0u64;
@@ -131,11 +127,7 @@ impl<'a> DecryptingStream<'a> {
     /// - I/O errors
     /// - Invalid format
     /// - Authentication failure (tampered data)
-    pub fn decrypt_stream<R: Read, W: Write>(
-        &self,
-        mut reader: R,
-        mut writer: W,
-    ) -> Result<u64> {
+    pub fn decrypt_stream<R: Read, W: Write>(&self, mut reader: R, mut writer: W) -> Result<u64> {
         // Read header
         let mut version = [0u8; 1];
         reader.read_exact(&mut version)?;
@@ -275,11 +267,11 @@ mod tests {
         let key = [42u8; KEY_LENGTH];
         let plaintext = b"Custom chunk size test data that is longer than the chunk";
 
-        let stream = EncryptingStream::new(&key)
-            .unwrap()
-            .with_chunk_size(16);
+        let stream = EncryptingStream::new(&key).unwrap().with_chunk_size(16);
         let mut encrypted = Vec::new();
-        stream.encrypt_stream(&plaintext[..], &mut encrypted).unwrap();
+        stream
+            .encrypt_stream(&plaintext[..], &mut encrypted)
+            .unwrap();
 
         let decrypted = decrypt_bytes(&key, &encrypted).unwrap();
         assert_eq!(decrypted, plaintext);

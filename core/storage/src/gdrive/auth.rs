@@ -145,7 +145,8 @@ impl AuthManager {
             .expires_in()
             .unwrap_or_else(|| std::time::Duration::from_secs(3600));
 
-        let expires_at = Utc::now() + Duration::from_std(expires_in).unwrap_or_else(|_| Duration::hours(1));
+        let expires_at =
+            Utc::now() + Duration::from_std(expires_in).unwrap_or_else(|_| Duration::hours(1));
 
         Ok(Tokens {
             access_token,
@@ -188,7 +189,8 @@ impl AuthManager {
             .expires_in()
             .unwrap_or_else(|| std::time::Duration::from_secs(3600));
 
-        let expires_at = Utc::now() + Duration::from_std(expires_in).unwrap_or_else(|_| Duration::hours(1));
+        let expires_at =
+            Utc::now() + Duration::from_std(expires_in).unwrap_or_else(|_| Duration::hours(1));
 
         Ok(Tokens {
             access_token,

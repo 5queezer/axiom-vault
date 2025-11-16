@@ -4,8 +4,8 @@
 //! sensitive data from persisting in memory.
 
 use serde::{Deserialize, Serialize};
-use zeroize::{Zeroize, ZeroizeOnDrop};
 use std::fmt;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// Length of encryption keys in bytes (256-bit).
 pub const KEY_LENGTH: usize = 32;
@@ -46,8 +46,8 @@ impl MasterKey {
     ///
     /// Uses blake2b for secure key derivation.
     pub fn derive_file_key(&self, file_id: &[u8]) -> FileKey {
-        use blake2::{Blake2b, Digest};
         use blake2::digest::consts::U32;
+        use blake2::{Blake2b, Digest};
 
         let mut hasher = Blake2b::<U32>::new();
         hasher.update(&self.key);
@@ -62,8 +62,8 @@ impl MasterKey {
 
     /// Derive a directory key from this master key.
     pub fn derive_directory_key(&self, dir_id: &[u8]) -> DirectoryKey {
-        use blake2::{Blake2b, Digest};
         use blake2::digest::consts::U32;
+        use blake2::{Blake2b, Digest};
 
         let mut hasher = Blake2b::<U32>::new();
         hasher.update(&self.key);

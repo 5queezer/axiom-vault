@@ -5,7 +5,7 @@ use std::time::Duration;
 use tokio::time::sleep;
 use tracing::{debug, warn};
 
-use axiomvault_common::{Result, Error};
+use axiomvault_common::{Error, Result};
 
 /// Configuration for retry behavior.
 #[derive(Debug, Clone)]
@@ -60,8 +60,8 @@ impl RetryConfig {
 
     /// Calculate delay for a given attempt number.
     pub fn delay_for_attempt(&self, attempt: u32) -> Duration {
-        let base_delay = self.initial_delay.as_millis() as f64
-            * self.backoff_multiplier.powi(attempt as i32);
+        let base_delay =
+            self.initial_delay.as_millis() as f64 * self.backoff_multiplier.powi(attempt as i32);
 
         let capped_delay = base_delay.min(self.max_delay.as_millis() as f64);
 
@@ -192,10 +192,7 @@ impl RetryExecutor {
 
     /// Check if an error is retryable.
     fn is_retryable(&self, err: &Error) -> bool {
-        matches!(
-            err,
-            Error::Network(_) | Error::Io(_)
-        )
+        matches!(err, Error::Network(_) | Error::Io(_))
     }
 
     /// Get the retry configuration.

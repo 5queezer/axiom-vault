@@ -1,9 +1,9 @@
 //! Vault configuration and metadata.
 
-use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 
-use axiomvault_common::{VaultId, Result, Error};
+use axiomvault_common::{Error, Result, VaultId};
 use axiomvault_crypto::{KdfParams, Salt};
 
 /// Vault format version for migration support.
@@ -110,7 +110,7 @@ impl VaultConfig {
     /// - `Ok(false)` if password is incorrect
     /// - `Err(_)` if verification failed for other reasons
     pub fn verify_password(&self, password: &[u8]) -> Result<bool> {
-        use axiomvault_crypto::{derive_key, decrypt};
+        use axiomvault_crypto::{decrypt, derive_key};
 
         let master_key = derive_key(password, &self.salt, &self.kdf_params)?;
 
@@ -125,26 +125,22 @@ impl VaultConfig {
 
     /// Serialize configuration to JSON.
     pub fn to_json(&self) -> Result<String> {
-        serde_json::to_string_pretty(self)
-            .map_err(|e| Error::Serialization(e.to_string()))
+        serde_json::to_string_pretty(self).map_err(|e| Error::Serialization(e.to_string()))
     }
 
     /// Deserialize configuration from JSON.
     pub fn from_json(json: &str) -> Result<Self> {
-        serde_json::from_str(json)
-            .map_err(|e| Error::Serialization(e.to_string()))
+        serde_json::from_str(json).map_err(|e| Error::Serialization(e.to_string()))
     }
 
     /// Serialize to bytes for storage.
     pub fn to_bytes(&self) -> Result<Vec<u8>> {
-        serde_json::to_vec(self)
-            .map_err(|e| Error::Serialization(e.to_string()))
+        serde_json::to_vec(self).map_err(|e| Error::Serialization(e.to_string()))
     }
 
     /// Deserialize from bytes.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
-        serde_json::from_slice(bytes)
-            .map_err(|e| Error::Serialization(e.to_string()))
+        serde_json::from_slice(bytes).map_err(|e| Error::Serialization(e.to_string()))
     }
 }
 
@@ -176,13 +172,8 @@ mod tests {
         let password = b"secure-password";
         let params = KdfParams::moderate();
 
-        let config = VaultConfig::new(
-            id,
-            password,
-            "memory",
-            serde_json::Value::Null,
-            params,
-        ).unwrap();
+        let config =
+            VaultConfig::new(id, password, "memory", serde_json::Value::Null, params).unwrap();
 
         assert!(config.verify_password(password).unwrap());
         assert!(!config.verify_password(b"wrong-password").unwrap());
@@ -200,7 +191,8 @@ mod tests {
             "local",
             serde_json::json!({"root": "/tmp/vault"}),
             params,
-        ).unwrap();
+        )
+        .unwrap();
 
         let json = config.to_json().unwrap();
         let restored = VaultConfig::from_json(&json).unwrap();

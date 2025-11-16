@@ -1,11 +1,11 @@
 //! Sync scheduling - on-demand and periodic modes.
 
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot, RwLock};
 use tokio::time::{interval, Instant};
-use tracing::{debug, info, error};
-use serde::{Deserialize, Serialize};
+use tracing::{debug, error, info};
 
 use axiomvault_common::Result;
 
@@ -117,7 +117,10 @@ impl SyncScheduler {
 
         // Send shutdown request
         let (response_tx, _) = oneshot::channel();
-        let _ = self.request_tx.send((SyncRequest::Shutdown, response_tx)).await;
+        let _ = self
+            .request_tx
+            .send((SyncRequest::Shutdown, response_tx))
+            .await;
     }
 }
 

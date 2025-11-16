@@ -2,13 +2,13 @@
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use futures::stream;
 use std::path::{Path, PathBuf};
 use tokio::fs;
-use futures::stream;
 use uuid::Uuid;
 
-use axiomvault_common::{Error, Result, VaultPath};
 use crate::provider::{ByteStream, Metadata, StorageProvider};
+use axiomvault_common::{Error, Result, VaultPath};
 
 /// Local filesystem storage provider.
 ///
@@ -139,7 +139,9 @@ impl StorageProvider for LocalProvider {
         }
 
         if fs_path.is_dir() {
-            return Err(Error::InvalidInput("Use delete_dir for directories".to_string()));
+            return Err(Error::InvalidInput(
+                "Use delete_dir for directories".to_string(),
+            ));
         }
 
         fs::remove_file(&fs_path).await?;
@@ -304,11 +306,23 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let provider = LocalProvider::new(temp.path()).unwrap();
 
-        provider.create_dir(&VaultPath::parse("/dir").unwrap()).await.unwrap();
-        provider.upload(&VaultPath::parse("/dir/file1.txt").unwrap(), vec![1]).await.unwrap();
-        provider.upload(&VaultPath::parse("/dir/file2.txt").unwrap(), vec![2]).await.unwrap();
+        provider
+            .create_dir(&VaultPath::parse("/dir").unwrap())
+            .await
+            .unwrap();
+        provider
+            .upload(&VaultPath::parse("/dir/file1.txt").unwrap(), vec![1])
+            .await
+            .unwrap();
+        provider
+            .upload(&VaultPath::parse("/dir/file2.txt").unwrap(), vec![2])
+            .await
+            .unwrap();
 
-        let contents = provider.list(&VaultPath::parse("/dir").unwrap()).await.unwrap();
+        let contents = provider
+            .list(&VaultPath::parse("/dir").unwrap())
+            .await
+            .unwrap();
         assert_eq!(contents.len(), 2);
     }
 }

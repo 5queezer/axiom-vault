@@ -10,14 +10,14 @@
 //! - Streaming support: Large files are handled via streams
 //! - Unified error semantics: Consistent error types across providers
 
+pub mod gdrive;
+pub mod local;
+pub mod memory;
 pub mod provider;
 pub mod registry;
-pub mod memory;
-pub mod local;
-pub mod gdrive;
 
-pub use provider::{StorageProvider, Metadata, ConflictResolution};
-pub use registry::{ProviderRegistry, ProviderFactory, create_default_registry};
-pub use memory::MemoryProvider;
+pub use gdrive::{GDriveConfig, GDriveProvider};
 pub use local::LocalProvider;
-pub use gdrive::{GDriveProvider, GDriveConfig};
+pub use memory::MemoryProvider;
+pub use provider::{ConflictResolution, Metadata, StorageProvider};
+pub use registry::{create_default_registry, ProviderFactory, ProviderRegistry};
