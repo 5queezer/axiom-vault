@@ -5,7 +5,7 @@ edition.workspace = true
 
 [features]
 default = []
-fuse = ["dep:fuser"]
+fuse = ["dep:fuser", "dep:libc"]
 
 [dependencies]
 axiomvault-common = { path = "../common" }
@@ -15,6 +15,7 @@ axiomvault-crypto = { path = "../crypto" }
 
 # FUSE (optional, requires libfuse3-dev or macFUSE)
 fuser = { version = "0.14", optional = true }
+libc = { version = "0.2", optional = true }
 
 # Async
 tokio.workspace = true

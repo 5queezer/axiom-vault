@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime};
 
 use fuser::{
     FileAttr, FileType, Filesystem, ReplyAttr, ReplyCreate, ReplyData, ReplyDirectory, ReplyEmpty,
@@ -14,7 +14,7 @@ use fuser::{
 };
 use tokio::runtime::Handle;
 use tokio::sync::RwLock;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 use axiomvault_common::{Result, VaultPath};
 use axiomvault_vault::{VaultOperations, VaultSession};
@@ -225,7 +225,7 @@ impl Filesystem for VaultFilesystem {
         });
     }
 
-    fn getattr(&mut self, _req: &Request, ino: u64, _fh: Option<u64>, reply: ReplyAttr) {
+    fn getattr(&mut self, _req: &Request, ino: u64, reply: ReplyAttr) {
         debug!("getattr: ino={}", ino);
 
         let session = self.session.clone();
@@ -962,6 +962,6 @@ impl Filesystem for VaultFilesystem {
 
         // For now, just return current attributes
         // TODO: Implement truncation if size is set
-        self.getattr(_req, ino, _fh, reply);
+        self.getattr(_req, ino, reply);
     }
 }
