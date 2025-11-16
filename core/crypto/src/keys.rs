@@ -104,7 +104,7 @@ impl FileKey {
     pub fn generate() -> Self {
         use rand::RngCore;
         let mut key = [0u8; KEY_LENGTH];
-        rand::thread_rng().fill_bytes(&mut key);
+        rand::rng().fill_bytes(&mut key);
         Self { key }
     }
 }
@@ -136,7 +136,7 @@ impl DirectoryKey {
     pub fn generate() -> Self {
         use rand::RngCore;
         let mut key = [0u8; KEY_LENGTH];
-        rand::thread_rng().fill_bytes(&mut key);
+        rand::rng().fill_bytes(&mut key);
         Self { key }
     }
 }
@@ -156,7 +156,7 @@ impl Salt {
     pub fn generate() -> Self {
         use rand::RngCore;
         let mut salt = [0u8; 32];
-        rand::thread_rng().fill_bytes(&mut salt);
+        rand::rng().fill_bytes(&mut salt);
         Self(salt)
     }
 
