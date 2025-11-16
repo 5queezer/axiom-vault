@@ -55,9 +55,7 @@ impl StagingArea {
         let registry_path = base_dir.join("staging_registry.json");
 
         // Create staging directory
-        fs::create_dir_all(&staging_dir)
-            .await
-            .map_err(Error::Io)?;
+        fs::create_dir_all(&staging_dir).await.map_err(Error::Io)?;
 
         // Load existing registry if present
         let changes = if registry_path.exists() {
@@ -87,9 +85,7 @@ impl StagingArea {
         let staging_file = self.base_dir.join(&change_id);
 
         // Write data to staging file
-        fs::write(&staging_file, &data)
-            .await
-            .map_err(Error::Io)?;
+        fs::write(&staging_file, &data).await.map_err(Error::Io)?;
 
         let change = StagedChange {
             id: change_id.clone(),
@@ -167,9 +163,7 @@ impl StagingArea {
         // Delete the staging file if present
         if let Some(staging_file) = &change.staging_file {
             if staging_file.exists() {
-                fs::remove_file(staging_file)
-                    .await
-                    .map_err(Error::Io)?;
+                fs::remove_file(staging_file).await.map_err(Error::Io)?;
             }
         }
 
@@ -219,9 +213,7 @@ impl StagingArea {
     /// Clean up orphaned staging files.
     pub async fn cleanup_orphaned(&mut self) -> Result<usize> {
         let mut cleaned = 0;
-        let mut entries = fs::read_dir(&self.base_dir)
-            .await
-            .map_err(Error::Io)?;
+        let mut entries = fs::read_dir(&self.base_dir).await.map_err(Error::Io)?;
 
         let known_files: std::collections::HashSet<PathBuf> = self
             .changes

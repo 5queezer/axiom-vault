@@ -112,10 +112,7 @@ pub fn create_default_registry() -> ProviderRegistry {
 
     // Register Google Drive provider
     registry
-        .register(
-            "gdrive",
-            Box::new(crate::gdrive::create_gdrive_provider),
-        )
+        .register("gdrive", Box::new(crate::gdrive::create_gdrive_provider))
         .expect("Failed to register gdrive provider");
 
     registry
