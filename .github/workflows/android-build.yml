@@ -123,22 +123,23 @@ jobs:
         run: |
           NDK_PATH="${ANDROID_HOME}/ndk/25.2.9519653"
           mkdir -p ~/.cargo
-          cat >> ~/.cargo/config.toml << CARGO_CONFIG
-          [target.aarch64-linux-android]
-          linker = "${NDK_PATH}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang"
-
-          [target.armv7-linux-androideabi]
-          linker = "${NDK_PATH}/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi24-clang"
-
-          [target.x86_64-linux-android]
-          linker = "${NDK_PATH}/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android24-clang"
-
-          [target.i686-linux-android]
-          linker = "${NDK_PATH}/toolchains/llvm/prebuilt/linux-x86_64/bin/i686-linux-android24-clang"
-          CARGO_CONFIG
-          # Remove leading whitespace from TOML file
-          sed -i 's/^[[:space:]]*//' ~/.cargo/config.toml
+          {
+            echo ""
+            echo "[target.aarch64-linux-android]"
+            echo "linker = \"${NDK_PATH}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang\""
+            echo ""
+            echo "[target.armv7-linux-androideabi]"
+            echo "linker = \"${NDK_PATH}/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi24-clang\""
+            echo ""
+            echo "[target.x86_64-linux-android]"
+            echo "linker = \"${NDK_PATH}/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android24-clang\""
+            echo ""
+            echo "[target.i686-linux-android]"
+            echo "linker = \"${NDK_PATH}/toolchains/llvm/prebuilt/linux-x86_64/bin/i686-linux-android24-clang\""
+          } >> ~/.cargo/config.toml
           echo "ANDROID_NDK_HOME=${NDK_PATH}" >> $GITHUB_ENV
+          echo "Cargo config updated:"
+          cat ~/.cargo/config.toml
 
       - name: Build FFI crate for ${{ matrix.target }}
         run: cargo build -p axiom-ffi --target ${{ matrix.target }} --release --features android
