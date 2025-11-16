@@ -12,6 +12,7 @@ use tracing_subscriber::FmtSubscriber;
 use axiomvault_common::{VaultId, VaultPath};
 use axiomvault_crypto::KdfParams;
 use axiomvault_storage::gdrive::{AuthConfig, AuthManager, GDriveConfig, Tokens};
+use axiomvault_sync::{ConflictStrategy, SyncConfig, SyncEngine, SyncMode, SyncState};
 use axiomvault_vault::{VaultManager, VaultOperations};
 
 #[derive(Parser)]
@@ -172,6 +173,61 @@ enum Commands {
         #[arg(short, long)]
         tokens: PathBuf,
     },
+
+    /// Sync vault with remote storage.
+    Sync {
+        /// Path to the vault.
+        #[arg(short = 'p', long)]
+        vault_path: PathBuf,
+
+        /// Conflict resolution strategy: "keep-both", "prefer-local", "prefer-remote".
+        #[arg(short, long, default_value = "keep-both")]
+        strategy: String,
+    },
+
+    /// Show sync status for the vault.
+    SyncStatus {
+        /// Path to the vault.
+        #[arg(short = 'p', long)]
+        vault_path: PathBuf,
+    },
+
+    /// List sync conflicts.
+    SyncConflicts {
+        /// Path to the vault.
+        #[arg(short = 'p', long)]
+        vault_path: PathBuf,
+    },
+
+    /// Resolve a sync conflict for a specific file.
+    SyncResolve {
+        /// Path to the vault.
+        #[arg(short = 'p', long)]
+        vault_path: PathBuf,
+
+        /// File path in vault to resolve.
+        #[arg(short, long)]
+        file: String,
+
+        /// Resolution strategy: "keep-both", "prefer-local", "prefer-remote".
+        #[arg(short, long)]
+        strategy: String,
+    },
+
+    /// Configure sync mode for the vault.
+    SyncConfigure {
+        /// Path to the vault.
+        #[arg(short = 'p', long)]
+        vault_path: PathBuf,
+
+        /// Sync mode: "manual", "on-demand", "periodic", "hybrid".
+        #[arg(short, long)]
+        mode: String,
+
+        /// Interval in seconds for periodic sync (required for periodic/hybrid modes).
+        #[arg(short, long)]
+        interval: Option<u64>,
+    },
 }
 
 #[tokio::main]
@@ -239,6 +295,27 @@ async fn main() -> Result<()> {
         Commands::GdriveOpen { folder_id, tokens } => {
             cmd_gdrive_open(&folder_id, &tokens).await
         }
+
+        Commands::Sync {
+            vault_path,
+            strategy,
+        } => cmd_sync(&vault_path, &strategy).await,
+
+        Commands::SyncStatus { vault_path } => cmd_sync_status(&vault_path).await,
+
+        Commands::SyncConflicts { vault_path } => cmd_sync_conflicts(&vault_path).await,
+
+        Commands::SyncResolve {
+            vault_path,
+            file,
+            strategy,
+        } => cmd_sync_resolve(&vault_path, &file, &strategy).await,
+
+        Commands::SyncConfigure {
+            vault_path,
+            mode,
+            interval,
+        } => cmd_sync_configure(&vault_path, &mode, interval).await,
     }
 }
 
@@ -716,6 +793,265 @@ async fn cmd_gdrive_open(folder_id: &str, tokens_path: &PathBuf) -> Result<()> {
     println!("  ID: {}", session.vault_id());
     println!("  Session: {}", session.handle().as_str());
     println!("\nVault is ready for operations.");
+
+    Ok(())
+}
+
+/// Parse conflict strategy from string.
+fn parse_conflict_strategy(strategy: &str) -> Result<ConflictStrategy> {
+    match strategy {
+        "keep-both" => Ok(ConflictStrategy::KeepBoth),
+        "prefer-local" => Ok(ConflictStrategy::PreferLocal),
+        "prefer-remote" => Ok(ConflictStrategy::PreferRemote),
+        _ => anyhow::bail!(
+            "Invalid strategy. Use: keep-both, prefer-local, or prefer-remote"
+        ),
+    }
+}
+
+/// Parse sync mode from string.
+fn parse_sync_mode(mode: &str, interval: Option<u64>) -> Result<SyncMode> {
+    match mode {
+        "manual" => Ok(SyncMode::Manual),
+        "on-demand" => Ok(SyncMode::OnDemand),
+        "periodic" => {
+            let secs = interval.ok_or_else(|| {
+                anyhow::anyhow!("Interval required for periodic mode")
+            })?;
+            Ok(SyncMode::Periodic {
+                interval: std::time::Duration::from_secs(secs),
+            })
+        }
+        "hybrid" => {
+            let secs = interval.ok_or_else(|| {
+                anyhow::anyhow!("Interval required for hybrid mode")
+            })?;
+            Ok(SyncMode::Hybrid {
+                interval: std::time::Duration::from_secs(secs),
+            })
+        }
+        _ => anyhow::bail!("Invalid mode. Use: manual, on-demand, periodic, or hybrid"),
+    }
+}
+
+/// Sync vault with remote storage.
+async fn cmd_sync(vault_path: &PathBuf, strategy: &str) -> Result<()> {
+    info!("Starting vault sync");
+
+    let conflict_strategy = parse_conflict_strategy(strategy)?;
+    let password = prompt_password("Enter password: ")?;
+    let path_str = vault_path.to_string_lossy().to_string();
+
+    let manager = VaultManager::new();
+    let provider_config = serde_json::json!({
+        "root": path_str
+    });
+
+    let session = manager
+        .open_vault("local", provider_config, &password)
+        .await
+        .context("Failed to open vault")?;
+
+    let sync_config = SyncConfig {
+        conflict_strategy,
+        auto_resolve_conflicts: true,
+        ..Default::default()
+    };
+
+    let staging_dir = vault_path.join(".axiom_sync");
+    let sync_engine: SyncEngine<dyn axiomvault_storage::StorageProvider> =
+        SyncEngine::from_arc(session.provider(), &staging_dir, sync_config)
+            .await
+            .context("Failed to create sync engine")?;
+
+    println!("Starting sync...");
+    let result = sync_engine
+        .sync_full()
+        .await
+        .context("Sync failed")?;
+
+    println!("Sync completed!");
+    println!("  Files synced: {}", result.files_synced);
+    println!("  Files failed: {}", result.files_failed);
+    println!("  Conflicts found: {}", result.conflicts_found);
+    println!("  Duration: {:?}", result.duration);
+
+    Ok(())
+}
+
+/// Show sync status for the vault.
+async fn cmd_sync_status(vault_path: &PathBuf) -> Result<()> {
+    info!("Getting sync status");
+
+    let staging_dir = vault_path.join(".axiom_sync");
+    let state_file = staging_dir.join("sync_state.json");
+
+    if !state_file.exists() {
+        println!("No sync state found. Vault has not been synced yet.");
+        return Ok(());
+    }
+
+    let state_json = tokio::fs::read_to_string(&state_file)
+        .await
+        .context("Failed to read sync state")?;
+
+    let state: SyncState =
+        serde_json::from_str(&state_json).context("Failed to parse sync state")?;
+
+    println!("Sync Status:");
+    if let Some(last_sync) = state.last_full_sync {
+        println!("  Last full sync: {}", last_sync);
+    } else {
+        println!("  Last full sync: Never");
+    }
+
+    let counts = state.count_by_status();
+    println!("  Files tracked: {}", state.entries().count());
+
+    for (status, count) in counts {
+        let status_str = match status {
+            axiomvault_sync::SyncStatus::Synced => "Synced",
+            axiomvault_sync::SyncStatus::LocalModified => "Local modified",
+            axiomvault_sync::SyncStatus::RemoteModified => "Remote modified",
+            axiomvault_sync::SyncStatus::Conflicted => "Conflicted",
+            axiomvault_sync::SyncStatus::Syncing => "Syncing",
+            axiomvault_sync::SyncStatus::Failed => "Failed",
+        };
+        println!("    {}: {}", status_str, count);
+    }
+
+    if state.has_pending_changes() {
+        println!("\n  Status: Has pending changes");
+    } else {
+        println!("\n  Status: All synced");
+    }
+
+    Ok(())
+}
+
+/// List sync conflicts.
+async fn cmd_sync_conflicts(vault_path: &PathBuf) -> Result<()> {
+    info!("Listing sync conflicts");
+
+    let staging_dir = vault_path.join(".axiom_sync");
+    let state_file = staging_dir.join("sync_state.json");
+
+    if !state_file.exists() {
+        println!("No sync state found. Vault has not been synced yet.");
+        return Ok(());
+    }
+
+    let state_json = tokio::fs::read_to_string(&state_file)
+        .await
+        .context("Failed to read sync state")?;
+
+    let state: SyncState =
+        serde_json::from_str(&state_json).context("Failed to parse sync state")?;
+
+    let conflicts = state.entries_with_status(axiomvault_sync::SyncStatus::Conflicted);
+
+    if conflicts.is_empty() {
+        println!("No conflicts found.");
+    } else {
+        println!("Sync Conflicts:");
+        for entry in conflicts {
+            println!("\n  Path: {}", entry.path);
+            println!("    Local etag: {:?}", entry.local_etag);
+            println!("    Remote etag: {:?}", entry.remote_etag);
+            println!("    Local modified: {}", entry.local_modified);
+            if let Some(remote_mod) = entry.remote_modified {
+                println!("    Remote modified: {}", remote_mod);
+            }
+        }
+        println!("\nUse 'axiomvault sync-resolve' to resolve conflicts.");
+    }
+
+    Ok(())
+}
+
+/// Resolve a sync conflict for a specific file.
+async fn cmd_sync_resolve(vault_path: &PathBuf, file: &str, strategy: &str) -> Result<()> {
+    info!("Resolving sync conflict for {}", file);
+
+    let conflict_strategy = parse_conflict_strategy(strategy)?;
+    let password = prompt_password("Enter password: ")?;
+    let path_str = vault_path.to_string_lossy().to_string();
+
+    let manager = VaultManager::new();
+    let provider_config = serde_json::json!({
+        "root": path_str
+    });
+
+    let session = manager
+        .open_vault("local", provider_config, &password)
+        .await
+        .context("Failed to open vault")?;
+
+    let sync_config = SyncConfig {
+        conflict_strategy,
+        ..Default::default()
+    };
+
+    let staging_dir = vault_path.join(".axiom_sync");
+    let sync_engine: SyncEngine<dyn axiomvault_storage::StorageProvider> =
+        SyncEngine::from_arc(session.provider(), &staging_dir, sync_config)
+            .await
+            .context("Failed to create sync engine")?;
+
+    let file_path = VaultPath::parse(file).context("Invalid file path")?;
+
+    // Read local file content for resolution
+    let ops = VaultOperations::new(&session)?;
+    let local_data = ops
+        .read_file(&file_path)
+        .await
+        .context("Failed to read local file")?;
+
+    sync_engine
+        .resolve_conflict(&file_path, local_data, conflict_strategy)
+        .await
+        .context("Failed to resolve conflict")?;
+
+    println!("Conflict resolved for {} using strategy: {}", file, strategy);
+
+    Ok(())
+}
+
+/// Configure sync mode for the vault.
+async fn cmd_sync_configure(vault_path: &PathBuf, mode: &str, interval: Option<u64>) -> Result<()> {
+    info!("Configuring sync mode: {}", mode);
+
+    let sync_mode = parse_sync_mode(mode, interval)?;
+
+    let staging_dir = vault_path.join(".axiom_sync");
+    tokio::fs::create_dir_all(&staging_dir)
+        .await
+        .context("Failed to create sync directory")?;
+
+    let config_file = staging_dir.join("sync_config.json");
+
+    let config = SyncConfig {
+        sync_mode: sync_mode.clone(),
+        ..Default::default()
+    };
+
+    let config_json =
+        serde_json::to_string_pretty(&config).context("Failed to serialize config")?;
+
+    tokio::fs::write(&config_file, config_json)
+        .await
+        .context("Failed to write config")?;
+
+    let mode_str = match sync_mode {
+        SyncMode::Manual => "Manual".to_string(),
+        SyncMode::OnDemand => "On-demand".to_string(),
+        SyncMode::Periodic { interval } => format!("Periodic (every {:?})", interval),
+        SyncMode::Hybrid { interval } => format!("Hybrid (every {:?})", interval),
+    };
+
+    println!("Sync configuration updated!");
+    println!("  Mode: {}", mode_str);
+    println!("  Config saved to: {}", config_file.display());
 
     Ok(())
 }

@@ -5,6 +5,7 @@ members = [
     "core/vault",
     "core/storage",
     "core/common",
+    "core/sync",
     "tools/cli",
 ]
 

@@ -1,0 +1,23 @@
+[package]
+name = "axiomvault-sync"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+axiomvault-common = { path = "../common" }
+axiomvault-storage = { path = "../storage" }
+axiomvault-vault = { path = "../vault" }
+
+async-trait.workspace = true
+tokio.workspace = true
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+tracing.workspace = true
+rand.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
