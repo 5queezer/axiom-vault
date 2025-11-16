@@ -114,14 +114,22 @@ jobs:
             target/
           key: ${{ runner.os }}-cargo-android-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Set up Android NDK
+      - name: Set up Android SDK
         uses: android-actions/setup-android@v3
-        with:
-          packages: 'ndk;25.2.9519653'
+
+      - name: Install Android NDK
+        run: |
+          echo "Installing NDK 25.2.9519653..."
+          yes | sdkmanager --install "ndk;25.2.9519653" || true
+          ls -la ${ANDROID_HOME}/ndk/ || echo "NDK directory not found"
 
       - name: Configure cargo for Android
         run: |
           NDK_PATH="${ANDROID_HOME}/ndk/25.2.9519653"
+          if [ ! -d "${NDK_PATH}" ]; then
+            echo "ERROR: NDK not found at ${NDK_PATH}"
+            exit 1
+          fi
           mkdir -p ~/.cargo
           {
             echo ""
