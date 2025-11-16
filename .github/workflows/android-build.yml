@@ -115,37 +115,32 @@ jobs:
           key: ${{ runner.os }}-cargo-android-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Set up Android NDK
-        uses: nttld/setup-ndk@v1
-        id: setup-ndk
+        uses: android-actions/setup-android@v3
         with:
-          ndk-version: r25c
-          add-to-path: true
+          packages: 'ndk;25.2.9519653'
 
       - name: Configure cargo for Android
         run: |
+          NDK_PATH="${ANDROID_HOME}/ndk/25.2.9519653"
           mkdir -p ~/.cargo
-          cat >> ~/.cargo/config.toml << EOF
+          cat >> ~/.cargo/config.toml << 'CARGO_CONFIG'
           [target.aarch64-linux-android]
-          ar = "${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
-          linker = "${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang"
+          linker = "NDK_PLACEHOLDER/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang"
 
           [target.armv7-linux-androideabi]
-          ar = "${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
-          linker = "${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi24-clang"
+          linker = "NDK_PLACEHOLDER/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi24-clang"
 
           [target.x86_64-linux-android]
-          ar = "${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
-          linker = "${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android24-clang"
+          linker = "NDK_PLACEHOLDER/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android24-clang"
 
           [target.i686-linux-android]
-          ar = "${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
-          linker = "${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/i686-linux-android24-clang"
-          EOF
+          linker = "NDK_PLACEHOLDER/toolchains/llvm/prebuilt/linux-x86_64/bin/i686-linux-android24-clang"
+          CARGO_CONFIG
+          sed -i "s|NDK_PLACEHOLDER|${NDK_PATH}|g" ~/.cargo/config.toml
+          echo "ANDROID_NDK_HOME=${NDK_PATH}" >> $GITHUB_ENV
 
       - name: Build FFI crate for ${{ matrix.target }}
         run: cargo build -p axiom-ffi --target ${{ matrix.target }} --release --features android
-        env:
-          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
 
       - name: Upload Android library
         uses: actions/upload-artifact@v4
