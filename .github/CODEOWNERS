@@ -1,0 +1,26 @@
+# CODEOWNERS for AxiomVault
+# These owners will be the default owners for everything in the repo.
+
+# Global owners
+* @5queezer
+
+# Core Rust modules
+/core/crypto/ @5queezer
+/core/vault/ @5queezer
+/core/storage/ @5queezer
+/core/sync/ @5queezer
+/core/ffi/ @5queezer
+/core/common/ @5queezer
+
+# iOS client
+/clients/ios/ @5queezer
+
+# CLI tool
+/tools/cli/ @5queezer
+
+# CI/CD configuration
+/.github/ @5queezer
+
+# Documentation
+*.md @5queezer
+/docs/ @5queezer

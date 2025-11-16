@@ -1,0 +1,194 @@
+name: PR Check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Quick check - runs first to fail fast
+  quick-check:
+    name: Quick Check
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.draft == false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Check compilation
+        run: cargo check --workspace
+
+      - name: Run Clippy (warnings as errors)
+        run: cargo clippy --workspace -- -D warnings
+
+  # Check PR metadata
+  pr-metadata:
+    name: PR Metadata Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check PR title
+        run: |
+          TITLE="${{ github.event.pull_request.title }}"
+          # Check that title is not empty and has reasonable length
+          if [ ${#TITLE} -lt 10 ]; then
+            echo "PR title is too short. Please provide a descriptive title."
+            exit 1
+          fi
+          if [ ${#TITLE} -gt 100 ]; then
+            echo "PR title is too long. Please keep it under 100 characters."
+            exit 1
+          fi
+          echo "PR title looks good: $TITLE"
+
+      - name: Check PR description
+        run: |
+          BODY="${{ github.event.pull_request.body }}"
+          if [ -z "$BODY" ] || [ ${#BODY} -lt 20 ]; then
+            echo "Please provide a meaningful PR description"
+            exit 1
+          fi
+          echo "PR has a description"
+
+  # Size check
+  size-check:
+    name: PR Size Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check PR size
+        run: |
+          ADDITIONS=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}" \
+            | jq '.additions')
+          DELETIONS=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}" \
+            | jq '.deletions')
+
+          TOTAL=$((ADDITIONS + DELETIONS))
+
+          echo "PR changes: +$ADDITIONS -$DELETIONS (total: $TOTAL lines)"
+
+          if [ $TOTAL -gt 1000 ]; then
+            echo "::warning::This is a large PR with $TOTAL changed lines. Consider breaking it into smaller PRs."
+          fi
+
+          if [ $TOTAL -gt 3000 ]; then
+            echo "::error::This PR is very large ($TOTAL lines). Please consider splitting it."
+          fi
+
+  # Files changed check
+  files-check:
+    name: Check Changed Files
+    runs-on: ubuntu-latest
+    outputs:
+      rust_changed: ${{ steps.changes.outputs.rust }}
+      ios_changed: ${{ steps.changes.outputs.ios }}
+      docs_changed: ${{ steps.changes.outputs.docs }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dorny/paths-filter@v3
+        id: changes
+        with:
+          filters: |
+            rust:
+              - 'core/**'
+              - 'tools/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+            ios:
+              - 'clients/ios/**'
+            docs:
+              - '**/*.md'
+              - 'docs/**'
+
+      - name: Report changes
+        run: |
+          echo "Rust code changed: ${{ steps.changes.outputs.rust }}"
+          echo "iOS code changed: ${{ steps.changes.outputs.ios }}"
+          echo "Documentation changed: ${{ steps.changes.outputs.docs }}"
+
+  # Test coverage (optional, if coverage tools are set up)
+  test-coverage:
+    name: Test with Coverage
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.draft == false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-coverage-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Run tests
+        run: cargo test --workspace --verbose
+
+      - name: Test summary
+        if: always()
+        run: |
+          echo "## Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "Tests completed. Check the logs for details." >> $GITHUB_STEP_SUMMARY
+
+  # Summary
+  pr-summary:
+    name: PR Check Summary
+    runs-on: ubuntu-latest
+    needs: [quick-check, pr-metadata, test-coverage]
+    if: always()
+    steps:
+      - name: Generate summary
+        run: |
+          echo "## PR Check Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [[ "${{ needs.quick-check.result }}" == "success" ]]; then
+            echo "- :white_check_mark: Quick Check passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- :x: Quick Check failed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [[ "${{ needs.pr-metadata.result }}" == "success" ]]; then
+            echo "- :white_check_mark: PR Metadata valid" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- :x: PR Metadata issues" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [[ "${{ needs.test-coverage.result }}" == "success" ]]; then
+            echo "- :white_check_mark: Tests passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- :x: Tests failed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Check overall status
+        run: |
+          if [[ "${{ needs.quick-check.result }}" != "success" ]] || \
+             [[ "${{ needs.test-coverage.result }}" != "success" ]]; then
+            echo "Some checks failed. Please fix the issues before merging."
+            exit 1
+          fi
+          echo "All PR checks passed!"
