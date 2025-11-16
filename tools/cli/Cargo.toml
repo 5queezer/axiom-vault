@@ -22,3 +22,5 @@ tracing-subscriber.workspace = true
 anyhow.workspace = true
 chrono.workspace = true
 rpassword = "7.0"
+open.workspace = true
+url.workspace = true
