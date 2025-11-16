@@ -226,7 +226,6 @@ pub fn decrypt_bytes(key: &[u8], data: &[u8]) -> Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Cursor;
 
     #[test]
     fn test_stream_encrypt_decrypt_roundtrip() {

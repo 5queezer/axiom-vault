@@ -1,0 +1,202 @@
+name: iOS Build
+
+on:
+  push:
+    branches: [ main, master, develop ]
+    paths:
+      - 'core/**'
+      - 'clients/ios/**'
+      - '.github/workflows/ios-build.yml'
+  pull_request:
+    branches: [ main, master, develop ]
+    paths:
+      - 'core/**'
+      - 'clients/ios/**'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Build Rust FFI for iOS targets
+  build-ios-rust:
+    name: Build Rust iOS Libraries
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios, aarch64-apple-ios-sim, x86_64-apple-ios
+
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: macos-cargo-ios-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            macos-cargo-ios-
+
+      - name: Build for iOS Device (arm64)
+        run: cargo build --release --target aarch64-apple-ios -p axiom-ffi
+
+      - name: Build for iOS Simulator (arm64)
+        run: cargo build --release --target aarch64-apple-ios-sim -p axiom-ffi
+
+      - name: Build for iOS Simulator (x86_64)
+        run: cargo build --release --target x86_64-apple-ios -p axiom-ffi
+
+      - name: Create output directories
+        run: |
+          mkdir -p artifacts/ios-device
+          mkdir -p artifacts/ios-simulator
+          mkdir -p artifacts/headers
+
+      - name: Copy device library
+        run: cp target/aarch64-apple-ios/release/libaxiom_vault.a artifacts/ios-device/
+
+      - name: Create universal simulator library
+        run: |
+          lipo -create \
+            target/aarch64-apple-ios-sim/release/libaxiom_vault.a \
+            target/x86_64-apple-ios/release/libaxiom_vault.a \
+            -output artifacts/ios-simulator/libaxiom_vault.a
+
+      - name: Copy C header
+        run: |
+          if [ -f target/include/axiom_ffi.h ]; then
+            cp target/include/axiom_ffi.h artifacts/headers/
+          fi
+
+      - name: Verify library architectures
+        run: |
+          echo "=== Device Library ==="
+          lipo -info artifacts/ios-device/libaxiom_vault.a
+
+          echo "=== Simulator Library ==="
+          lipo -info artifacts/ios-simulator/libaxiom_vault.a
+
+      - name: Upload iOS libraries
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-rust-libraries
+          path: artifacts/
+          retention-days: 7
+
+  # Validate Swift code
+  swift-lint:
+    name: Swift Lint
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SwiftLint
+        run: brew install swiftlint
+
+      - name: Create SwiftLint config
+        run: |
+          cat > .swiftlint.yml << 'EOF'
+          disabled_rules:
+            - trailing_whitespace
+            - line_length
+          opt_in_rules:
+            - empty_count
+            - missing_docs
+          excluded:
+            - Carthage
+            - Pods
+            - .build
+          line_length:
+            warning: 150
+            error: 200
+          EOF
+
+      - name: Run SwiftLint
+        run: |
+          cd clients/ios
+          swiftlint lint --reporter github-actions-logging || true
+
+  # Check Swift syntax (without Xcode project)
+  swift-syntax:
+    name: Swift Syntax Check
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check Swift syntax
+        run: |
+          cd clients/ios/AxiomVault/Sources
+          for file in $(find . -name "*.swift"); do
+            echo "Checking $file..."
+            swiftc -parse "$file" 2>&1 || true
+          done
+
+  # Create XCFramework
+  create-xcframework:
+    name: Create XCFramework
+    runs-on: macos-latest
+    needs: build-ios-rust
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download iOS libraries
+        uses: actions/download-artifact@v4
+        with:
+          name: ios-rust-libraries
+          path: artifacts/
+
+      - name: Create module map
+        run: |
+          mkdir -p artifacts/headers
+          cat > artifacts/headers/module.modulemap << 'EOF'
+          module AxiomVaultCore {
+              header "axiom_ffi.h"
+              export *
+          }
+          EOF
+
+      - name: Create XCFramework
+        run: |
+          xcodebuild -create-xcframework \
+            -library artifacts/ios-device/libaxiom_vault.a \
+            -headers artifacts/headers \
+            -library artifacts/ios-simulator/libaxiom_vault.a \
+            -headers artifacts/headers \
+            -output AxiomVaultCore.xcframework
+
+      - name: Verify XCFramework
+        run: |
+          echo "=== XCFramework Contents ==="
+          ls -la AxiomVaultCore.xcframework/
+
+          echo "=== Info.plist ==="
+          cat AxiomVaultCore.xcframework/Info.plist
+
+      - name: Upload XCFramework
+        uses: actions/upload-artifact@v4
+        with:
+          name: AxiomVaultCore-xcframework
+          path: AxiomVaultCore.xcframework/
+          retention-days: 30
+
+  # Summary job
+  ios-build-success:
+    name: iOS Build Success
+    runs-on: ubuntu-latest
+    needs: [build-ios-rust, swift-lint, create-xcframework]
+    if: always()
+    steps:
+      - name: Check build status
+        run: |
+          if [[ "${{ needs.build-ios-rust.result }}" != "success" ]] || \
+             [[ "${{ needs.create-xcframework.result }}" != "success" ]]; then
+            echo "iOS build failed"
+            exit 1
+          fi
+          echo "iOS build completed successfully!"

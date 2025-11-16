@@ -55,15 +55,13 @@ impl StagingArea {
         let registry_path = base_dir.join("staging_registry.json");
 
         // Create staging directory
-        fs::create_dir_all(&staging_dir)
-            .await
-            .map_err(|e| Error::Io(e))?;
+        fs::create_dir_all(&staging_dir).await.map_err(Error::Io)?;
 
         // Load existing registry if present
         let changes = if registry_path.exists() {
             let content = fs::read_to_string(&registry_path)
                 .await
-                .map_err(|e| Error::Io(e))?;
+                .map_err(Error::Io)?;
             serde_json::from_str(&content).unwrap_or_default()
         } else {
             HashMap::new()
@@ -87,9 +85,7 @@ impl StagingArea {
         let staging_file = self.base_dir.join(&change_id);
 
         // Write data to staging file
-        fs::write(&staging_file, &data)
-            .await
-            .map_err(|e| Error::Io(e))?;
+        fs::write(&staging_file, &data).await.map_err(Error::Io)?;
 
         let change = StagedChange {
             id: change_id.clone(),
@@ -136,7 +132,7 @@ impl StagingArea {
             Error::InvalidInput("No staging file for this change type".to_string())
         })?;
 
-        fs::read(staging_file).await.map_err(|e| Error::Io(e))
+        fs::read(staging_file).await.map_err(Error::Io)
     }
 
     /// Get a staged change by ID.
@@ -167,9 +163,7 @@ impl StagingArea {
         // Delete the staging file if present
         if let Some(staging_file) = &change.staging_file {
             if staging_file.exists() {
-                fs::remove_file(staging_file)
-                    .await
-                    .map_err(|e| Error::Io(e))?;
+                fs::remove_file(staging_file).await.map_err(Error::Io)?;
             }
         }
 
@@ -213,15 +207,13 @@ impl StagingArea {
             .map_err(|e| Error::Serialization(e.to_string()))?;
         fs::write(&self.registry_path, json)
             .await
-            .map_err(|e| Error::Io(e))
+            .map_err(Error::Io)
     }
 
     /// Clean up orphaned staging files.
     pub async fn cleanup_orphaned(&mut self) -> Result<usize> {
         let mut cleaned = 0;
-        let mut entries = fs::read_dir(&self.base_dir)
-            .await
-            .map_err(|e| Error::Io(e))?;
+        let mut entries = fs::read_dir(&self.base_dir).await.map_err(Error::Io)?;
 
         let known_files: std::collections::HashSet<PathBuf> = self
             .changes
@@ -229,10 +221,10 @@ impl StagingArea {
             .filter_map(|c| c.staging_file.clone())
             .collect();
 
-        while let Some(entry) = entries.next_entry().await.map_err(|e| Error::Io(e))? {
+        while let Some(entry) = entries.next_entry().await.map_err(Error::Io)? {
             let path = entry.path();
             if path.is_file() && !known_files.contains(&path) {
-                fs::remove_file(&path).await.map_err(|e| Error::Io(e))?;
+                fs::remove_file(&path).await.map_err(Error::Io)?;
                 cleaned += 1;
             }
         }

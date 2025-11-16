@@ -144,7 +144,7 @@ impl SyncSchedulerHandle {
     {
         let mut request_rx = self.request_rx.take().expect("Handle can only be run once");
         let mut periodic_interval = self.create_periodic_interval().await;
-        let mut last_sync = Instant::now();
+        let mut _last_sync = Instant::now();
 
         info!("Sync scheduler started");
 
@@ -166,7 +166,7 @@ impl SyncSchedulerHandle {
                         _ => {
                             debug!("Processing sync request: {:?}", request);
                             let result = sync_fn(request).await;
-                            last_sync = Instant::now();
+                            _last_sync = Instant::now();
                             let _ = response_tx.send(result);
                         }
                     }
@@ -179,7 +179,7 @@ impl SyncSchedulerHandle {
                         SyncMode::Periodic { .. } | SyncMode::Hybrid { .. } => {
                             debug!("Triggering periodic sync");
                             let result = sync_fn(SyncRequest::Full).await;
-                            last_sync = Instant::now();
+                            _last_sync = Instant::now();
                             match &result {
                                 Ok(sync_result) => {
                                     info!(
