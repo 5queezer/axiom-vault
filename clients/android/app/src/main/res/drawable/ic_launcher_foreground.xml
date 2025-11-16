@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Vault icon -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,24L30,36v18c0,16.5 10.2,31.9 24,36 13.8,-4.1 24,-19.5 24,-36V36L54,24zM54,54L36,54V42l18,-9v21zM54,54v18.9c-7.7,-3.4 -12,-12.5 -12,-18.9H54zM54,54h12c0,6.4 -4.3,15.5 -12,18.9V54z"/>
+</vector>

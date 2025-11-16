@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <style name="Theme.AxiomVault" parent="android:Theme.Material.Light.NoActionBar">
+        <!-- Primary brand color -->
+        <item name="android:colorPrimary">@color/primary</item>
+        <item name="android:colorPrimaryDark">@color/primary_dark</item>
+        <item name="android:colorAccent">@color/accent</item>
+
+        <!-- Status bar color -->
+        <item name="android:statusBarColor">@color/primary_dark</item>
+
+        <!-- Navigation bar color -->
+        <item name="android:navigationBarColor">@color/surface</item>
+    </style>
+</resources>
