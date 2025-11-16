@@ -44,6 +44,18 @@ pub enum Error {
     /// Conflict detected.
     #[error("Conflict: {0}")]
     Conflict(String),
+
+    /// Authentication failed.
+    #[error("Authentication error: {0}")]
+    Authentication(String),
+
+    /// Network operation failed.
+    #[error("Network error: {0}")]
+    Network(String),
+
+    /// Permission denied.
+    #[error("Permission denied: {0}")]
+    PermissionDenied(String),
 }
 
 /// Result type alias using the common Error.

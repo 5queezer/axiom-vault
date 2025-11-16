@@ -11,6 +11,7 @@ use tracing_subscriber::FmtSubscriber;
 
 use axiomvault_common::{VaultId, VaultPath};
 use axiomvault_crypto::KdfParams;
+use axiomvault_storage::gdrive::{AuthConfig, AuthManager, GDriveConfig, Tokens};
 use axiomvault_vault::{VaultManager, VaultOperations};
 
 #[derive(Parser)]
@@ -126,6 +127,51 @@ enum Commands {
         #[arg(short, long)]
         path: PathBuf,
     },
+
+    /// Authenticate with Google Drive and get tokens.
+    GdriveAuth {
+        /// Optional custom client ID.
+        #[arg(long)]
+        client_id: Option<String>,
+
+        /// Optional custom client secret.
+        #[arg(long)]
+        client_secret: Option<String>,
+
+        /// Path to save tokens (JSON file).
+        #[arg(short, long)]
+        output: PathBuf,
+    },
+
+    /// Create a vault on Google Drive.
+    GdriveCreate {
+        /// Vault name/identifier.
+        #[arg(short, long)]
+        name: String,
+
+        /// Google Drive folder ID where vault will be stored.
+        #[arg(short, long)]
+        folder_id: String,
+
+        /// Path to tokens file.
+        #[arg(short, long)]
+        tokens: PathBuf,
+
+        /// KDF strength: "interactive", "moderate", or "sensitive".
+        #[arg(short, long, default_value = "moderate")]
+        strength: String,
+    },
+
+    /// Open a vault on Google Drive.
+    GdriveOpen {
+        /// Google Drive folder ID where vault is stored.
+        #[arg(short, long)]
+        folder_id: String,
+
+        /// Path to tokens file.
+        #[arg(short, long)]
+        tokens: PathBuf,
+    },
 }
 
 #[tokio::main]
@@ -176,6 +222,23 @@ async fn main() -> Result<()> {
         Commands::Info { path } => cmd_info(&path).await,
 
         Commands::ChangePassword { path } => cmd_change_password(&path).await,
+
+        Commands::GdriveAuth {
+            client_id,
+            client_secret,
+            output,
+        } => cmd_gdrive_auth(client_id, client_secret, &output).await,
+
+        Commands::GdriveCreate {
+            name,
+            folder_id,
+            tokens,
+            strength,
+        } => cmd_gdrive_create(&name, &folder_id, &tokens, &strength).await,
+
+        Commands::GdriveOpen { folder_id, tokens } => {
+            cmd_gdrive_open(&folder_id, &tokens).await
+        }
     }
 }
 
@@ -497,6 +560,162 @@ async fn cmd_change_password(path: &PathBuf) -> Result<()> {
     manager.save_config(&session).await?;
 
     println!("Password changed successfully!");
+
+    Ok(())
+}
+
+/// Authenticate with Google Drive and save tokens.
+async fn cmd_gdrive_auth(
+    client_id: Option<String>,
+    client_secret: Option<String>,
+    output: &PathBuf,
+) -> Result<()> {
+    info!("Starting Google Drive authentication");
+
+    let auth_config = if let (Some(id), Some(secret)) = (client_id, client_secret) {
+        AuthConfig {
+            client_id: id,
+            client_secret: secret,
+            redirect_url: "http://localhost:8080/callback".to_string(),
+        }
+    } else {
+        AuthConfig::default()
+    };
+
+    let auth_manager = AuthManager::new(auth_config).context("Failed to create auth manager")?;
+
+    let (auth_url, _csrf_token) = auth_manager.authorization_url();
+
+    println!("Please visit this URL to authorize AxiomVault:");
+    println!();
+    println!("  {}", auth_url);
+    println!();
+    println!("After authorization, you will be redirected to a URL like:");
+    println!("  http://localhost:8080/callback?code=AUTHORIZATION_CODE&state=...");
+    println!();
+    println!("Copy the 'code' parameter value from the URL.");
+    println!();
+
+    let code = rpassword::prompt_password("Enter the authorization code: ")
+        .context("Failed to read code")?;
+
+    info!("Exchanging authorization code for tokens");
+
+    let tokens = auth_manager
+        .exchange_code(&code)
+        .await
+        .context("Failed to exchange authorization code")?;
+
+    // Save tokens to file
+    let tokens_json =
+        serde_json::to_string_pretty(&tokens).context("Failed to serialize tokens")?;
+
+    tokio::fs::write(output, tokens_json)
+        .await
+        .context("Failed to write tokens file")?;
+
+    println!("Authentication successful!");
+    println!("  Tokens saved to: {}", output.display());
+    println!("  Expires at: {}", tokens.expires_at);
+
+    Ok(())
+}
+
+/// Create a vault on Google Drive.
+async fn cmd_gdrive_create(
+    name: &str,
+    folder_id: &str,
+    tokens_path: &PathBuf,
+    strength: &str,
+) -> Result<()> {
+    info!("Creating new vault on Google Drive: {}", name);
+
+    let kdf_params = match strength {
+        "interactive" => KdfParams::interactive(),
+        "moderate" => KdfParams::moderate(),
+        "sensitive" => KdfParams::sensitive(),
+        _ => {
+            anyhow::bail!("Invalid strength. Use: interactive, moderate, or sensitive");
+        }
+    };
+
+    let password = prompt_password("Enter password: ")?;
+    let confirm = prompt_password("Confirm password: ")?;
+
+    if password != confirm {
+        anyhow::bail!("Passwords do not match");
+    }
+
+    if password.is_empty() {
+        anyhow::bail!("Password cannot be empty");
+    }
+
+    // Load tokens
+    let tokens_json = tokio::fs::read_to_string(tokens_path)
+        .await
+        .context("Failed to read tokens file")?;
+    let tokens: Tokens =
+        serde_json::from_str(&tokens_json).context("Failed to parse tokens file")?;
+
+    let vault_id = VaultId::new(name).context("Invalid vault name")?;
+
+    let manager = VaultManager::new();
+
+    let gdrive_config = GDriveConfig {
+        folder_id: folder_id.to_string(),
+        tokens,
+        auth_config: None,
+    };
+
+    let provider_config =
+        serde_json::to_value(gdrive_config).context("Failed to serialize GDrive config")?;
+
+    let session = manager
+        .create_vault(vault_id, &password, "gdrive", provider_config, kdf_params)
+        .await
+        .context("Failed to create vault on Google Drive")?;
+
+    println!("Vault created successfully on Google Drive!");
+    println!("  ID: {}", session.vault_id());
+    println!("  Folder ID: {}", folder_id);
+    println!("  Provider: {}", session.config().provider_type);
+
+    Ok(())
+}
+
+/// Open a vault on Google Drive.
+async fn cmd_gdrive_open(folder_id: &str, tokens_path: &PathBuf) -> Result<()> {
+    info!("Opening vault on Google Drive");
+
+    let password = prompt_password("Enter password: ")?;
+
+    // Load tokens
+    let tokens_json = tokio::fs::read_to_string(tokens_path)
+        .await
+        .context("Failed to read tokens file")?;
+    let tokens: Tokens =
+        serde_json::from_str(&tokens_json).context("Failed to parse tokens file")?;
+
+    let gdrive_config = GDriveConfig {
+        folder_id: folder_id.to_string(),
+        tokens,
+        auth_config: None,
+    };
+
+    let provider_config =
+        serde_json::to_value(gdrive_config).context("Failed to serialize GDrive config")?;
+
+    let manager = VaultManager::new();
+
+    let session = manager
+        .open_vault("gdrive", provider_config, &password)
+        .await
+        .context("Failed to open vault on Google Drive")?;
+
+    println!("Vault opened successfully from Google Drive!");
+    println!("  ID: {}", session.vault_id());
+    println!("  Session: {}", session.handle().as_str());
+    println!("\nVault is ready for operations.");
 
     Ok(())
 }
