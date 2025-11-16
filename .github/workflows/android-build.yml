@@ -1,0 +1,136 @@
+name: Android Build
+
+on:
+  push:
+    branches: [ main, master, develop, 'claude/**' ]
+    paths:
+      - 'clients/android/**'
+      - 'core/ffi/**'
+      - '.github/workflows/android-build.yml'
+  pull_request:
+    branches: [ main, master, develop ]
+    paths:
+      - 'clients/android/**'
+      - 'core/ffi/**'
+  workflow_dispatch:
+
+env:
+  ANDROID_NDK_VERSION: 25.2.9519653
+  RUST_BACKTRACE: 1
+
+jobs:
+  # Check Android project structure
+  android-lint:
+    name: Android Lint Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Check Android project files
+        run: |
+          if [ ! -f "clients/android/build.gradle.kts" ]; then
+            echo "ERROR: Missing root build.gradle.kts"
+            exit 1
+          fi
+          if [ ! -f "clients/android/settings.gradle.kts" ]; then
+            echo "ERROR: Missing settings.gradle.kts"
+            exit 1
+          fi
+          if [ ! -f "clients/android/app/build.gradle.kts" ]; then
+            echo "ERROR: Missing app build.gradle.kts"
+            exit 1
+          fi
+          echo "Android project structure looks good"
+
+      - name: Validate Kotlin source files
+        run: |
+          # Count Kotlin files
+          KOTLIN_COUNT=$(find clients/android/app/src -name "*.kt" | wc -l)
+          echo "Found $KOTLIN_COUNT Kotlin source files"
+
+          if [ "$KOTLIN_COUNT" -lt 5 ]; then
+            echo "ERROR: Too few Kotlin files found"
+            exit 1
+          fi
+
+          # Check for main entry points
+          if [ ! -f "clients/android/app/src/main/kotlin/com/axiomvault/android/MainActivity.kt" ]; then
+            echo "ERROR: Missing MainActivity.kt"
+            exit 1
+          fi
+          if [ ! -f "clients/android/app/src/main/kotlin/com/axiomvault/android/AxiomVaultApp.kt" ]; then
+            echo "ERROR: Missing AxiomVaultApp.kt"
+            exit 1
+          fi
+
+          echo "Kotlin source validation passed"
+
+      - name: Check JNI integration
+        run: |
+          if [ ! -f "clients/android/app/src/main/cpp/CMakeLists.txt" ]; then
+            echo "ERROR: Missing CMakeLists.txt for JNI"
+            exit 1
+          fi
+          if [ ! -f "clients/android/app/src/main/cpp/axiom_vault_jni.cpp" ]; then
+            echo "ERROR: Missing JNI wrapper implementation"
+            exit 1
+          fi
+          echo "JNI integration files present"
+
+  # Build Rust FFI for Android targets (optional, for local builds)
+  # Note: Cross-compilation requires NDK setup which is complex in CI
+  # The native libraries should be built locally and included in the APK
+  rust-android-check:
+    name: Check Rust FFI Compiles
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-android-check-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Check FFI crate compiles with android feature
+        run: cargo build -p axiom-ffi --features android
+
+      - name: Verify C header generation
+        run: |
+          if [ -f target/include/axiom_ffi.h ]; then
+            echo "C header generated successfully for JNI bridge"
+            head -30 target/include/axiom_ffi.h
+          else
+            echo "ERROR: C header not generated"
+            exit 1
+          fi
+
+  # Summary job
+  android-ci-success:
+    name: Android CI Success
+    runs-on: ubuntu-latest
+    needs: [android-lint]
+    if: always()
+    steps:
+      - name: Check all jobs
+        run: |
+          if [[ "${{ needs.android-lint.result }}" != "success" ]]; then
+            echo "Android lint check failed"
+            exit 1
+          fi
+          echo "All Android CI checks passed!"

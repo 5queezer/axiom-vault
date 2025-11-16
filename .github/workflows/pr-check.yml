@@ -98,6 +98,7 @@ jobs:
     outputs:
       rust_changed: ${{ steps.changes.outputs.rust }}
       ios_changed: ${{ steps.changes.outputs.ios }}
+      android_changed: ${{ steps.changes.outputs.android }}
       docs_changed: ${{ steps.changes.outputs.docs }}
     steps:
       - uses: actions/checkout@v4
@@ -113,6 +114,8 @@ jobs:
               - 'Cargo.lock'
             ios:
               - 'clients/ios/**'
+            android:
+              - 'clients/android/**'
             docs:
               - '**/*.md'
               - 'docs/**'
@@ -121,6 +124,7 @@ jobs:
         run: |
           echo "Rust code changed: ${{ steps.changes.outputs.rust }}"
           echo "iOS code changed: ${{ steps.changes.outputs.ios }}"
+          echo "Android code changed: ${{ steps.changes.outputs.android }}"
           echo "Documentation changed: ${{ steps.changes.outputs.docs }}"
 
   # Test coverage (optional, if coverage tools are set up)
