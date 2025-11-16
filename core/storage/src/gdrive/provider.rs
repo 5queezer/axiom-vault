@@ -54,7 +54,7 @@ impl GDriveProvider {
         let auth_config = config
             .auth_config
             .clone()
-            .unwrap_or_else(AuthConfig::default);
+            .unwrap_or_default();
 
         let auth_manager = AuthManager::new(auth_config)?;
         let token_manager = Arc::new(TokenManager::new(auth_manager, config.tokens.clone()));
@@ -345,7 +345,7 @@ impl StorageProvider for GDriveProvider {
         let (new_parent_id, new_name) = self.resolve_parent(to).await?;
 
         // Check if destination already exists
-        if let Some(_) = self.client.find_file(&new_name, &new_parent_id).await? {
+        if self.client.find_file(&new_name, &new_parent_id).await?.is_some() {
             return Err(Error::AlreadyExists(format!(
                 "Destination already exists: {}",
                 to
@@ -377,7 +377,7 @@ impl StorageProvider for GDriveProvider {
         let (to_parent_id, to_name) = self.resolve_parent(to).await?;
 
         // Check if destination already exists
-        if let Some(_) = self.client.find_file(&to_name, &to_parent_id).await? {
+        if self.client.find_file(&to_name, &to_parent_id).await?.is_some() {
             return Err(Error::AlreadyExists(format!(
                 "Destination already exists: {}",
                 to

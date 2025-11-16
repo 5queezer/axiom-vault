@@ -283,17 +283,17 @@ impl VaultTree {
 
     /// Count the total number of files in the tree.
     pub fn count_files(&self) -> usize {
-        self.count_files_recursive(&self.root)
+        Self::count_files_recursive(&self.root)
     }
 
     /// Recursively count files.
-    fn count_files_recursive(&self, node: &TreeNode) -> usize {
+    fn count_files_recursive(node: &TreeNode) -> usize {
         let mut count = 0;
         for child in node.children.values() {
             if child.is_file() {
                 count += 1;
             } else {
-                count += self.count_files_recursive(child);
+                count += Self::count_files_recursive(child);
             }
         }
         count
@@ -301,17 +301,17 @@ impl VaultTree {
 
     /// Get the total size of all files in the tree.
     pub fn total_size(&self) -> u64 {
-        self.total_size_recursive(&self.root)
+        Self::total_size_recursive(&self.root)
     }
 
     /// Recursively calculate total size.
-    fn total_size_recursive(&self, node: &TreeNode) -> u64 {
+    fn total_size_recursive(node: &TreeNode) -> u64 {
         let mut size = 0;
         for child in node.children.values() {
             if child.is_file() {
                 size += child.metadata.size.unwrap_or(0);
             } else {
-                size += self.total_size_recursive(child);
+                size += Self::total_size_recursive(child);
             }
         }
         size

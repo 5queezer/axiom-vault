@@ -114,7 +114,7 @@ pub fn create_default_registry() -> ProviderRegistry {
     registry
         .register(
             "gdrive",
-            Box::new(|config| crate::gdrive::create_gdrive_provider(config)),
+            Box::new(crate::gdrive::create_gdrive_provider),
         )
         .expect("Failed to register gdrive provider");
 

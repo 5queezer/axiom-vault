@@ -5,7 +5,7 @@
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
 
@@ -324,7 +324,7 @@ fn prompt_password(prompt: &str) -> Result<Vec<u8>> {
 }
 
 /// Create a new vault.
-async fn cmd_create(name: &str, path: &PathBuf, strength: &str) -> Result<()> {
+async fn cmd_create(name: &str, path: &Path, strength: &str) -> Result<()> {
     info!("Creating new vault: {}", name);
 
     let kdf_params = match strength {
@@ -369,7 +369,7 @@ async fn cmd_create(name: &str, path: &PathBuf, strength: &str) -> Result<()> {
 }
 
 /// Open vault for interactive session.
-async fn cmd_open(path: &PathBuf) -> Result<()> {
+async fn cmd_open(path: &Path) -> Result<()> {
     info!("Opening vault at: {}", path.display());
 
     let password = prompt_password("Enter password: ")?;
@@ -397,7 +397,7 @@ async fn cmd_open(path: &PathBuf) -> Result<()> {
 }
 
 /// List directory contents.
-async fn cmd_list(vault_path: &PathBuf, dir: &str) -> Result<()> {
+async fn cmd_list(vault_path: &Path, dir: &str) -> Result<()> {
     let password = prompt_password("Enter password: ")?;
     let path_str = vault_path.to_string_lossy().to_string();
 
@@ -437,7 +437,7 @@ async fn cmd_list(vault_path: &PathBuf, dir: &str) -> Result<()> {
 }
 
 /// Add a file to the vault.
-async fn cmd_add(vault_path: &PathBuf, source: &PathBuf, dest: &str) -> Result<()> {
+async fn cmd_add(vault_path: &Path, source: &Path, dest: &str) -> Result<()> {
     info!("Adding file {} to vault as {}", source.display(), dest);
 
     let password = prompt_password("Enter password: ")?;
@@ -475,7 +475,7 @@ async fn cmd_add(vault_path: &PathBuf, source: &PathBuf, dest: &str) -> Result<(
 }
 
 /// Extract a file from the vault.
-async fn cmd_extract(vault_path: &PathBuf, source: &str, dest: &PathBuf) -> Result<()> {
+async fn cmd_extract(vault_path: &Path, source: &str, dest: &Path) -> Result<()> {
     info!("Extracting {} from vault to {}", source, dest.display());
 
     let password = prompt_password("Enter password: ")?;
@@ -513,7 +513,7 @@ async fn cmd_extract(vault_path: &PathBuf, source: &str, dest: &PathBuf) -> Resu
 }
 
 /// Create a directory in the vault.
-async fn cmd_mkdir(vault_path: &PathBuf, dir: &str) -> Result<()> {
+async fn cmd_mkdir(vault_path: &Path, dir: &str) -> Result<()> {
     info!("Creating directory: {}", dir);
 
     let password = prompt_password("Enter password: ")?;
@@ -542,7 +542,7 @@ async fn cmd_mkdir(vault_path: &PathBuf, dir: &str) -> Result<()> {
 }
 
 /// Remove a file from the vault.
-async fn cmd_remove(vault_path: &PathBuf, file: &str) -> Result<()> {
+async fn cmd_remove(vault_path: &Path, file: &str) -> Result<()> {
     info!("Removing: {}", file);
 
     let password = prompt_password("Enter password: ")?;
@@ -571,7 +571,7 @@ async fn cmd_remove(vault_path: &PathBuf, file: &str) -> Result<()> {
 }
 
 /// Show vault information.
-async fn cmd_info(path: &PathBuf) -> Result<()> {
+async fn cmd_info(path: &Path) -> Result<()> {
     info!("Getting vault info: {}", path.display());
 
     let password = prompt_password("Enter password: ")?;
@@ -607,7 +607,7 @@ async fn cmd_info(path: &PathBuf) -> Result<()> {
 }
 
 /// Change vault password.
-async fn cmd_change_password(path: &PathBuf) -> Result<()> {
+async fn cmd_change_password(path: &Path) -> Result<()> {
     info!("Changing vault password");
 
     let old_password = prompt_password("Enter current password: ")?;
@@ -707,7 +707,7 @@ async fn cmd_gdrive_auth(
 async fn cmd_gdrive_create(
     name: &str,
     folder_id: &str,
-    tokens_path: &PathBuf,
+    tokens_path: &Path,
     strength: &str,
 ) -> Result<()> {
     info!("Creating new vault on Google Drive: {}", name);
@@ -766,7 +766,7 @@ async fn cmd_gdrive_create(
 }
 
 /// Open a vault on Google Drive.
-async fn cmd_gdrive_open(folder_id: &str, tokens_path: &PathBuf) -> Result<()> {
+async fn cmd_gdrive_open(folder_id: &str, tokens_path: &Path) -> Result<()> {
     info!("Opening vault on Google Drive");
 
     let password = prompt_password("Enter password: ")?;
@@ -836,7 +836,7 @@ fn parse_sync_mode(mode: &str, interval: Option<u64>) -> Result<SyncMode> {
 }
 
 /// Sync vault with remote storage.
-async fn cmd_sync(vault_path: &PathBuf, strategy: &str) -> Result<()> {
+async fn cmd_sync(vault_path: &Path, strategy: &str) -> Result<()> {
     info!("Starting vault sync");
 
     let conflict_strategy = parse_conflict_strategy(strategy)?;
@@ -878,7 +878,7 @@ async fn cmd_sync(vault_path: &PathBuf, strategy: &str) -> Result<()> {
 }
 
 /// Show sync status for the vault.
-async fn cmd_sync_status(vault_path: &PathBuf) -> Result<()> {
+async fn cmd_sync_status(vault_path: &Path) -> Result<()> {
     info!("Getting sync status");
 
     let staging_dir = vault_path.join(".axiom_sync");
@@ -928,7 +928,7 @@ async fn cmd_sync_status(vault_path: &PathBuf) -> Result<()> {
 }
 
 /// List sync conflicts.
-async fn cmd_sync_conflicts(vault_path: &PathBuf) -> Result<()> {
+async fn cmd_sync_conflicts(vault_path: &Path) -> Result<()> {
     info!("Listing sync conflicts");
 
     let staging_dir = vault_path.join(".axiom_sync");
@@ -968,7 +968,7 @@ async fn cmd_sync_conflicts(vault_path: &PathBuf) -> Result<()> {
 }
 
 /// Resolve a sync conflict for a specific file.
-async fn cmd_sync_resolve(vault_path: &PathBuf, file: &str, strategy: &str) -> Result<()> {
+async fn cmd_sync_resolve(vault_path: &Path, file: &str, strategy: &str) -> Result<()> {
     info!("Resolving sync conflict for {}", file);
 
     let conflict_strategy = parse_conflict_strategy(strategy)?;
@@ -1019,7 +1019,7 @@ async fn cmd_sync_resolve(vault_path: &PathBuf, file: &str, strategy: &str) -> R
 }
 
 /// Configure sync mode for the vault.
-async fn cmd_sync_configure(vault_path: &PathBuf, mode: &str, interval: Option<u64>) -> Result<()> {
+async fn cmd_sync_configure(vault_path: &Path, mode: &str, interval: Option<u64>) -> Result<()> {
     info!("Configuring sync mode: {}", mode);
 
     let sync_mode = parse_sync_mode(mode, interval)?;
