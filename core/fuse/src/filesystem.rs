@@ -130,7 +130,7 @@ impl VaultFilesystem {
     }
 
     /// Get vault operations handler.
-    fn ops(&self) -> Result<VaultOperations> {
+    fn ops(&self) -> Result<VaultOperations<'_>> {
         VaultOperations::new(&self.session)
     }
 }
