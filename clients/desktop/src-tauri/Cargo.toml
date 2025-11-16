@@ -1,0 +1,39 @@
+[package]
+name = "axiomvault-desktop"
+version.workspace = true
+edition.workspace = true
+description = "AxiomVault Desktop Client"
+
+[build-dependencies]
+tauri-build.workspace = true
+
+[dependencies]
+axiomvault-common = { path = "../../../core/common" }
+axiomvault-vault = { path = "../../../core/vault" }
+axiomvault-storage = { path = "../../../core/storage" }
+axiomvault-crypto = { path = "../../../core/crypto" }
+axiomvault-fuse = { path = "../../../core/fuse" }
+axiomvault-sync = { path = "../../../core/sync" }
+
+tauri.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+rusqlite.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+dirs = "5.0"
+tauri-plugin-shell = "2"
+regex = "1.10"
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
+[[bin]]
+name = "axiomvault-desktop"
+path = "src/main.rs"

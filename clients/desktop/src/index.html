@@ -1,0 +1,718 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AxiomVault</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: #1a1a2e;
+            color: #e0e0e0;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .header {
+            background: #16213e;
+            padding: 1rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #0f3460;
+        }
+
+        .header h1 {
+            color: #00d9ff;
+            font-size: 1.5rem;
+        }
+
+        .fuse-status {
+            font-size: 0.9rem;
+            color: #888;
+        }
+
+        .main-container {
+            display: flex;
+            flex: 1;
+        }
+
+        .sidebar {
+            width: 250px;
+            background: #16213e;
+            padding: 1rem;
+            border-right: 1px solid #0f3460;
+        }
+
+        .content {
+            flex: 1;
+            padding: 2rem;
+        }
+
+        .vault-list {
+            margin-bottom: 2rem;
+        }
+
+        .vault-list h3 {
+            color: #00d9ff;
+            margin-bottom: 1rem;
+            font-size: 1rem;
+        }
+
+        .vault-item {
+            background: #0f3460;
+            padding: 0.8rem;
+            border-radius: 5px;
+            margin-bottom: 0.5rem;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .vault-item:hover {
+            background: #1a4a7a;
+        }
+
+        .vault-item.active {
+            border-left: 3px solid #00d9ff;
+        }
+
+        .vault-name {
+            font-weight: 600;
+            margin-bottom: 0.3rem;
+        }
+
+        .vault-status {
+            font-size: 0.8rem;
+            color: #888;
+        }
+
+        .vault-status.mounted {
+            color: #4caf50;
+        }
+
+        .action-buttons {
+            margin-top: 2rem;
+        }
+
+        .btn {
+            width: 100%;
+            padding: 0.8rem;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: #00d9ff;
+            color: #1a1a2e;
+        }
+
+        .btn-primary:hover {
+            background: #00b8d4;
+        }
+
+        .btn-secondary {
+            background: #0f3460;
+            color: #e0e0e0;
+        }
+
+        .btn-secondary:hover {
+            background: #1a4a7a;
+        }
+
+        .btn-danger {
+            background: #d32f2f;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #b71c1c;
+        }
+
+        .file-browser {
+            background: #16213e;
+            border-radius: 8px;
+            padding: 1.5rem;
+        }
+
+        .file-browser h2 {
+            color: #00d9ff;
+            margin-bottom: 1rem;
+        }
+
+        .breadcrumb {
+            background: #0f3460;
+            padding: 0.8rem;
+            border-radius: 5px;
+            margin-bottom: 1rem;
+            font-size: 0.9rem;
+        }
+
+        .file-list {
+            background: #0f3460;
+            border-radius: 5px;
+            min-height: 400px;
+        }
+
+        .file-item {
+            display: flex;
+            align-items: center;
+            padding: 0.8rem 1rem;
+            border-bottom: 1px solid #1a4a7a;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .file-item:hover {
+            background: #1a4a7a;
+        }
+
+        .file-item:last-child {
+            border-bottom: none;
+        }
+
+        .file-icon {
+            margin-right: 1rem;
+            font-size: 1.2rem;
+        }
+
+        .file-name {
+            flex: 1;
+        }
+
+        .file-size {
+            color: #888;
+            font-size: 0.9rem;
+        }
+
+        .modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal.active {
+            display: flex;
+        }
+
+        .modal-content {
+            background: #16213e;
+            padding: 2rem;
+            border-radius: 10px;
+            width: 400px;
+            max-width: 90%;
+        }
+
+        .modal-content h3 {
+            color: #00d9ff;
+            margin-bottom: 1.5rem;
+        }
+
+        .form-group {
+            margin-bottom: 1rem;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-size: 0.9rem;
+        }
+
+        .form-group input, .form-group select {
+            width: 100%;
+            padding: 0.8rem;
+            border: 1px solid #0f3460;
+            border-radius: 5px;
+            background: #1a1a2e;
+            color: #e0e0e0;
+            font-size: 0.9rem;
+        }
+
+        .form-group input:focus, .form-group select:focus {
+            outline: none;
+            border-color: #00d9ff;
+        }
+
+        .modal-actions {
+            display: flex;
+            gap: 1rem;
+            margin-top: 1.5rem;
+        }
+
+        .modal-actions .btn {
+            flex: 1;
+        }
+
+        .toolbar {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .toolbar .btn {
+            width: auto;
+            padding: 0.5rem 1rem;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 3rem;
+            color: #888;
+        }
+
+        .empty-state h3 {
+            margin-bottom: 1rem;
+        }
+
+        .notification {
+            position: fixed;
+            top: 1rem;
+            right: 1rem;
+            padding: 1rem 1.5rem;
+            border-radius: 5px;
+            background: #4caf50;
+            color: white;
+            display: none;
+            z-index: 1000;
+        }
+
+        .notification.error {
+            background: #d32f2f;
+        }
+
+        .notification.active {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>AxiomVault</h1>
+        <div class="fuse-status" id="fuseStatus">Checking FUSE...</div>
+    </div>
+
+    <div class="main-container">
+        <div class="sidebar">
+            <div class="vault-list">
+                <h3>Open Vaults</h3>
+                <div id="vaultList">
+                    <div class="empty-state">
+                        <p>No vaults open</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="action-buttons">
+                <button class="btn btn-primary" onclick="showCreateVaultModal()">Create Vault</button>
+                <button class="btn btn-secondary" onclick="showUnlockVaultModal()">Unlock Vault</button>
+            </div>
+        </div>
+
+        <div class="content">
+            <div id="welcomeScreen" class="empty-state">
+                <h3>Welcome to AxiomVault</h3>
+                <p>Create or unlock a vault to get started</p>
+            </div>
+
+            <div id="fileBrowser" class="file-browser" style="display: none;">
+                <h2 id="currentVaultName">Vault</h2>
+
+                <div class="toolbar">
+                    <button class="btn btn-secondary" onclick="createNewFile()">New File</button>
+                    <button class="btn btn-secondary" onclick="createNewFolder()">New Folder</button>
+                    <button class="btn btn-primary" onclick="toggleMount()">Mount</button>
+                    <button class="btn btn-danger" onclick="lockCurrentVault()">Lock</button>
+                </div>
+
+                <div class="breadcrumb" id="breadcrumb">/</div>
+
+                <div class="file-list" id="fileList">
+                    <div class="empty-state">
+                        <p>Empty directory</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create Vault Modal -->
+    <div class="modal" id="createVaultModal">
+        <div class="modal-content">
+            <h3>Create New Vault</h3>
+            <div class="form-group">
+                <label>Vault Name</label>
+                <input type="text" id="newVaultName" placeholder="my-vault">
+            </div>
+            <div class="form-group">
+                <label>Password</label>
+                <input type="password" id="newVaultPassword">
+            </div>
+            <div class="form-group">
+                <label>Confirm Password</label>
+                <input type="password" id="newVaultPasswordConfirm">
+            </div>
+            <div class="form-group">
+                <label>Storage Provider</label>
+                <select id="newVaultProvider">
+                    <option value="memory">Local (Memory)</option>
+                    <option value="gdrive">Google Drive</option>
+                </select>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="closeModal('createVaultModal')">Cancel</button>
+                <button class="btn btn-primary" onclick="createVault()">Create</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Unlock Vault Modal -->
+    <div class="modal" id="unlockVaultModal">
+        <div class="modal-content">
+            <h3>Unlock Vault</h3>
+            <div class="form-group">
+                <label>Vault ID</label>
+                <input type="text" id="unlockVaultId" placeholder="my-vault">
+            </div>
+            <div class="form-group">
+                <label>Password</label>
+                <input type="password" id="unlockVaultPassword">
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="closeModal('unlockVaultModal')">Cancel</button>
+                <button class="btn btn-primary" onclick="unlockVault()">Unlock</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Mount Vault Modal -->
+    <div class="modal" id="mountVaultModal">
+        <div class="modal-content">
+            <h3>Mount Vault</h3>
+            <div class="form-group">
+                <label>Mount Point</label>
+                <input type="text" id="mountPoint" placeholder="/mnt/vault">
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="closeModal('mountVaultModal')">Cancel</button>
+                <button class="btn btn-primary" onclick="mountVault()">Mount</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notification -->
+    <div class="notification" id="notification"></div>
+
+    <script>
+        const { invoke } = window.__TAURI__.core;
+
+        let currentVaultId = null;
+        let currentPath = '/';
+        let openVaults = [];
+
+        // Initialize
+        async function init() {
+            await checkFuseStatus();
+            await refreshVaultList();
+        }
+
+        async function checkFuseStatus() {
+            try {
+                const info = await invoke('get_fuse_info');
+                document.getElementById('fuseStatus').textContent = info;
+            } catch (e) {
+                document.getElementById('fuseStatus').textContent = 'FUSE status unknown';
+            }
+        }
+
+        async function refreshVaultList() {
+            try {
+                openVaults = await invoke('list_vaults');
+                renderVaultList();
+            } catch (e) {
+                showNotification('Failed to load vaults: ' + e, true);
+            }
+        }
+
+        function renderVaultList() {
+            const container = document.getElementById('vaultList');
+            if (openVaults.length === 0) {
+                container.innerHTML = '<div class="empty-state"><p>No vaults open</p></div>';
+                return;
+            }
+
+            container.innerHTML = openVaults.map(vault => `
+                <div class="vault-item ${vault.id === currentVaultId ? 'active' : ''}"
+                     onclick="selectVault('${vault.id}')">
+                    <div class="vault-name">${vault.id}</div>
+                    <div class="vault-status ${vault.is_mounted ? 'mounted' : ''}">
+                        ${vault.is_mounted ? 'Mounted at ' + vault.mount_point : 'Unlocked'}
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        async function selectVault(id) {
+            currentVaultId = id;
+            currentPath = '/';
+            renderVaultList();
+            document.getElementById('welcomeScreen').style.display = 'none';
+            document.getElementById('fileBrowser').style.display = 'block';
+            document.getElementById('currentVaultName').textContent = id;
+            await refreshFiles();
+        }
+
+        async function refreshFiles() {
+            if (!currentVaultId) return;
+
+            document.getElementById('breadcrumb').textContent = currentPath;
+
+            try {
+                const files = await invoke('list_files', {
+                    id: currentVaultId,
+                    path: currentPath
+                });
+
+                const container = document.getElementById('fileList');
+                if (files.length === 0) {
+                    container.innerHTML = '<div class="empty-state"><p>Empty directory</p></div>';
+                    return;
+                }
+
+                let html = '';
+                if (currentPath !== '/') {
+                    html += `
+                        <div class="file-item" onclick="navigateUp()">
+                            <div class="file-icon">📁</div>
+                            <div class="file-name">..</div>
+                            <div class="file-size"></div>
+                        </div>
+                    `;
+                }
+
+                html += files.map(file => `
+                    <div class="file-item" onclick="itemClick('${file.path}', ${file.is_directory})">
+                        <div class="file-icon">${file.is_directory ? '📁' : '📄'}</div>
+                        <div class="file-name">${file.name}</div>
+                        <div class="file-size">${file.size ? formatSize(file.size) : ''}</div>
+                    </div>
+                `).join('');
+
+                container.innerHTML = html;
+            } catch (e) {
+                showNotification('Failed to list files: ' + e, true);
+            }
+        }
+
+        function itemClick(path, isDir) {
+            if (isDir) {
+                currentPath = path;
+                refreshFiles();
+            } else {
+                // TODO: Open file viewer/editor
+                showNotification('File: ' + path);
+            }
+        }
+
+        function navigateUp() {
+            const parts = currentPath.split('/').filter(p => p);
+            parts.pop();
+            currentPath = parts.length === 0 ? '/' : '/' + parts.join('/');
+            refreshFiles();
+        }
+
+        function formatSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            if (bytes < 1024 * 1024 * 1024) return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+            return (bytes / 1024 / 1024 / 1024).toFixed(1) + ' GB';
+        }
+
+        // Modal functions
+        function showCreateVaultModal() {
+            document.getElementById('createVaultModal').classList.add('active');
+        }
+
+        function showUnlockVaultModal() {
+            document.getElementById('unlockVaultModal').classList.add('active');
+        }
+
+        function closeModal(id) {
+            document.getElementById(id).classList.remove('active');
+        }
+
+        async function createVault() {
+            const name = document.getElementById('newVaultName').value;
+            const password = document.getElementById('newVaultPassword').value;
+            const confirm = document.getElementById('newVaultPasswordConfirm').value;
+            const provider = document.getElementById('newVaultProvider').value;
+
+            if (!name || !password) {
+                showNotification('Please fill in all fields', true);
+                return;
+            }
+
+            if (password !== confirm) {
+                showNotification('Passwords do not match', true);
+                return;
+            }
+
+            try {
+                await invoke('create_vault', {
+                    id: name,
+                    password: password,
+                    providerType: provider
+                });
+                closeModal('createVaultModal');
+                showNotification('Vault created successfully');
+                await refreshVaultList();
+                selectVault(name);
+            } catch (e) {
+                showNotification('Failed to create vault: ' + e, true);
+            }
+        }
+
+        async function unlockVault() {
+            const id = document.getElementById('unlockVaultId').value;
+            const password = document.getElementById('unlockVaultPassword').value;
+
+            if (!id || !password) {
+                showNotification('Please fill in all fields', true);
+                return;
+            }
+
+            try {
+                await invoke('unlock_vault', {
+                    id: id,
+                    password: password
+                });
+                closeModal('unlockVaultModal');
+                showNotification('Vault unlocked successfully');
+                await refreshVaultList();
+                selectVault(id);
+            } catch (e) {
+                showNotification('Failed to unlock vault: ' + e, true);
+            }
+        }
+
+        async function lockCurrentVault() {
+            if (!currentVaultId) return;
+
+            try {
+                await invoke('lock_vault', { id: currentVaultId });
+                showNotification('Vault locked');
+                currentVaultId = null;
+                document.getElementById('welcomeScreen').style.display = 'block';
+                document.getElementById('fileBrowser').style.display = 'none';
+                await refreshVaultList();
+            } catch (e) {
+                showNotification('Failed to lock vault: ' + e, true);
+            }
+        }
+
+        function toggleMount() {
+            const vault = openVaults.find(v => v.id === currentVaultId);
+            if (vault && vault.is_mounted) {
+                unmountCurrentVault();
+            } else {
+                document.getElementById('mountVaultModal').classList.add('active');
+            }
+        }
+
+        async function mountVault() {
+            const mountPoint = document.getElementById('mountPoint').value;
+            if (!mountPoint) {
+                showNotification('Please specify mount point', true);
+                return;
+            }
+
+            try {
+                await invoke('mount_vault', {
+                    id: currentVaultId,
+                    mountPoint: mountPoint
+                });
+                closeModal('mountVaultModal');
+                showNotification('Vault mounted at ' + mountPoint);
+                await refreshVaultList();
+            } catch (e) {
+                showNotification('Failed to mount vault: ' + e, true);
+            }
+        }
+
+        async function unmountCurrentVault() {
+            try {
+                await invoke('unmount_vault', { id: currentVaultId });
+                showNotification('Vault unmounted');
+                await refreshVaultList();
+            } catch (e) {
+                showNotification('Failed to unmount vault: ' + e, true);
+            }
+        }
+
+        async function createNewFile() {
+            const name = prompt('Enter file name:');
+            if (!name) return;
+
+            const path = currentPath === '/' ? '/' + name : currentPath + '/' + name;
+
+            try {
+                await invoke('create_file', {
+                    vaultId: currentVaultId,
+                    path: path,
+                    content: []
+                });
+                showNotification('File created');
+                await refreshFiles();
+            } catch (e) {
+                showNotification('Failed to create file: ' + e, true);
+            }
+        }
+
+        async function createNewFolder() {
+            const name = prompt('Enter folder name:');
+            if (!name) return;
+
+            const path = currentPath === '/' ? '/' + name : currentPath + '/' + name;
+
+            try {
+                await invoke('create_directory', {
+                    vaultId: currentVaultId,
+                    path: path
+                });
+                showNotification('Folder created');
+                await refreshFiles();
+            } catch (e) {
+                showNotification('Failed to create folder: ' + e, true);
+            }
+        }
+
+        function showNotification(message, isError = false) {
+            const notification = document.getElementById('notification');
+            notification.textContent = message;
+            notification.className = 'notification active' + (isError ? ' error' : '');
+            setTimeout(() => {
+                notification.classList.remove('active');
+            }, 3000);
+        }
+
+        // Initialize on load
+        window.addEventListener('DOMContentLoaded', init);
+    </script>
+</body>
+</html>

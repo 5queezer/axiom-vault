@@ -106,6 +106,7 @@ jobs:
           - axiomvault-vault
           - axiomvault-storage
           - axiomvault-sync
+          - axiomvault-fuse
           - axiom-ffi
           - axiomvault-cli
     steps:

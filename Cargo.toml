@@ -7,7 +7,9 @@ members = [
     "core/common",
     "core/sync",
     "core/ffi",
+    "core/fuse",
     "tools/cli",
+    # "clients/desktop/src-tauri", # Requires GTK3 dev libraries
 ]
 
 [workspace.package]
@@ -59,3 +61,11 @@ oauth2 = "4.4"
 url = "2.5"
 tokio-util = { version = "0.7", features = ["io"] }
 bytes = "1.5"
+
+# Database
+rusqlite = { version = "0.31", features = ["bundled"] }
+
+# Desktop
+tauri = { version = "2.0", features = [] }
+tauri-build = { version = "2.0", features = [] }
+fuser = "0.14"
