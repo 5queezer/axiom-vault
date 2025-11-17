@@ -11,7 +11,7 @@ use axiomvault_common::{VaultId, VaultPath};
 use axiomvault_crypto::KdfParams;
 use axiomvault_fuse::MountOptions;
 use axiomvault_fuse::mount::mount as mount_vault_fuse;
-use axiomvault_storage::MemoryProvider;
+use axiomvault_storage::{MemoryProvider, StorageProvider};
 use axiomvault_vault::{VaultConfig, VaultOperations, VaultSession};
 
 use crate::local_index::{IndexEntry, LocalIndex};
