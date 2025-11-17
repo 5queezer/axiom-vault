@@ -168,8 +168,31 @@ mkdir -p "$OUTPUT_DIR"
 # Build for iOS device (arm64)
 echo -e "${YELLOW}Building for iOS device (arm64)...${NC}"
 cd "$PROJECT_ROOT"
-# Use rustup run to explicitly use the stable toolchain where we installed targets
-rustup run stable cargo build --release --target $IOS_ARCH -p axiom-ffi
+
+# Diagnostic: show exactly what toolchain cargo will use
+echo -e "${YELLOW}Diagnosing toolchain setup...${NC}"
+echo "RUSTUP_TOOLCHAIN (before): ${RUSTUP_TOOLCHAIN:-not set}"
+export RUSTUP_TOOLCHAIN=stable
+echo "RUSTUP_TOOLCHAIN (after): $RUSTUP_TOOLCHAIN"
+echo "Which rustc: $(which rustc)"
+echo "Rustc version: $(rustc --version)"
+echo "Rustc sysroot: $(rustc --print sysroot)"
+echo "Cargo version: $(cargo --version)"
+
+# Verify this rustc has the target
+ACTUAL_SYSROOT=$(rustc --print sysroot)
+if [ ! -d "$ACTUAL_SYSROOT/lib/rustlib/$IOS_ARCH/lib" ]; then
+    echo -e "${RED}ERROR: The rustc being used doesn't have $IOS_ARCH target!${NC}"
+    echo "Expected sysroot: $SYSROOT"
+    echo "Actual sysroot: $ACTUAL_SYSROOT"
+    echo ""
+    echo "This means cargo is using a different rustc than expected."
+    exit 1
+fi
+ls "$ACTUAL_SYSROOT/lib/rustlib/$IOS_ARCH/lib"/libcore-*.rlib || echo "No libcore found!"
+
+# Set environment to force the toolchain
+cargo build --release --target $IOS_ARCH -p axiom-ffi
 
 if [ $? -ne 0 ]; then
     echo -e "${RED}Failed to build for iOS device${NC}"
@@ -178,7 +201,7 @@ fi
 
 # Build for iOS simulator (arm64)
 echo -e "${YELLOW}Building for iOS simulator (arm64)...${NC}"
-rustup run stable cargo build --release --target $IOS_SIM_ARCH -p axiom-ffi
+cargo build --release --target $IOS_SIM_ARCH -p axiom-ffi
 
 if [ $? -ne 0 ]; then
     echo -e "${RED}Failed to build for iOS simulator (arm64)${NC}"
@@ -187,7 +210,7 @@ fi
 
 # Build for iOS simulator (x86_64)
 echo -e "${YELLOW}Building for iOS simulator (x86_64)...${NC}"
-rustup run stable cargo build --release --target $IOS_SIM_X86 -p axiom-ffi
+cargo build --release --target $IOS_SIM_X86 -p axiom-ffi
 
 if [ $? -ne 0 ]; then
     echo -e "${RED}Failed to build for iOS simulator (x86_64)${NC}"
