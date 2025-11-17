@@ -1,5 +1,8 @@
 # AxiomVault
 
+> **Warning**
+> This project is in **early design phase** and is **not production ready**. APIs may change without notice, features may be incomplete, and there may be security vulnerabilities. Do not use for storing sensitive data in production environments.
+
 A cross-platform encrypted vault system with client-side encryption, independent of cloud provider trust. Built in Rust with support for Linux, macOS, iOS, and Android.
 
 ## Features
