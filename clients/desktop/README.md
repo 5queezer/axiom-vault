@@ -92,7 +92,44 @@ Note: Direct cargo builds may show cryptic errors if system dependencies are mis
 ```bash
 # Run the desktop application
 cargo run --package axiomvault-desktop
+
+# Or use the launcher script (handles library conflicts automatically)
+./run-desktop.sh
 ```
+
+### Troubleshooting: Library Conflicts with Conda
+
+If you see an error like:
+```
+symbol lookup error: /lib64/libjson-glib-1.0.so.0: undefined symbol: g_once_init_leave_pointer
+```
+
+This is caused by conda's GLib libraries conflicting with system libraries. Solutions:
+
+1. **Use the launcher script** (recommended):
+   ```bash
+   ./run-desktop.sh
+   ```
+
+2. **Deactivate conda** before running:
+   ```bash
+   conda deactivate
+   ./target/debug/axiomvault-desktop
+   ```
+
+3. **Force system libraries**:
+   ```bash
+   # Fedora/RHEL
+   LD_LIBRARY_PATH=/usr/lib64:$LD_LIBRARY_PATH ./target/debug/axiomvault-desktop
+
+   # Debian/Ubuntu
+   LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH ./target/debug/axiomvault-desktop
+   ```
+
+4. **Update conda's glib** (if you need conda active):
+   ```bash
+   conda update glib
+   ```
 
 ## Architecture
 
