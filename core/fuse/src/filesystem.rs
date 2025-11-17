@@ -19,6 +19,32 @@ use tracing::{debug, error, info};
 use axiomvault_common::{Result, VaultPath};
 use axiomvault_vault::{VaultOperations, VaultSession};
 
+/// Helper function to create FileAttr with common defaults.
+fn create_file_attr(ino: u64, is_dir: bool, size: u64) -> FileAttr {
+    let now = SystemTime::now();
+    FileAttr {
+        ino,
+        size,
+        blocks: (size + 511) / 512,
+        atime: now,
+        mtime: now,
+        ctime: now,
+        crtime: now,
+        kind: if is_dir {
+            FileType::Directory
+        } else {
+            FileType::RegularFile
+        },
+        perm: if is_dir { 0o755 } else { 0o644 },
+        nlink: if is_dir { 2 } else { 1 },
+        uid: unsafe { libc::getuid() },
+        gid: unsafe { libc::getgid() },
+        rdev: 0,
+        blksize: 4096,
+        flags: 0,
+    }
+}
+
 /// Inode number mapping to vault paths.
 struct InodeMap {
     path_to_inode: HashMap<String, u64>,
@@ -194,27 +220,7 @@ impl Filesystem for VaultFilesystem {
                 Ok((_, is_dir, size)) => {
                     let mut map = inodes.write().await;
                     let ino = map.get_or_create_inode(&child_path);
-                    let attr = FileAttr {
-                        ino,
-                        size: size.unwrap_or(0),
-                        blocks: (size.unwrap_or(0) + 511) / 512,
-                        atime: SystemTime::now(),
-                        mtime: SystemTime::now(),
-                        ctime: SystemTime::now(),
-                        crtime: SystemTime::now(),
-                        kind: if is_dir {
-                            FileType::Directory
-                        } else {
-                            FileType::RegularFile
-                        },
-                        perm: if is_dir { 0o755 } else { 0o644 },
-                        nlink: if is_dir { 2 } else { 1 },
-                        uid: unsafe { libc::getuid() },
-                        gid: unsafe { libc::getgid() },
-                        rdev: 0,
-                        blksize: 4096,
-                        flags: 0,
-                    };
+                    let attr = create_file_attr(ino, is_dir, size.unwrap_or(0));
                     reply.entry(&ttl, &attr, 0);
                 }
                 Err(e) => {
@@ -246,23 +252,7 @@ impl Filesystem for VaultFilesystem {
 
             if path_str == "/" {
                 // Root directory
-                let attr = FileAttr {
-                    ino: 1,
-                    size: 0,
-                    blocks: 0,
-                    atime: SystemTime::now(),
-                    mtime: SystemTime::now(),
-                    ctime: SystemTime::now(),
-                    crtime: SystemTime::now(),
-                    kind: FileType::Directory,
-                    perm: 0o755,
-                    nlink: 2,
-                    uid: unsafe { libc::getuid() },
-                    gid: unsafe { libc::getgid() },
-                    rdev: 0,
-                    blksize: 4096,
-                    flags: 0,
-                };
+                let attr = create_file_attr(1, true, 0);
                 reply.attr(&ttl, &attr);
                 return;
             }
@@ -285,27 +275,7 @@ impl Filesystem for VaultFilesystem {
 
             match ops.metadata(&path).await {
                 Ok((_, is_dir, size)) => {
-                    let attr = FileAttr {
-                        ino,
-                        size: size.unwrap_or(0),
-                        blocks: (size.unwrap_or(0) + 511) / 512,
-                        atime: SystemTime::now(),
-                        mtime: SystemTime::now(),
-                        ctime: SystemTime::now(),
-                        crtime: SystemTime::now(),
-                        kind: if is_dir {
-                            FileType::Directory
-                        } else {
-                            FileType::RegularFile
-                        },
-                        perm: if is_dir { 0o755 } else { 0o644 },
-                        nlink: if is_dir { 2 } else { 1 },
-                        uid: unsafe { libc::getuid() },
-                        gid: unsafe { libc::getgid() },
-                        rdev: 0,
-                        blksize: 4096,
-                        flags: 0,
-                    };
+                    let attr = create_file_attr(ino, is_dir, size.unwrap_or(0));
                     reply.attr(&ttl, &attr);
                 }
                 Err(e) => {
@@ -702,23 +672,7 @@ impl Filesystem for VaultFilesystem {
                 );
             }
 
-            let attr = FileAttr {
-                ino,
-                size: 0,
-                blocks: 0,
-                atime: SystemTime::now(),
-                mtime: SystemTime::now(),
-                ctime: SystemTime::now(),
-                crtime: SystemTime::now(),
-                kind: FileType::RegularFile,
-                perm: 0o644,
-                nlink: 1,
-                uid: unsafe { libc::getuid() },
-                gid: unsafe { libc::getgid() },
-                rdev: 0,
-                blksize: 4096,
-                flags: 0,
-            };
+            let attr = create_file_attr(ino, false, 0);
 
             reply.created(&ttl, &attr, 0, fh, 0);
         });
@@ -792,23 +746,7 @@ impl Filesystem for VaultFilesystem {
                 map.get_or_create_inode(&child_path)
             };
 
-            let attr = FileAttr {
-                ino,
-                size: 0,
-                blocks: 0,
-                atime: SystemTime::now(),
-                mtime: SystemTime::now(),
-                ctime: SystemTime::now(),
-                crtime: SystemTime::now(),
-                kind: FileType::Directory,
-                perm: 0o755,
-                nlink: 2,
-                uid: unsafe { libc::getuid() },
-                gid: unsafe { libc::getgid() },
-                rdev: 0,
-                blksize: 4096,
-                flags: 0,
-            };
+            let attr = create_file_attr(ino, true, 0);
 
             reply.entry(&ttl, &attr, 0);
         });

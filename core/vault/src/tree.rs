@@ -48,8 +48,13 @@ pub struct TreeNode {
 }
 
 impl TreeNode {
-    /// Create a new file node.
-    pub fn new_file(name: impl Into<String>, encrypted_name: impl Into<String>, size: u64) -> Self {
+    /// Internal helper to create a new node with common initialization.
+    fn new_internal(
+        name: impl Into<String>,
+        encrypted_name: impl Into<String>,
+        node_type: NodeType,
+        size: Option<u64>,
+    ) -> Self {
         let name = name.into();
         let now = Utc::now();
 
@@ -58,8 +63,8 @@ impl TreeNode {
             metadata: NodeMetadata {
                 name: name.clone(),
                 encrypted_name: encrypted_name.into(),
-                node_type: NodeType::File,
-                size: Some(size),
+                node_type,
+                size,
                 created_at: now,
                 modified_at: now,
                 etag: Some(Uuid::new_v4().to_string()),
@@ -68,24 +73,14 @@ impl TreeNode {
         }
     }
 
+    /// Create a new file node.
+    pub fn new_file(name: impl Into<String>, encrypted_name: impl Into<String>, size: u64) -> Self {
+        Self::new_internal(name, encrypted_name, NodeType::File, Some(size))
+    }
+
     /// Create a new directory node.
     pub fn new_directory(name: impl Into<String>, encrypted_name: impl Into<String>) -> Self {
-        let name = name.into();
-        let now = Utc::now();
-
-        Self {
-            id: Uuid::new_v4().to_string(),
-            metadata: NodeMetadata {
-                name: name.clone(),
-                encrypted_name: encrypted_name.into(),
-                node_type: NodeType::Directory,
-                size: None,
-                created_at: now,
-                modified_at: now,
-                etag: Some(Uuid::new_v4().to_string()),
-            },
-            children: HashMap::new(),
-        }
+        Self::new_internal(name, encrypted_name, NodeType::Directory, None)
     }
 
     /// Check if this is a file.

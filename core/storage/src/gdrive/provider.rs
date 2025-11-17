@@ -179,15 +179,14 @@ impl GDriveProvider {
         let mut cache = self.path_cache.write().await;
         cache.insert(path.to_string(), file_id.to_string());
     }
-}
 
-#[async_trait]
-impl StorageProvider for GDriveProvider {
-    fn name(&self) -> &str {
-        "gdrive"
-    }
-
-    async fn upload(&self, path: &VaultPath, data: Vec<u8>) -> Result<Metadata> {
+    /// Internal helper for uploading data with optional resumable upload support.
+    async fn upload_data(
+        &self,
+        path: &VaultPath,
+        data: Vec<u8>,
+        use_resumable_for_large: bool,
+    ) -> Result<Metadata> {
         let (parent_id, name) = self.resolve_parent(path).await?;
 
         // Check if file already exists
@@ -196,6 +195,13 @@ impl StorageProvider for GDriveProvider {
         let file = if let Some(existing_file) = existing {
             // Update existing file
             self.client.update_file(&existing_file.id, data).await?
+        } else if use_resumable_for_large && data.len() as u64 > 5 * 1024 * 1024 {
+            // Use resumable upload for large files (>5MB)
+            let total_size = data.len() as u64;
+            let data_stream = stream::once(async { Ok(data) });
+            self.client
+                .upload_resumable(&name, &parent_id, Box::pin(data_stream), total_size)
+                .await?
         } else {
             // Create new file
             self.client.upload_simple(&name, &parent_id, data).await?
@@ -205,6 +211,17 @@ impl StorageProvider for GDriveProvider {
         self.cache_path(path, &file.id).await;
 
         Ok(self.to_metadata(file, path))
+    }
+}
+
+#[async_trait]
+impl StorageProvider for GDriveProvider {
+    fn name(&self) -> &str {
+        "gdrive"
+    }
+
+    async fn upload(&self, path: &VaultPath, data: Vec<u8>) -> Result<Metadata> {
+        self.upload_data(path, data, false).await
     }
 
     async fn upload_stream(&self, path: &VaultPath, stream: ByteStream) -> Result<Metadata> {
@@ -217,29 +234,7 @@ impl StorageProvider for GDriveProvider {
             data.extend_from_slice(&chunk?);
         }
 
-        let total_size = data.len() as u64;
-        let (parent_id, name) = self.resolve_parent(path).await?;
-
-        // Check if file already exists
-        let existing = self.client.find_file(&name, &parent_id).await?;
-
-        let file = if let Some(existing_file) = existing {
-            // Update existing file
-            self.client.update_file(&existing_file.id, data).await?
-        } else if total_size > 5 * 1024 * 1024 {
-            // Use resumable upload for large files (>5MB)
-            let data_stream = stream::once(async { Ok(data) });
-            self.client
-                .upload_resumable(&name, &parent_id, Box::pin(data_stream), total_size)
-                .await?
-        } else {
-            // Use simple upload for small files
-            self.client.upload_simple(&name, &parent_id, data).await?
-        };
-
-        self.cache_path(path, &file.id).await;
-
-        Ok(self.to_metadata(file, path))
+        self.upload_data(path, data, true).await
     }
 
     async fn download(&self, path: &VaultPath) -> Result<Vec<u8>> {

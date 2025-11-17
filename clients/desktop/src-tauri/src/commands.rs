@@ -49,6 +49,58 @@ impl From<axiomvault_common::Error> for ErrorResponse {
     }
 }
 
+/// Helper to create provider, session, and register vault in state.
+async fn setup_vault_session(
+    state: &Arc<AppState>,
+    id: &str,
+    config: VaultConfig,
+    password: &str,
+    init_index_metadata: bool,
+) -> Result<VaultInfo, String> {
+    let provider_type = config.provider_type.clone();
+
+    // For now, use memory provider for testing
+    let provider = Arc::new(MemoryProvider::new());
+    provider
+        .create_dir(&VaultPath::parse("/d").unwrap())
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let session =
+        VaultSession::unlock(config, password.as_bytes(), provider).map_err(|e| e.to_string())?;
+
+    // Open local index
+    let index_path = state.data_dir.join(format!("{}.db", id));
+    let index = LocalIndex::open(&index_path).map_err(|e| e.to_string())?;
+
+    if init_index_metadata {
+        index
+            .set_metadata("vault_id", id)
+            .map_err(|e| e.to_string())?;
+    }
+
+    let open_vault = OpenVault {
+        session: Arc::new(session),
+        index: Arc::new(index),
+        config_path: state.data_dir.join(format!("{}.json", id)),
+        mount_handle: None,
+    };
+
+    let vault_info = VaultInfo {
+        id: id.to_string(),
+        provider_type,
+        is_mounted: false,
+        mount_point: None,
+    };
+
+    {
+        let mut vaults = state.vaults.write().await;
+        vaults.insert(id.to_string(), open_vault);
+    }
+
+    Ok(vault_info)
+}
+
 /// Create a new vault.
 #[tauri::command]
 pub async fn create_vault(
@@ -71,39 +123,7 @@ pub async fn create_vault(
     )
     .map_err(|e| e.to_string())?;
 
-    // For now, use memory provider for testing
-    let provider = Arc::new(MemoryProvider::new());
-    provider
-        .create_dir(&VaultPath::parse("/d").unwrap())
-        .await
-        .map_err(|e| e.to_string())?;
-
-    let session =
-        VaultSession::unlock(config, password.as_bytes(), provider).map_err(|e| e.to_string())?;
-
-    // Create local index
-    let index_path = state.data_dir.join(format!("{}.db", id));
-    let index = LocalIndex::open(&index_path).map_err(|e| e.to_string())?;
-    index.set_metadata("vault_id", &id).map_err(|e| e.to_string())?;
-
-    let open_vault = OpenVault {
-        session: Arc::new(session),
-        index: Arc::new(index),
-        config_path: state.data_dir.join(format!("{}.json", id)),
-        mount_handle: None,
-    };
-
-    let vault_info = VaultInfo {
-        id: id.clone(),
-        provider_type,
-        is_mounted: false,
-        mount_point: None,
-    };
-
-    {
-        let mut vaults = state.vaults.write().await;
-        vaults.insert(id, open_vault);
-    }
+    let vault_info = setup_vault_session(&state, &id, config, &password, true).await?;
 
     info!("Vault created successfully");
     Ok(vault_info)
@@ -127,39 +147,7 @@ pub async fn unlock_vault(
     let config_data = std::fs::read_to_string(&config_path).map_err(|e| e.to_string())?;
     let config: VaultConfig = serde_json::from_str(&config_data).map_err(|e| e.to_string())?;
 
-    let provider_type = config.provider_type.clone();
-
-    // For now, use memory provider
-    let provider = Arc::new(MemoryProvider::new());
-    provider
-        .create_dir(&VaultPath::parse("/d").unwrap())
-        .await
-        .map_err(|e| e.to_string())?;
-
-    let session =
-        VaultSession::unlock(config, password.as_bytes(), provider).map_err(|e| e.to_string())?;
-
-    let index_path = state.data_dir.join(format!("{}.db", id));
-    let index = LocalIndex::open(&index_path).map_err(|e| e.to_string())?;
-
-    let open_vault = OpenVault {
-        session: Arc::new(session),
-        index: Arc::new(index),
-        config_path,
-        mount_handle: None,
-    };
-
-    let vault_info = VaultInfo {
-        id: id.clone(),
-        provider_type,
-        is_mounted: false,
-        mount_point: None,
-    };
-
-    {
-        let mut vaults = state.vaults.write().await;
-        vaults.insert(id, open_vault);
-    }
+    let vault_info = setup_vault_session(&state, &id, config, &password, false).await?;
 
     info!("Vault unlocked successfully");
     Ok(vault_info)

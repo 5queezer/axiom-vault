@@ -66,19 +66,7 @@ impl<P: StorageProvider + 'static> SyncEngine<P> {
         staging_dir: impl AsRef<std::path::Path>,
         config: SyncConfig,
     ) -> Result<Self> {
-        let staging = StagingArea::new(staging_dir).await?;
-        let retry_config = RetryConfig::new(config.max_retries);
-        let conflict_resolver = ConflictResolver::new(config.conflict_strategy);
-
-        Ok(Self {
-            provider: Arc::new(provider),
-            state: Arc::new(RwLock::new(SyncState::new())),
-            staging: Arc::new(RwLock::new(staging)),
-            conflict_resolver: Arc::new(conflict_resolver),
-            retry_executor: Arc::new(RetryExecutor::new(retry_config)),
-            scheduler: None,
-            config,
-        })
+        Self::from_arc(Arc::new(provider), staging_dir, config).await
     }
 }
 

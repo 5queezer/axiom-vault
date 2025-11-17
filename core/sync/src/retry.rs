@@ -103,42 +103,8 @@ impl RetryExecutor {
         F: Fn() -> Fut,
         Fut: Future<Output = Result<T>>,
     {
-        let mut attempt = 0;
-        let mut last_error: Option<Error> = None;
-
-        loop {
-            match operation().await {
-                Ok(result) => {
-                    if attempt > 0 {
-                        debug!("Operation succeeded after {} retries", attempt);
-                    }
-                    return Ok(result);
-                }
-                Err(err) => {
-                    if !self.is_retryable(&err) {
-                        return Err(err);
-                    }
-
-                    attempt += 1;
-                    if attempt > self.config.max_retries {
-                        warn!(
-                            "Operation failed after {} attempts: {}",
-                            self.config.max_retries, err
-                        );
-                        return Err(last_error.unwrap_or(err));
-                    }
-
-                    let delay = self.config.delay_for_attempt(attempt - 1);
-                    warn!(
-                        "Attempt {} failed: {}. Retrying in {:?}...",
-                        attempt, err, delay
-                    );
-
-                    last_error = Some(err);
-                    sleep(delay).await;
-                }
-            }
-        }
+        self.execute_with_condition(operation, |err| self.is_retryable(err))
+            .await
     }
 
     /// Execute with a custom retry condition.
