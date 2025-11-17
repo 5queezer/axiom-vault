@@ -112,12 +112,17 @@ axiomvault sync-configure --vault-path ~/my-vault \
 ## Desktop Application
 
 ```bash
-# Build and run desktop GUI
-cargo run --package axiomvault-desktop
+# Build desktop GUI (with dependency check)
+make desktop
+
+# Or use cargo directly
+cargo build --package axiomvault-desktop
 
 # With FUSE support
 cargo build --package axiomvault-desktop --features axiomvault-fuse/fuse
 ```
+
+See `make help` for all available build targets.
 
 ## CLI Reference
 
