@@ -62,35 +62,68 @@ echo -e "${YELLOW}Installing iOS Rust targets...${NC}"
 # Use --force-non-host to ensure we can install cross-compilation targets
 rustup toolchain install stable --no-self-update 2>/dev/null || true
 
-# Force reinstall rust-std components to ensure they're actually available
-# This fixes issues where targets appear "up to date" but std library is missing
-echo -e "${YELLOW}Installing rust-std for iOS targets...${NC}"
+# Get the sysroot for verification
+SYSROOT=$(rustup run stable rustc --print sysroot)
+echo "Rust sysroot: $SYSROOT"
 
-# Remove and re-add targets to force a fresh install if they're corrupted
-# First try to add them normally
-rustup target add --toolchain stable $IOS_ARCH $IOS_SIM_ARCH $IOS_SIM_X86
-if [ $? -ne 0 ]; then
-    echo -e "${YELLOW}Attempting to reinstall targets...${NC}"
-    # Remove them first (ignore errors if not installed)
+# Function to check if a target has the actual library files (not just the directory)
+check_target_libs() {
+    local target=$1
+    local lib_dir="$SYSROOT/lib/rustlib/$target/lib"
+    if [ ! -d "$lib_dir" ] || [ -z "$(ls -A "$lib_dir" 2>/dev/null)" ]; then
+        return 1
+    fi
+    # Check for core library specifically
+    if ! ls "$lib_dir"/libcore-*.rlib >/dev/null 2>&1; then
+        return 1
+    fi
+    return 0
+}
+
+# Check if targets need reinstalling (directories exist but libraries are missing)
+NEED_REINSTALL=false
+for target in $IOS_ARCH $IOS_SIM_ARCH $IOS_SIM_X86; do
+    if ! check_target_libs "$target"; then
+        echo -e "${YELLOW}Target $target libraries are missing or incomplete${NC}"
+        NEED_REINSTALL=true
+    fi
+done
+
+if [ "$NEED_REINSTALL" = true ]; then
+    echo -e "${YELLOW}Force reinstalling iOS targets to fix missing libraries...${NC}"
+    # Remove all iOS targets first
     rustup target remove --toolchain stable $IOS_ARCH 2>/dev/null || true
     rustup target remove --toolchain stable $IOS_SIM_ARCH 2>/dev/null || true
     rustup target remove --toolchain stable $IOS_SIM_X86 2>/dev/null || true
+
+    # Small delay to ensure cleanup is complete
+    sleep 1
+
     # Now add them fresh
+    echo -e "${YELLOW}Downloading and installing $IOS_ARCH...${NC}"
     rustup target add --toolchain stable $IOS_ARCH
     if [ $? -ne 0 ]; then
         echo -e "${RED}Failed to install rust-std for $IOS_ARCH${NC}"
         exit 1
     fi
+
+    echo -e "${YELLOW}Downloading and installing $IOS_SIM_ARCH...${NC}"
     rustup target add --toolchain stable $IOS_SIM_ARCH
     if [ $? -ne 0 ]; then
         echo -e "${RED}Failed to install rust-std for $IOS_SIM_ARCH${NC}"
         exit 1
     fi
+
+    echo -e "${YELLOW}Downloading and installing $IOS_SIM_X86...${NC}"
     rustup target add --toolchain stable $IOS_SIM_X86
     if [ $? -ne 0 ]; then
         echo -e "${RED}Failed to install rust-std for $IOS_SIM_X86${NC}"
         exit 1
     fi
+else
+    # Just ensure they're added (will be quick if already present)
+    echo -e "${YELLOW}Installing rust-std for iOS targets...${NC}"
+    rustup target add --toolchain stable $IOS_ARCH $IOS_SIM_ARCH $IOS_SIM_X86
 fi
 
 # Verify targets are installed for the stable toolchain
@@ -111,16 +144,23 @@ if ! rustup target list --toolchain stable --installed | grep -q "$IOS_SIM_X86";
     exit 1
 fi
 
-# Additional verification: check that the sysroot actually contains the target libraries
-SYSROOT=$(rustup run stable rustc --print sysroot)
-if [ ! -d "$SYSROOT/lib/rustlib/$IOS_ARCH" ]; then
-    echo -e "${RED}Error: Standard library for $IOS_ARCH not found in sysroot${NC}"
-    echo "Sysroot: $SYSROOT"
-    echo "Try running: rustup toolchain uninstall stable && rustup toolchain install stable"
-    exit 1
-fi
+# Final verification: ensure the actual library files exist
+echo -e "${YELLOW}Verifying standard library files exist...${NC}"
+for target in $IOS_ARCH $IOS_SIM_ARCH $IOS_SIM_X86; do
+    if ! check_target_libs "$target"; then
+        echo -e "${RED}Error: Standard library files for $target are missing${NC}"
+        echo "Library directory: $SYSROOT/lib/rustlib/$target/lib"
+        echo ""
+        echo "This appears to be a corrupted rustup installation."
+        echo "Try running these commands:"
+        echo "  rustup toolchain uninstall stable"
+        echo "  rustup toolchain install stable"
+        echo "  rustup target add --toolchain stable $IOS_ARCH $IOS_SIM_ARCH $IOS_SIM_X86"
+        exit 1
+    fi
+done
 
-echo -e "${GREEN}All iOS targets verified${NC}"
+echo -e "${GREEN}All iOS targets verified with library files present${NC}"
 
 # Create output directory
 mkdir -p "$OUTPUT_DIR"
