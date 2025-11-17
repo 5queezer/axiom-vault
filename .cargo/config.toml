@@ -1,0 +1,16 @@
+# Cargo configuration for AxiomVault
+# This file configures linker settings for proper system library discovery
+
+[target.x86_64-unknown-linux-gnu]
+# Tell the linker where to find system libraries
+# This is needed because lld doesn't search standard paths by default
+rustflags = [
+    "-C", "link-arg=-L/usr/lib64",
+    "-C", "link-arg=-L/usr/lib",
+    "-C", "link-arg=-L/lib64",
+    "-C", "link-arg=-L/lib",
+]
+
+[env]
+# Also set LIBRARY_PATH as a fallback
+LIBRARY_PATH = { value = "/usr/lib64:/usr/lib:/lib64:/lib", force = true }
