@@ -191,12 +191,7 @@ fi
 
 # Verify rustup's cargo uses the correct toolchain
 echo -e "${YELLOW}Using rustup's cargo: $RUSTUP_CARGO${NC}"
-CARGO_SYSROOT=$("$RUSTUP_CARGO" +stable rustc -- --print sysroot 2>/dev/null)
-echo "Cargo's rustc sysroot: $CARGO_SYSROOT"
-
-if [ "$CARGO_SYSROOT" != "$SYSROOT" ]; then
-    echo -e "${YELLOW}Note: Cargo sysroot differs from expected, but using +stable should work${NC}"
-fi
+echo "Expected sysroot: $SYSROOT"
 
 # Build for iOS device (arm64)
 echo -e "${YELLOW}Building for iOS device (arm64)...${NC}"
