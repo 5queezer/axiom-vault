@@ -5,6 +5,7 @@
 use rusqlite::{params, Connection, Result as SqliteResult};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+use std::sync::Mutex;
 use tracing::{debug, info};
 
 /// Represents a cached vault entry.
@@ -20,7 +21,7 @@ pub struct IndexEntry {
 
 /// Local index manager using SQLite.
 pub struct LocalIndex {
-    conn: Connection,
+    conn: Mutex<Connection>,
 }
 
 impl LocalIndex {
@@ -56,7 +57,9 @@ impl LocalIndex {
         )?;
 
         info!("Local index opened successfully");
-        Ok(Self { conn })
+        Ok(Self {
+            conn: Mutex::new(conn),
+        })
     }
 
     /// Create an in-memory index (for testing).
@@ -67,7 +70,13 @@ impl LocalIndex {
     /// Insert or update an entry in the index.
     pub fn upsert_entry(&self, entry: &IndexEntry) -> SqliteResult<()> {
         debug!("Upserting entry: {}", entry.path);
-        self.conn.execute(
+        let conn = self.conn.lock().map_err(|_| {
+            rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
+                Some("Failed to acquire lock".to_string()),
+            )
+        })?;
+        conn.execute(
             r#"
             INSERT OR REPLACE INTO vault_entries
             (path, encrypted_name, is_directory, size, modified_at, etag)
@@ -87,7 +96,13 @@ impl LocalIndex {
 
     /// Get an entry by path.
     pub fn get_entry(&self, path: &str) -> SqliteResult<Option<IndexEntry>> {
-        let mut stmt = self.conn.prepare(
+        let conn = self.conn.lock().map_err(|_| {
+            rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
+                Some("Failed to acquire lock".to_string()),
+            )
+        })?;
+        let mut stmt = conn.prepare(
             r#"
             SELECT path, encrypted_name, is_directory, size, modified_at, etag
             FROM vault_entries WHERE path = ?1
@@ -127,7 +142,13 @@ impl LocalIndex {
             format!("{}/", parent_path)
         };
 
-        let mut stmt = self.conn.prepare(
+        let conn = self.conn.lock().map_err(|_| {
+            rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
+                Some("Failed to acquire lock".to_string()),
+            )
+        })?;
+        let mut stmt = conn.prepare(
             r#"
             SELECT path, encrypted_name, is_directory, size, modified_at, etag
             FROM vault_entries
@@ -165,7 +186,13 @@ impl LocalIndex {
     /// Delete an entry by path.
     pub fn delete_entry(&self, path: &str) -> SqliteResult<()> {
         debug!("Deleting entry: {}", path);
-        self.conn.execute(
+        let conn = self.conn.lock().map_err(|_| {
+            rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
+                Some("Failed to acquire lock".to_string()),
+            )
+        })?;
+        conn.execute(
             "DELETE FROM vault_entries WHERE path = ?1",
             params![path],
         )?;
@@ -175,7 +202,13 @@ impl LocalIndex {
     /// Delete all entries under a path (recursively).
     pub fn delete_tree(&self, path: &str) -> SqliteResult<()> {
         debug!("Deleting tree: {}", path);
-        self.conn.execute(
+        let conn = self.conn.lock().map_err(|_| {
+            rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
+                Some("Failed to acquire lock".to_string()),
+            )
+        })?;
+        conn.execute(
             "DELETE FROM vault_entries WHERE path = ?1 OR path LIKE ?2",
             params![path, format!("{}/%", path)],
         )?;
@@ -185,15 +218,25 @@ impl LocalIndex {
     /// Clear all entries.
     pub fn clear(&self) -> SqliteResult<()> {
         info!("Clearing local index");
-        self.conn.execute("DELETE FROM vault_entries", [])?;
+        let conn = self.conn.lock().map_err(|_| {
+            rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
+                Some("Failed to acquire lock".to_string()),
+            )
+        })?;
+        conn.execute("DELETE FROM vault_entries", [])?;
         Ok(())
     }
 
     /// Get vault metadata value.
     pub fn get_metadata(&self, key: &str) -> SqliteResult<Option<String>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT value FROM vault_metadata WHERE key = ?1")?;
+        let conn = self.conn.lock().map_err(|_| {
+            rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
+                Some("Failed to acquire lock".to_string()),
+            )
+        })?;
+        let mut stmt = conn.prepare("SELECT value FROM vault_metadata WHERE key = ?1")?;
 
         match stmt.query_row([key], |row| row.get(0)) {
             Ok(v) => Ok(Some(v)),
@@ -204,7 +247,13 @@ impl LocalIndex {
 
     /// Set vault metadata value.
     pub fn set_metadata(&self, key: &str, value: &str) -> SqliteResult<()> {
-        self.conn.execute(
+        let conn = self.conn.lock().map_err(|_| {
+            rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
+                Some("Failed to acquire lock".to_string()),
+            )
+        })?;
+        conn.execute(
             "INSERT OR REPLACE INTO vault_metadata (key, value) VALUES (?1, ?2)",
             params![key, value],
         )?;
@@ -213,9 +262,13 @@ impl LocalIndex {
 
     /// Get total entry count.
     pub fn count(&self) -> SqliteResult<u64> {
-        let count: i64 = self
-            .conn
-            .query_row("SELECT COUNT(*) FROM vault_entries", [], |row| row.get(0))?;
+        let conn = self.conn.lock().map_err(|_| {
+            rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
+                Some("Failed to acquire lock".to_string()),
+            )
+        })?;
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM vault_entries", [], |row| row.get(0))?;
         Ok(count as u64)
     }
 }
