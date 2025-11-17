@@ -128,7 +128,8 @@ mkdir -p "$OUTPUT_DIR"
 # Build for iOS device (arm64)
 echo -e "${YELLOW}Building for iOS device (arm64)...${NC}"
 cd "$PROJECT_ROOT"
-cargo build --release --target $IOS_ARCH -p axiom-ffi
+# Use cargo +stable to explicitly use the stable toolchain where we installed targets
+cargo +stable build --release --target $IOS_ARCH -p axiom-ffi
 
 if [ $? -ne 0 ]; then
     echo -e "${RED}Failed to build for iOS device${NC}"
@@ -137,7 +138,7 @@ fi
 
 # Build for iOS simulator (arm64)
 echo -e "${YELLOW}Building for iOS simulator (arm64)...${NC}"
-cargo build --release --target $IOS_SIM_ARCH -p axiom-ffi
+cargo +stable build --release --target $IOS_SIM_ARCH -p axiom-ffi
 
 if [ $? -ne 0 ]; then
     echo -e "${RED}Failed to build for iOS simulator (arm64)${NC}"
@@ -146,7 +147,7 @@ fi
 
 # Build for iOS simulator (x86_64)
 echo -e "${YELLOW}Building for iOS simulator (x86_64)...${NC}"
-cargo build --release --target $IOS_SIM_X86 -p axiom-ffi
+cargo +stable build --release --target $IOS_SIM_X86 -p axiom-ffi
 
 if [ $? -ne 0 ]; then
     echo -e "${RED}Failed to build for iOS simulator (x86_64)${NC}"
