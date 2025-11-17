@@ -165,34 +165,43 @@ echo -e "${GREEN}All iOS targets verified with library files present${NC}"
 # Create output directory
 mkdir -p "$OUTPUT_DIR"
 
+# Check for Homebrew Rust which conflicts with rustup
+if command -v rustc &> /dev/null; then
+    SYSTEM_RUSTC=$(which rustc)
+    if [[ "$SYSTEM_RUSTC" == */homebrew/* ]] || [[ "$SYSTEM_RUSTC" == */Cellar/* ]]; then
+        echo -e "${RED}WARNING: Homebrew Rust detected at $SYSTEM_RUSTC${NC}"
+        echo "Homebrew's Rust conflicts with rustup and doesn't support iOS targets."
+        echo ""
+        echo "To fix this, either:"
+        echo "  1. Uninstall Homebrew Rust: brew uninstall rust"
+        echo "  2. Or ensure rustup's binaries come first in PATH"
+        echo ""
+        echo "Attempting to use rustup's cargo directly..."
+    fi
+fi
+
+# Get the path to rustup's cargo for the stable toolchain
+# This bypasses any PATH issues with Homebrew's rust
+RUSTUP_CARGO="$HOME/.cargo/bin/cargo"
+if [ ! -f "$RUSTUP_CARGO" ]; then
+    echo -e "${RED}Error: rustup's cargo not found at $RUSTUP_CARGO${NC}"
+    echo "Please ensure rustup is properly installed"
+    exit 1
+fi
+
+# Verify rustup's cargo uses the correct toolchain
+echo -e "${YELLOW}Using rustup's cargo: $RUSTUP_CARGO${NC}"
+CARGO_SYSROOT=$("$RUSTUP_CARGO" +stable rustc -- --print sysroot 2>/dev/null)
+echo "Cargo's rustc sysroot: $CARGO_SYSROOT"
+
+if [ "$CARGO_SYSROOT" != "$SYSROOT" ]; then
+    echo -e "${YELLOW}Note: Cargo sysroot differs from expected, but using +stable should work${NC}"
+fi
+
 # Build for iOS device (arm64)
 echo -e "${YELLOW}Building for iOS device (arm64)...${NC}"
 cd "$PROJECT_ROOT"
-
-# Diagnostic: show exactly what toolchain cargo will use
-echo -e "${YELLOW}Diagnosing toolchain setup...${NC}"
-echo "RUSTUP_TOOLCHAIN (before): ${RUSTUP_TOOLCHAIN:-not set}"
-export RUSTUP_TOOLCHAIN=stable
-echo "RUSTUP_TOOLCHAIN (after): $RUSTUP_TOOLCHAIN"
-echo "Which rustc: $(which rustc)"
-echo "Rustc version: $(rustc --version)"
-echo "Rustc sysroot: $(rustc --print sysroot)"
-echo "Cargo version: $(cargo --version)"
-
-# Verify this rustc has the target
-ACTUAL_SYSROOT=$(rustc --print sysroot)
-if [ ! -d "$ACTUAL_SYSROOT/lib/rustlib/$IOS_ARCH/lib" ]; then
-    echo -e "${RED}ERROR: The rustc being used doesn't have $IOS_ARCH target!${NC}"
-    echo "Expected sysroot: $SYSROOT"
-    echo "Actual sysroot: $ACTUAL_SYSROOT"
-    echo ""
-    echo "This means cargo is using a different rustc than expected."
-    exit 1
-fi
-ls "$ACTUAL_SYSROOT/lib/rustlib/$IOS_ARCH/lib"/libcore-*.rlib || echo "No libcore found!"
-
-# Set environment to force the toolchain
-cargo build --release --target $IOS_ARCH -p axiom-ffi
+"$RUSTUP_CARGO" +stable build --release --target $IOS_ARCH -p axiom-ffi
 
 if [ $? -ne 0 ]; then
     echo -e "${RED}Failed to build for iOS device${NC}"
@@ -201,7 +210,7 @@ fi
 
 # Build for iOS simulator (arm64)
 echo -e "${YELLOW}Building for iOS simulator (arm64)...${NC}"
-cargo build --release --target $IOS_SIM_ARCH -p axiom-ffi
+"$RUSTUP_CARGO" +stable build --release --target $IOS_SIM_ARCH -p axiom-ffi
 
 if [ $? -ne 0 ]; then
     echo -e "${RED}Failed to build for iOS simulator (arm64)${NC}"
@@ -210,7 +219,7 @@ fi
 
 # Build for iOS simulator (x86_64)
 echo -e "${YELLOW}Building for iOS simulator (x86_64)...${NC}"
-cargo build --release --target $IOS_SIM_X86 -p axiom-ffi
+"$RUSTUP_CARGO" +stable build --release --target $IOS_SIM_X86 -p axiom-ffi
 
 if [ $? -ne 0 ]; then
     echo -e "${RED}Failed to build for iOS simulator (x86_64)${NC}"
