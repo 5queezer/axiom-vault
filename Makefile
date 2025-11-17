@@ -36,30 +36,30 @@ core:
 
 # Check desktop dependencies (Linux only)
 check-desktop-deps:
-ifeq ($(shell uname),Linux)
-	@echo "Checking system dependencies for desktop build..."
-	@command -v pkg-config >/dev/null 2>&1 || { \
-		echo ""; \
-		echo "ERROR: pkg-config not found"; \
-		echo "Install with: sudo apt-get install pkg-config"; \
-		echo ""; \
-		exit 1; \
-	}
-	@pkg-config --exists gtk+-3.0 2>/dev/null || { \
-		echo ""; \
-		echo "ERROR: GTK 3 not found"; \
-		echo "Install with: sudo apt-get install libgtk-3-dev"; \
-		echo ""; \
-		exit 1; \
-	}
-	@pkg-config --exists webkit2gtk-4.1 2>/dev/null || { \
-		echo ""; \
-		echo "ERROR: WebKit2GTK 4.1 not found"; \
-		echo "Install with: sudo apt-get install libwebkit2gtk-4.1-dev"; \
-		echo ""; \
-		exit 1; \
-	}
-	@echo "✓ All required dependencies found"
-else
-	@echo "Skipping dependency check (not Linux)"
-endif
+	@if [ "$$(uname)" = "Linux" ]; then \
+		echo "Checking system dependencies for desktop build..."; \
+		command -v pkg-config >/dev/null 2>&1 || { \
+			echo ""; \
+			echo "ERROR: pkg-config not found"; \
+			echo "Install with: sudo apt-get install pkg-config"; \
+			echo ""; \
+			exit 1; \
+		}; \
+		pkg-config --exists gtk+-3.0 2>/dev/null || { \
+			echo ""; \
+			echo "ERROR: GTK 3 not found"; \
+			echo "Install with: sudo apt-get install libgtk-3-dev"; \
+			echo ""; \
+			exit 1; \
+		}; \
+		pkg-config --exists webkit2gtk-4.1 2>/dev/null || { \
+			echo ""; \
+			echo "ERROR: WebKit2GTK 4.1 not found"; \
+			echo "Install with: sudo apt-get install libwebkit2gtk-4.1-dev"; \
+			echo ""; \
+			exit 1; \
+		}; \
+		echo "✓ All required dependencies found"; \
+	else \
+		echo "Skipping dependency check (not Linux)"; \
+	fi
