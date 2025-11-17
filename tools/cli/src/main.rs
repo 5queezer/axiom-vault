@@ -672,9 +672,9 @@ async fn cmd_gdrive_auth(
     let (auth_url, csrf_token) = auth_manager.authorization_url();
 
     // Start local HTTP server to capture the OAuth callback
-    let listener = TcpListener::bind("127.0.0.1:8080")
-        .await
-        .context("Failed to start local server on port 8080. Is another process using this port?")?;
+    let listener = TcpListener::bind("127.0.0.1:8080").await.context(
+        "Failed to start local server on port 8080. Is another process using this port?",
+    )?;
 
     println!("Starting Google Drive authentication...");
     println!();

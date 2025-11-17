@@ -9,8 +9,8 @@ use tracing::{error, info};
 
 use axiomvault_common::{VaultId, VaultPath};
 use axiomvault_crypto::KdfParams;
-use axiomvault_fuse::MountOptions;
 use axiomvault_fuse::mount::mount as mount_vault_fuse;
+use axiomvault_fuse::MountOptions;
 use axiomvault_storage::{MemoryProvider, StorageProvider};
 use axiomvault_vault::{VaultConfig, VaultOperations, VaultSession};
 
@@ -290,7 +290,10 @@ pub async fn create_file(
         modified_at: chrono::Utc::now().timestamp(),
         etag: None,
     };
-    vault.index.upsert_entry(&entry).map_err(|e| e.to_string())?;
+    vault
+        .index
+        .upsert_entry(&entry)
+        .map_err(|e| e.to_string())?;
 
     info!("File created successfully");
     Ok(())
@@ -309,9 +312,7 @@ pub async fn read_file(
     let ops = VaultOperations::new(&vault.session).map_err(|e| e.to_string())?;
     let vault_path = VaultPath::parse(&path).map_err(|e| e.to_string())?;
 
-    ops.read_file(&vault_path)
-        .await
-        .map_err(|e| e.to_string())
+    ops.read_file(&vault_path).await.map_err(|e| e.to_string())
 }
 
 /// Update a file's content.
@@ -390,7 +391,10 @@ pub async fn create_directory(
         modified_at: chrono::Utc::now().timestamp(),
         etag: None,
     };
-    vault.index.upsert_entry(&entry).map_err(|e| e.to_string())?;
+    vault
+        .index
+        .upsert_entry(&entry)
+        .map_err(|e| e.to_string())?;
 
     info!("Directory created successfully");
     Ok(())

@@ -192,10 +192,7 @@ impl LocalIndex {
                 Some("Failed to acquire lock".to_string()),
             )
         })?;
-        conn.execute(
-            "DELETE FROM vault_entries WHERE path = ?1",
-            params![path],
-        )?;
+        conn.execute("DELETE FROM vault_entries WHERE path = ?1", params![path])?;
         Ok(())
     }
 
@@ -268,7 +265,8 @@ impl LocalIndex {
                 Some("Failed to acquire lock".to_string()),
             )
         })?;
-        let count: i64 = conn.query_row("SELECT COUNT(*) FROM vault_entries", [], |row| row.get(0))?;
+        let count: i64 =
+            conn.query_row("SELECT COUNT(*) FROM vault_entries", [], |row| row.get(0))?;
         Ok(count as u64)
     }
 }
