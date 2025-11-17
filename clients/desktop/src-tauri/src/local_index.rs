@@ -156,7 +156,7 @@ impl LocalIndex {
             "#,
         )?;
 
-        let entries = stmt.query_map([format!("{}%", prefix), parent_path], |row| {
+        let entries = stmt.query_map([format!("{}%", prefix), parent_path.to_string()], |row| {
             let path: String = row.get(0)?;
             // Check if it's a direct child (no additional slashes after prefix)
             let relative = &path[prefix.len()..];
