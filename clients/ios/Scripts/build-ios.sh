@@ -46,44 +46,50 @@ if ! command -v cargo &> /dev/null; then
     exit 1
 fi
 
-# Install iOS targets if not present
-echo -e "${YELLOW}Installing iOS Rust targets...${NC}"
-rustup target add $IOS_ARCH
+# Ensure we're using the stable toolchain as specified in rust-toolchain.toml
+# and install iOS targets for that specific toolchain
+echo -e "${YELLOW}Installing iOS Rust targets for stable toolchain...${NC}"
+
+# First, ensure the stable toolchain is installed
+rustup toolchain install stable --no-self-update 2>/dev/null || true
+
+# Install targets explicitly for the stable toolchain (which matches rust-toolchain.toml)
+rustup target add --toolchain stable $IOS_ARCH
 if [ $? -ne 0 ]; then
-    echo -e "${RED}Failed to install $IOS_ARCH target${NC}"
+    echo -e "${RED}Failed to install $IOS_ARCH target for stable toolchain${NC}"
     exit 1
 fi
 
-rustup target add $IOS_SIM_ARCH
+rustup target add --toolchain stable $IOS_SIM_ARCH
 if [ $? -ne 0 ]; then
-    echo -e "${RED}Failed to install $IOS_SIM_ARCH target${NC}"
+    echo -e "${RED}Failed to install $IOS_SIM_ARCH target for stable toolchain${NC}"
     exit 1
 fi
 
-rustup target add $IOS_SIM_X86
+rustup target add --toolchain stable $IOS_SIM_X86
 if [ $? -ne 0 ]; then
-    echo -e "${RED}Failed to install $IOS_SIM_X86 target${NC}"
+    echo -e "${RED}Failed to install $IOS_SIM_X86 target for stable toolchain${NC}"
     exit 1
 fi
 
-# Verify targets are installed
-echo -e "${YELLOW}Verifying Rust targets are available...${NC}"
-if ! rustup target list --installed | grep -q "$IOS_ARCH"; then
-    echo -e "${RED}Error: $IOS_ARCH target is not installed${NC}"
-    echo "Try running: rustup target add $IOS_ARCH"
+# Verify targets are installed for the stable toolchain
+echo -e "${YELLOW}Verifying Rust targets are available for stable toolchain...${NC}"
+if ! rustup target list --toolchain stable --installed | grep -q "$IOS_ARCH"; then
+    echo -e "${RED}Error: $IOS_ARCH target is not installed for stable toolchain${NC}"
+    echo "Try running: rustup target add --toolchain stable $IOS_ARCH"
     exit 1
 fi
-if ! rustup target list --installed | grep -q "$IOS_SIM_ARCH"; then
-    echo -e "${RED}Error: $IOS_SIM_ARCH target is not installed${NC}"
-    echo "Try running: rustup target add $IOS_SIM_ARCH"
+if ! rustup target list --toolchain stable --installed | grep -q "$IOS_SIM_ARCH"; then
+    echo -e "${RED}Error: $IOS_SIM_ARCH target is not installed for stable toolchain${NC}"
+    echo "Try running: rustup target add --toolchain stable $IOS_SIM_ARCH"
     exit 1
 fi
-if ! rustup target list --installed | grep -q "$IOS_SIM_X86"; then
-    echo -e "${RED}Error: $IOS_SIM_X86 target is not installed${NC}"
-    echo "Try running: rustup target add $IOS_SIM_X86"
+if ! rustup target list --toolchain stable --installed | grep -q "$IOS_SIM_X86"; then
+    echo -e "${RED}Error: $IOS_SIM_X86 target is not installed for stable toolchain${NC}"
+    echo "Try running: rustup target add --toolchain stable $IOS_SIM_X86"
     exit 1
 fi
-echo -e "${GREEN}All iOS targets verified${NC}"
+echo -e "${GREEN}All iOS targets verified for stable toolchain${NC}"
 
 # Create output directory
 mkdir -p "$OUTPUT_DIR"
