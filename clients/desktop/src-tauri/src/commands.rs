@@ -9,7 +9,8 @@ use tracing::{error, info};
 
 use axiomvault_common::{VaultId, VaultPath};
 use axiomvault_crypto::KdfParams;
-use axiomvault_fuse::{mount, MountOptions};
+use axiomvault_fuse::MountOptions;
+use axiomvault_fuse::mount::mount as mount_vault_fuse;
 use axiomvault_storage::MemoryProvider;
 use axiomvault_vault::{VaultConfig, VaultOperations, VaultSession};
 
@@ -196,7 +197,7 @@ pub async fn mount_vault(
     let vault = vaults.get_mut(&id).ok_or("Vault not open")?;
 
     let runtime_handle = tokio::runtime::Handle::current();
-    let mount_handle = mount(
+    let mount_handle = mount_vault_fuse(
         vault.session.clone(),
         &mount_path,
         MountOptions::default(),
