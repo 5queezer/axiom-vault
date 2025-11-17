@@ -46,52 +46,157 @@ if ! command -v cargo &> /dev/null; then
     exit 1
 fi
 
-# Install iOS targets if not present
+# Determine which toolchain cargo will use based on rust-toolchain.toml
+cd "$PROJECT_ROOT"
+ACTIVE_TOOLCHAIN=$(rustup show active-toolchain 2>/dev/null | cut -d' ' -f1)
+if [ -z "$ACTIVE_TOOLCHAIN" ]; then
+    ACTIVE_TOOLCHAIN="stable"
+fi
+echo -e "${YELLOW}Active toolchain for project: $ACTIVE_TOOLCHAIN${NC}"
+
+# Ensure we're using the stable toolchain as specified in rust-toolchain.toml
+# and install iOS targets for that specific toolchain
 echo -e "${YELLOW}Installing iOS Rust targets...${NC}"
-rustup target add $IOS_ARCH
-if [ $? -ne 0 ]; then
-    echo -e "${RED}Failed to install $IOS_ARCH target${NC}"
-    exit 1
+
+# First, ensure the stable toolchain is installed with all components
+# Use --force-non-host to ensure we can install cross-compilation targets
+rustup toolchain install stable --no-self-update 2>/dev/null || true
+
+# Get the sysroot for verification
+SYSROOT=$(rustup run stable rustc --print sysroot)
+echo "Rust sysroot: $SYSROOT"
+
+# Function to check if a target has the actual library files (not just the directory)
+check_target_libs() {
+    local target=$1
+    local lib_dir="$SYSROOT/lib/rustlib/$target/lib"
+    if [ ! -d "$lib_dir" ] || [ -z "$(ls -A "$lib_dir" 2>/dev/null)" ]; then
+        return 1
+    fi
+    # Check for core library specifically
+    if ! ls "$lib_dir"/libcore-*.rlib >/dev/null 2>&1; then
+        return 1
+    fi
+    return 0
+}
+
+# Check if targets need reinstalling (directories exist but libraries are missing)
+NEED_REINSTALL=false
+for target in $IOS_ARCH $IOS_SIM_ARCH $IOS_SIM_X86; do
+    if ! check_target_libs "$target"; then
+        echo -e "${YELLOW}Target $target libraries are missing or incomplete${NC}"
+        NEED_REINSTALL=true
+    fi
+done
+
+if [ "$NEED_REINSTALL" = true ]; then
+    echo -e "${YELLOW}Force reinstalling iOS targets to fix missing libraries...${NC}"
+    # Remove all iOS targets first
+    rustup target remove --toolchain stable $IOS_ARCH 2>/dev/null || true
+    rustup target remove --toolchain stable $IOS_SIM_ARCH 2>/dev/null || true
+    rustup target remove --toolchain stable $IOS_SIM_X86 2>/dev/null || true
+
+    # Small delay to ensure cleanup is complete
+    sleep 1
+
+    # Now add them fresh
+    echo -e "${YELLOW}Downloading and installing $IOS_ARCH...${NC}"
+    rustup target add --toolchain stable $IOS_ARCH
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}Failed to install rust-std for $IOS_ARCH${NC}"
+        exit 1
+    fi
+
+    echo -e "${YELLOW}Downloading and installing $IOS_SIM_ARCH...${NC}"
+    rustup target add --toolchain stable $IOS_SIM_ARCH
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}Failed to install rust-std for $IOS_SIM_ARCH${NC}"
+        exit 1
+    fi
+
+    echo -e "${YELLOW}Downloading and installing $IOS_SIM_X86...${NC}"
+    rustup target add --toolchain stable $IOS_SIM_X86
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}Failed to install rust-std for $IOS_SIM_X86${NC}"
+        exit 1
+    fi
+else
+    # Just ensure they're added (will be quick if already present)
+    echo -e "${YELLOW}Installing rust-std for iOS targets...${NC}"
+    rustup target add --toolchain stable $IOS_ARCH $IOS_SIM_ARCH $IOS_SIM_X86
 fi
 
-rustup target add $IOS_SIM_ARCH
-if [ $? -ne 0 ]; then
-    echo -e "${RED}Failed to install $IOS_SIM_ARCH target${NC}"
-    exit 1
-fi
-
-rustup target add $IOS_SIM_X86
-if [ $? -ne 0 ]; then
-    echo -e "${RED}Failed to install $IOS_SIM_X86 target${NC}"
-    exit 1
-fi
-
-# Verify targets are installed
+# Verify targets are installed for the stable toolchain
 echo -e "${YELLOW}Verifying Rust targets are available...${NC}"
-if ! rustup target list --installed | grep -q "$IOS_ARCH"; then
-    echo -e "${RED}Error: $IOS_ARCH target is not installed${NC}"
-    echo "Try running: rustup target add $IOS_ARCH"
+if ! rustup target list --toolchain stable --installed | grep -q "$IOS_ARCH"; then
+    echo -e "${RED}Error: $IOS_ARCH target is not installed for stable toolchain${NC}"
+    echo "Try running: rustup target add --toolchain stable $IOS_ARCH"
     exit 1
 fi
-if ! rustup target list --installed | grep -q "$IOS_SIM_ARCH"; then
-    echo -e "${RED}Error: $IOS_SIM_ARCH target is not installed${NC}"
-    echo "Try running: rustup target add $IOS_SIM_ARCH"
+if ! rustup target list --toolchain stable --installed | grep -q "$IOS_SIM_ARCH"; then
+    echo -e "${RED}Error: $IOS_SIM_ARCH target is not installed for stable toolchain${NC}"
+    echo "Try running: rustup target add --toolchain stable $IOS_SIM_ARCH"
     exit 1
 fi
-if ! rustup target list --installed | grep -q "$IOS_SIM_X86"; then
-    echo -e "${RED}Error: $IOS_SIM_X86 target is not installed${NC}"
-    echo "Try running: rustup target add $IOS_SIM_X86"
+if ! rustup target list --toolchain stable --installed | grep -q "$IOS_SIM_X86"; then
+    echo -e "${RED}Error: $IOS_SIM_X86 target is not installed for stable toolchain${NC}"
+    echo "Try running: rustup target add --toolchain stable $IOS_SIM_X86"
     exit 1
 fi
-echo -e "${GREEN}All iOS targets verified${NC}"
+
+# Final verification: ensure the actual library files exist
+echo -e "${YELLOW}Verifying standard library files exist...${NC}"
+for target in $IOS_ARCH $IOS_SIM_ARCH $IOS_SIM_X86; do
+    if ! check_target_libs "$target"; then
+        echo -e "${RED}Error: Standard library files for $target are missing${NC}"
+        echo "Library directory: $SYSROOT/lib/rustlib/$target/lib"
+        echo ""
+        echo "This appears to be a corrupted rustup installation."
+        echo "Try running these commands:"
+        echo "  rustup toolchain uninstall stable"
+        echo "  rustup toolchain install stable"
+        echo "  rustup target add --toolchain stable $IOS_ARCH $IOS_SIM_ARCH $IOS_SIM_X86"
+        exit 1
+    fi
+done
+
+echo -e "${GREEN}All iOS targets verified with library files present${NC}"
 
 # Create output directory
 mkdir -p "$OUTPUT_DIR"
 
+# Check for Homebrew Rust which conflicts with rustup
+if command -v rustc &> /dev/null; then
+    SYSTEM_RUSTC=$(which rustc)
+    if [[ "$SYSTEM_RUSTC" == */homebrew/* ]] || [[ "$SYSTEM_RUSTC" == */Cellar/* ]]; then
+        echo -e "${RED}WARNING: Homebrew Rust detected at $SYSTEM_RUSTC${NC}"
+        echo "Homebrew's Rust conflicts with rustup and doesn't support iOS targets."
+        echo ""
+        echo "To fix this, either:"
+        echo "  1. Uninstall Homebrew Rust: brew uninstall rust"
+        echo "  2. Or ensure rustup's binaries come first in PATH"
+        echo ""
+        echo "Attempting to use rustup's cargo directly..."
+    fi
+fi
+
+# Get the path to rustup's cargo for the stable toolchain
+# This bypasses any PATH issues with Homebrew's rust
+RUSTUP_CARGO="$HOME/.cargo/bin/cargo"
+if [ ! -f "$RUSTUP_CARGO" ]; then
+    echo -e "${RED}Error: rustup's cargo not found at $RUSTUP_CARGO${NC}"
+    echo "Please ensure rustup is properly installed"
+    exit 1
+fi
+
+# Verify rustup's cargo uses the correct toolchain
+echo -e "${YELLOW}Using rustup's cargo: $RUSTUP_CARGO${NC}"
+echo "Expected sysroot: $SYSROOT"
+
 # Build for iOS device (arm64)
 echo -e "${YELLOW}Building for iOS device (arm64)...${NC}"
 cd "$PROJECT_ROOT"
-cargo build --release --target $IOS_ARCH -p axiom-ffi
+"$RUSTUP_CARGO" +stable build --release --target $IOS_ARCH -p axiom-ffi
 
 if [ $? -ne 0 ]; then
     echo -e "${RED}Failed to build for iOS device${NC}"
@@ -100,7 +205,7 @@ fi
 
 # Build for iOS simulator (arm64)
 echo -e "${YELLOW}Building for iOS simulator (arm64)...${NC}"
-cargo build --release --target $IOS_SIM_ARCH -p axiom-ffi
+"$RUSTUP_CARGO" +stable build --release --target $IOS_SIM_ARCH -p axiom-ffi
 
 if [ $? -ne 0 ]; then
     echo -e "${RED}Failed to build for iOS simulator (arm64)${NC}"
@@ -109,7 +214,7 @@ fi
 
 # Build for iOS simulator (x86_64)
 echo -e "${YELLOW}Building for iOS simulator (x86_64)...${NC}"
-cargo build --release --target $IOS_SIM_X86 -p axiom-ffi
+"$RUSTUP_CARGO" +stable build --release --target $IOS_SIM_X86 -p axiom-ffi
 
 if [ $? -ne 0 ]; then
     echo -e "${RED}Failed to build for iOS simulator (x86_64)${NC}"
