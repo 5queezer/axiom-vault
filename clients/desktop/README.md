@@ -51,6 +51,23 @@ brew install --cask macfuse
 
 ## Building
 
+### Check Prerequisites
+
+Before building, verify that all required system dependencies are installed:
+
+```bash
+# Run the dependency checker
+./clients/desktop/check-deps.sh
+
+# Or from the desktop directory
+cd clients/desktop
+./check-deps.sh
+```
+
+This script will list missing dependencies and provide installation instructions for your distribution.
+
+### Build Commands
+
 ```bash
 # Build without FUSE support
 cargo build --package axiomvault-desktop
@@ -62,6 +79,17 @@ cargo build --package axiomvault-desktop --features axiomvault-fuse/fuse
 cd clients/desktop/src-tauri
 cargo build
 ```
+
+### Common Build Errors
+
+**"pkg-config exited with status code 1"** or **"system library not found"**
+- Missing system development libraries (GTK3, WebKit, etc.)
+- Run `./check-deps.sh` to see what's missing
+- Install the required packages for your distribution (see System Requirements above)
+
+**"90 previous errors"**
+- This usually indicates missing GTK/WebKit system dependencies, not code errors
+- The compiler reports multiple errors because many crates depend on the same missing libraries
 
 ## Running
 
