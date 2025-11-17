@@ -112,7 +112,7 @@ if ! rustup target list --toolchain stable --installed | grep -q "$IOS_SIM_X86";
 fi
 
 # Additional verification: check that the sysroot actually contains the target libraries
-SYSROOT=$(rustc --print sysroot --toolchain stable)
+SYSROOT=$(rustup run stable rustc --print sysroot)
 if [ ! -d "$SYSROOT/lib/rustlib/$IOS_ARCH" ]; then
     echo -e "${RED}Error: Standard library for $IOS_ARCH not found in sysroot${NC}"
     echo "Sysroot: $SYSROOT"
