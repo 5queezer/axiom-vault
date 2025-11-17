@@ -48,9 +48,42 @@ fi
 
 # Install iOS targets if not present
 echo -e "${YELLOW}Installing iOS Rust targets...${NC}"
-rustup target add $IOS_ARCH 2>/dev/null || true
-rustup target add $IOS_SIM_ARCH 2>/dev/null || true
-rustup target add $IOS_SIM_X86 2>/dev/null || true
+rustup target add $IOS_ARCH
+if [ $? -ne 0 ]; then
+    echo -e "${RED}Failed to install $IOS_ARCH target${NC}"
+    exit 1
+fi
+
+rustup target add $IOS_SIM_ARCH
+if [ $? -ne 0 ]; then
+    echo -e "${RED}Failed to install $IOS_SIM_ARCH target${NC}"
+    exit 1
+fi
+
+rustup target add $IOS_SIM_X86
+if [ $? -ne 0 ]; then
+    echo -e "${RED}Failed to install $IOS_SIM_X86 target${NC}"
+    exit 1
+fi
+
+# Verify targets are installed
+echo -e "${YELLOW}Verifying Rust targets are available...${NC}"
+if ! rustup target list --installed | grep -q "$IOS_ARCH"; then
+    echo -e "${RED}Error: $IOS_ARCH target is not installed${NC}"
+    echo "Try running: rustup target add $IOS_ARCH"
+    exit 1
+fi
+if ! rustup target list --installed | grep -q "$IOS_SIM_ARCH"; then
+    echo -e "${RED}Error: $IOS_SIM_ARCH target is not installed${NC}"
+    echo "Try running: rustup target add $IOS_SIM_ARCH"
+    exit 1
+fi
+if ! rustup target list --installed | grep -q "$IOS_SIM_X86"; then
+    echo -e "${RED}Error: $IOS_SIM_X86 target is not installed${NC}"
+    echo "Try running: rustup target add $IOS_SIM_X86"
+    exit 1
+fi
+echo -e "${GREEN}All iOS targets verified${NC}"
 
 # Create output directory
 mkdir -p "$OUTPUT_DIR"
