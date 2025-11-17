@@ -51,22 +51,31 @@ brew install --cask macfuse
 
 ## Building
 
-### Check Prerequisites
+### Using Make (Recommended)
 
-Before building, verify that all required system dependencies are installed:
+The project includes a Makefile that checks dependencies before building:
 
 ```bash
-# Run the dependency checker
-./clients/desktop/check-deps.sh
+# Build desktop client (checks dependencies first)
+make desktop
 
-# Or from the desktop directory
-cd clients/desktop
-./check-deps.sh
+# Build in release mode
+make desktop-release
+
+# Just check if dependencies are installed
+make check-desktop-deps
 ```
 
-This script will list missing dependencies and provide installation instructions for your distribution.
+If dependencies are missing, you'll see a clear error:
 
-### Build Commands
+```
+Checking system dependencies for desktop build...
+
+ERROR: GTK 3 not found
+Install with: sudo apt-get install libgtk-3-dev
+```
+
+### Using Cargo Directly
 
 ```bash
 # Build without FUSE support
@@ -74,22 +83,9 @@ cargo build --package axiomvault-desktop
 
 # Build with FUSE support (requires libfuse3-dev)
 cargo build --package axiomvault-desktop --features axiomvault-fuse/fuse
-
-# Development build
-cd clients/desktop/src-tauri
-cargo build
 ```
 
-### Common Build Errors
-
-**"pkg-config exited with status code 1"** or **"system library not found"**
-- Missing system development libraries (GTK3, WebKit, etc.)
-- Run `./check-deps.sh` to see what's missing
-- Install the required packages for your distribution (see System Requirements above)
-
-**"90 previous errors"**
-- This usually indicates missing GTK/WebKit system dependencies, not code errors
-- The compiler reports multiple errors because many crates depend on the same missing libraries
+Note: Direct cargo builds may show cryptic errors if system dependencies are missing. Use `make check-desktop-deps` first to verify.
 
 ## Running
 
