@@ -64,23 +64,33 @@ rustup toolchain install stable --no-self-update 2>/dev/null || true
 
 # Force reinstall rust-std components to ensure they're actually available
 # This fixes issues where targets appear "up to date" but std library is missing
-echo -e "${YELLOW}Force reinstalling rust-std for iOS targets...${NC}"
-rustup component add rust-std --toolchain stable --target $IOS_ARCH --force
-if [ $? -ne 0 ]; then
-    echo -e "${RED}Failed to install rust-std for $IOS_ARCH${NC}"
-    exit 1
-fi
+echo -e "${YELLOW}Installing rust-std for iOS targets...${NC}"
 
-rustup component add rust-std --toolchain stable --target $IOS_SIM_ARCH --force
+# Remove and re-add targets to force a fresh install if they're corrupted
+# First try to add them normally
+rustup target add --toolchain stable $IOS_ARCH $IOS_SIM_ARCH $IOS_SIM_X86
 if [ $? -ne 0 ]; then
-    echo -e "${RED}Failed to install rust-std for $IOS_SIM_ARCH${NC}"
-    exit 1
-fi
-
-rustup component add rust-std --toolchain stable --target $IOS_SIM_X86 --force
-if [ $? -ne 0 ]; then
-    echo -e "${RED}Failed to install rust-std for $IOS_SIM_X86${NC}"
-    exit 1
+    echo -e "${YELLOW}Attempting to reinstall targets...${NC}"
+    # Remove them first (ignore errors if not installed)
+    rustup target remove --toolchain stable $IOS_ARCH 2>/dev/null || true
+    rustup target remove --toolchain stable $IOS_SIM_ARCH 2>/dev/null || true
+    rustup target remove --toolchain stable $IOS_SIM_X86 2>/dev/null || true
+    # Now add them fresh
+    rustup target add --toolchain stable $IOS_ARCH
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}Failed to install rust-std for $IOS_ARCH${NC}"
+        exit 1
+    fi
+    rustup target add --toolchain stable $IOS_SIM_ARCH
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}Failed to install rust-std for $IOS_SIM_ARCH${NC}"
+        exit 1
+    fi
+    rustup target add --toolchain stable $IOS_SIM_X86
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}Failed to install rust-std for $IOS_SIM_X86${NC}"
+        exit 1
+    fi
 fi
 
 # Verify targets are installed for the stable toolchain
