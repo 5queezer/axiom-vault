@@ -9,7 +9,7 @@ members = [
     "core/ffi",
     "core/fuse",
     "tools/cli",
-    # "clients/desktop/src-tauri", # Requires GTK3 dev libraries
+    "clients/desktop/src-tauri",
 ]
 
 [workspace.package]
