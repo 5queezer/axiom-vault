@@ -46,34 +46,45 @@ if ! command -v cargo &> /dev/null; then
     exit 1
 fi
 
+# Determine which toolchain cargo will use based on rust-toolchain.toml
+cd "$PROJECT_ROOT"
+ACTIVE_TOOLCHAIN=$(rustup show active-toolchain 2>/dev/null | cut -d' ' -f1)
+if [ -z "$ACTIVE_TOOLCHAIN" ]; then
+    ACTIVE_TOOLCHAIN="stable"
+fi
+echo -e "${YELLOW}Active toolchain for project: $ACTIVE_TOOLCHAIN${NC}"
+
 # Ensure we're using the stable toolchain as specified in rust-toolchain.toml
 # and install iOS targets for that specific toolchain
-echo -e "${YELLOW}Installing iOS Rust targets for stable toolchain...${NC}"
+echo -e "${YELLOW}Installing iOS Rust targets...${NC}"
 
-# First, ensure the stable toolchain is installed
+# First, ensure the stable toolchain is installed with all components
+# Use --force-non-host to ensure we can install cross-compilation targets
 rustup toolchain install stable --no-self-update 2>/dev/null || true
 
-# Install targets explicitly for the stable toolchain (which matches rust-toolchain.toml)
-rustup target add --toolchain stable $IOS_ARCH
+# Force reinstall rust-std components to ensure they're actually available
+# This fixes issues where targets appear "up to date" but std library is missing
+echo -e "${YELLOW}Force reinstalling rust-std for iOS targets...${NC}"
+rustup component add rust-std --toolchain stable --target $IOS_ARCH --force
 if [ $? -ne 0 ]; then
-    echo -e "${RED}Failed to install $IOS_ARCH target for stable toolchain${NC}"
+    echo -e "${RED}Failed to install rust-std for $IOS_ARCH${NC}"
     exit 1
 fi
 
-rustup target add --toolchain stable $IOS_SIM_ARCH
+rustup component add rust-std --toolchain stable --target $IOS_SIM_ARCH --force
 if [ $? -ne 0 ]; then
-    echo -e "${RED}Failed to install $IOS_SIM_ARCH target for stable toolchain${NC}"
+    echo -e "${RED}Failed to install rust-std for $IOS_SIM_ARCH${NC}"
     exit 1
 fi
 
-rustup target add --toolchain stable $IOS_SIM_X86
+rustup component add rust-std --toolchain stable --target $IOS_SIM_X86 --force
 if [ $? -ne 0 ]; then
-    echo -e "${RED}Failed to install $IOS_SIM_X86 target for stable toolchain${NC}"
+    echo -e "${RED}Failed to install rust-std for $IOS_SIM_X86${NC}"
     exit 1
 fi
 
 # Verify targets are installed for the stable toolchain
-echo -e "${YELLOW}Verifying Rust targets are available for stable toolchain...${NC}"
+echo -e "${YELLOW}Verifying Rust targets are available...${NC}"
 if ! rustup target list --toolchain stable --installed | grep -q "$IOS_ARCH"; then
     echo -e "${RED}Error: $IOS_ARCH target is not installed for stable toolchain${NC}"
     echo "Try running: rustup target add --toolchain stable $IOS_ARCH"
@@ -89,7 +100,17 @@ if ! rustup target list --toolchain stable --installed | grep -q "$IOS_SIM_X86";
     echo "Try running: rustup target add --toolchain stable $IOS_SIM_X86"
     exit 1
 fi
-echo -e "${GREEN}All iOS targets verified for stable toolchain${NC}"
+
+# Additional verification: check that the sysroot actually contains the target libraries
+SYSROOT=$(rustc --print sysroot --toolchain stable)
+if [ ! -d "$SYSROOT/lib/rustlib/$IOS_ARCH" ]; then
+    echo -e "${RED}Error: Standard library for $IOS_ARCH not found in sysroot${NC}"
+    echo "Sysroot: $SYSROOT"
+    echo "Try running: rustup toolchain uninstall stable && rustup toolchain install stable"
+    exit 1
+fi
+
+echo -e "${GREEN}All iOS targets verified${NC}"
 
 # Create output directory
 mkdir -p "$OUTPUT_DIR"
