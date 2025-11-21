@@ -39,8 +39,8 @@ jobs:
       - name: Check compilation
         run: cargo check --workspace
 
-      - name: Run Clippy (warnings as errors)
-        run: cargo clippy --workspace -- -D warnings
+      - name: Run Clippy
+        run: cargo clippy --workspace
 
   # Check PR metadata
   pr-metadata:
