@@ -292,9 +292,7 @@ mod tests {
 
         session.change_password(old_password, new_password).unwrap();
 
-        // Verify new password works
         assert!(session.config().verify_password(new_password).unwrap());
-        // Old password should not work
         assert!(!session.config().verify_password(old_password).unwrap());
     }
 }
