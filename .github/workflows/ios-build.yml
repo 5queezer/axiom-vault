@@ -83,7 +83,7 @@ jobs:
           lipo -info artifacts/ios-simulator/libaxiom_vault.a
 
       - name: Upload iOS libraries
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: ios-rust-libraries
           path: artifacts/
@@ -179,7 +179,7 @@ jobs:
           cat AxiomVaultCore.xcframework/Info.plist
 
       - name: Upload XCFramework
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: AxiomVaultCore-xcframework
           path: AxiomVaultCore.xcframework/
