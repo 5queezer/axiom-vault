@@ -395,17 +395,27 @@
 </div>
 
 <script type="module">
-    try {
-        const { createApp, ref, computed, onMounted } = await import('https://unpkg.com/vue@3/dist/vue.esm-browser.js');
-
-        // Check if Tauri API is available
-        if (!window.__TAURI__ || !window.__TAURI__.core) {
-            console.error('Tauri API not available');
-            document.body.innerHTML = '<div style="color: white; padding: 20px; text-align: center;">Error: Tauri API not loaded. Please restart the application.</div>';
-            throw new Error('Tauri API not available');
+    // Wait for Tauri API to be ready
+    async function waitForTauri(timeout = 5000) {
+        const startTime = Date.now();
+        while (!window.__TAURI__ || !window.__TAURI__.core) {
+            if (Date.now() - startTime > timeout) {
+                throw new Error('Tauri API not available after timeout');
+            }
+            await new Promise(resolve => setTimeout(resolve, 50));
         }
+        return window.__TAURI__.core;
+    }
 
-        const { invoke } = window.__TAURI__.core;
+    try {
+        console.log('Waiting for Tauri API...');
+        const tauriCore = await waitForTauri();
+        const { invoke } = tauriCore;
+        console.log('Tauri API ready');
+
+        console.log('Loading Vue...');
+        const { createApp, ref, computed, onMounted } = await import('https://unpkg.com/vue@3/dist/vue.esm-browser.js');
+        console.log('Vue loaded');
 
         const app = createApp({
         setup() {
@@ -605,11 +615,22 @@
         }
     });
 
+        console.log('Mounting Vue app...');
         app.mount('#app');
         console.log('Vue app mounted successfully');
     } catch (error) {
-        console.error('Failed to initialize Vue app:', error);
-        document.body.innerHTML = '<div style="color: white; padding: 20px; text-align: center;"><h2>Initialization Error</h2><p>' + error.message + '</p><p>Check the console for details.</p></div>';
+        console.error('Failed to initialize application:', error);
+        const errorHTML = `
+            <div style="color: white; padding: 40px; text-align: center; font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
+                <h2 style="color: #ff453a; margin-bottom: 20px;">Initialization Error</h2>
+                <p style="font-size: 14px; margin-bottom: 10px;">${error.message}</p>
+                <p style="font-size: 12px; color: #98989d;">Check the browser console (F12) for more details.</p>
+                <button onclick="location.reload()" style="margin-top: 20px; padding: 8px 16px; background: #0a84ff; color: white; border: none; border-radius: 6px; cursor: pointer;">
+                    Reload
+                </button>
+            </div>
+        `;
+        document.body.innerHTML = errorHTML;
     }
 </script>
 </body>
