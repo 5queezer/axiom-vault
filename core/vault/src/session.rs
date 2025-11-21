@@ -248,7 +248,8 @@ mod tests {
             VaultConfig::new(id, password, "memory", serde_json::Value::Null, params).unwrap();
 
         let provider = Arc::new(MemoryProvider::new());
-        let session = VaultSession::unlock(config.clone(), password, provider, VaultTree::new()).unwrap();
+        let session =
+            VaultSession::unlock(config.clone(), password, provider, VaultTree::new()).unwrap();
 
         (session, config)
     }
