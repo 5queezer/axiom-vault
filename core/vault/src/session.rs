@@ -7,9 +7,9 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
-use crate::config::VaultConfig;
+use crate::config::{VaultConfig, META_DIRNAME, TREE_FILENAME};
 use crate::tree::VaultTree;
-use axiomvault_common::{Error, Result, VaultId};
+use axiomvault_common::{Error, Result, VaultId, VaultPath};
 use axiomvault_crypto::{derive_key, MasterKey};
 use axiomvault_storage::StorageProvider;
 
@@ -83,8 +83,8 @@ impl VaultSession {
         config: VaultConfig,
         password: &[u8],
         provider: Arc<dyn StorageProvider>,
+        tree: VaultTree,
     ) -> Result<Self> {
-        // Verify vault version
         if !config.version.is_compatible() {
             return Err(Error::Vault(format!(
                 "Incompatible vault version: {:?}",
@@ -92,15 +92,13 @@ impl VaultSession {
             )));
         }
 
-        // Verify password
         if !config.verify_password(password)? {
             return Err(Error::NotPermitted("Invalid password".to_string()));
         }
 
-        // Derive master key
         let master_key = derive_key(password, &config.salt, &config.kdf_params)?;
 
-        let tree = Arc::new(RwLock::new(VaultTree::new()));
+        let tree = Arc::new(RwLock::new(tree));
 
         Ok(Self {
             handle: SessionHandle::new(),
@@ -195,12 +193,10 @@ impl VaultSession {
             return Err(Error::NotPermitted("Session is locked".to_string()));
         }
 
-        // Verify old password
         if !self.config.verify_password(old_password)? {
             return Err(Error::NotPermitted("Invalid old password".to_string()));
         }
 
-        // Create new config with new password
         let new_config = VaultConfig::new(
             self.config.id.clone(),
             new_password,
@@ -209,20 +205,32 @@ impl VaultSession {
             self.config.kdf_params.clone(),
         )?;
 
-        // Derive new master key
         let new_master_key = derive_key(new_password, &new_config.salt, &new_config.kdf_params)?;
 
-        // Update session
         self.config = new_config;
         self.master_key = Some(new_master_key);
 
+        Ok(())
+    }
+
+    /// Save the current tree state to storage.
+    ///
+    /// # Errors
+    /// - Serialization failure
+    /// - Storage failure
+    pub async fn save_tree(&self) -> Result<()> {
+        let tree = self.tree.read().await;
+        let tree_json = tree.to_json()?;
+        let tree_path = VaultPath::parse(META_DIRNAME)?.join(TREE_FILENAME)?;
+        self.provider
+            .upload(&tree_path, tree_json.into_bytes())
+            .await?;
         Ok(())
     }
 }
 
 impl Drop for VaultSession {
     fn drop(&mut self) {
-        // Ensure keys are zeroized
         self.lock();
     }
 }
@@ -240,7 +248,8 @@ mod tests {
             VaultConfig::new(id, password, "memory", serde_json::Value::Null, params).unwrap();
 
         let provider = Arc::new(MemoryProvider::new());
-        let session = VaultSession::unlock(config.clone(), password, provider).unwrap();
+        let session =
+            VaultSession::unlock(config.clone(), password, provider, VaultTree::new()).unwrap();
 
         (session, config)
     }
@@ -271,7 +280,7 @@ mod tests {
             VaultConfig::new(id, password, "memory", serde_json::Value::Null, params).unwrap();
 
         let provider = Arc::new(MemoryProvider::new());
-        let result = VaultSession::unlock(config, b"wrong", provider);
+        let result = VaultSession::unlock(config, b"wrong", provider, VaultTree::new());
 
         assert!(result.is_err());
     }
@@ -284,9 +293,7 @@ mod tests {
 
         session.change_password(old_password, new_password).unwrap();
 
-        // Verify new password works
         assert!(session.config().verify_password(new_password).unwrap());
-        // Old password should not work
         assert!(!session.config().verify_password(old_password).unwrap());
     }
 }

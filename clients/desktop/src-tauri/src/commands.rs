@@ -12,7 +12,7 @@ use axiomvault_crypto::KdfParams;
 use axiomvault_fuse::mount::mount as mount_vault_fuse;
 use axiomvault_fuse::MountOptions;
 use axiomvault_storage::{MemoryProvider, StorageProvider};
-use axiomvault_vault::{VaultConfig, VaultOperations, VaultSession};
+use axiomvault_vault::{VaultConfig, VaultOperations, VaultSession, VaultTree};
 
 use crate::local_index::{IndexEntry, LocalIndex};
 use crate::state::{AppState, OpenVault};
@@ -66,8 +66,8 @@ async fn setup_vault_session(
         .await
         .map_err(|e| e.to_string())?;
 
-    let session =
-        VaultSession::unlock(config, password.as_bytes(), provider).map_err(|e| e.to_string())?;
+    let session = VaultSession::unlock(config, password.as_bytes(), provider, VaultTree::new())
+        .map_err(|e| e.to_string())?;
 
     // Open local index
     let index_path = state.data_dir.join(format!("{}.db", id));

@@ -153,6 +153,9 @@ pub const DATA_DIRNAME: &str = "d";
 /// Metadata directory name in vault root.
 pub const META_DIRNAME: &str = "m";
 
+/// Tree state filename in metadata directory.
+pub const TREE_FILENAME: &str = "tree.json";
+
 #[cfg(test)]
 mod tests {
     use super::*;
