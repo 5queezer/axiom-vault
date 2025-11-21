@@ -4,715 +4,598 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AxiomVault</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
+        :root {
+            /* macOS Dark Mode System Colors */
+            --mac-bg-main: #1e1e1e;
+            --mac-bg-sidebar: #2d2d2d;
+            --mac-border: #454545;
+            --mac-blue: #0a84ff;
+            --mac-blue-dim: rgba(10, 132, 255, 0.2);
+            --mac-text: #ffffff;
+            --mac-text-secondary: #98989d;
+            --mac-selected: #0a84ff;
+            --mac-button-bg: rgba(255, 255, 255, 0.1);
+            --mac-button-hover: rgba(255, 255, 255, 0.15);
+            --radius-s: 5px;
+            --radius-m: 10px;
+            --font-stack: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; user-select: none; }
 
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-            background: #1a1a2e;
-            color: #e0e0e0;
-            min-height: 100vh;
+            font-family: var(--font-stack);
+            background-color: var(--mac-bg-main);
+            color: var(--mac-text);
+            height: 100vh;
             display: flex;
             flex-direction: column;
+            overflow: hidden;
+            font-size: 13px;
         }
 
-        .header {
-            background: #16213e;
-            padding: 1rem 2rem;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            border-bottom: 1px solid #0f3460;
-        }
-
-        .header h1 {
-            color: #00d9ff;
-            font-size: 1.5rem;
-        }
-
-        .fuse-status {
-            font-size: 0.9rem;
-            color: #888;
-        }
-
-        .main-container {
-            display: flex;
-            flex: 1;
-        }
-
-        .sidebar {
-            width: 250px;
-            background: #16213e;
-            padding: 1rem;
-            border-right: 1px solid #0f3460;
-        }
-
-        .content {
-            flex: 1;
-            padding: 2rem;
-        }
-
-        .vault-list {
-            margin-bottom: 2rem;
-        }
-
-        .vault-list h3 {
-            color: #00d9ff;
-            margin-bottom: 1rem;
-            font-size: 1rem;
-        }
-
-        .vault-item {
-            background: #0f3460;
-            padding: 0.8rem;
-            border-radius: 5px;
-            margin-bottom: 0.5rem;
-            cursor: pointer;
-            transition: background 0.2s;
-        }
-
-        .vault-item:hover {
-            background: #1a4a7a;
-        }
-
-        .vault-item.active {
-            border-left: 3px solid #00d9ff;
-        }
-
-        .vault-name {
-            font-weight: 600;
-            margin-bottom: 0.3rem;
-        }
-
-        .vault-status {
-            font-size: 0.8rem;
-            color: #888;
-        }
-
-        .vault-status.mounted {
-            color: #4caf50;
-        }
-
-        .action-buttons {
-            margin-top: 2rem;
-        }
-
-        .btn {
+        /* --- Window Drag Region --- */
+        .titlebar-drag-region {
+            height: 28px;
             width: 100%;
-            padding: 0.8rem;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 0.9rem;
-            font-weight: 600;
-            margin-bottom: 0.5rem;
-            transition: all 0.2s;
-        }
-
-        .btn-primary {
-            background: #00d9ff;
-            color: #1a1a2e;
-        }
-
-        .btn-primary:hover {
-            background: #00b8d4;
-        }
-
-        .btn-secondary {
-            background: #0f3460;
-            color: #e0e0e0;
-        }
-
-        .btn-secondary:hover {
-            background: #1a4a7a;
-        }
-
-        .btn-danger {
-            background: #d32f2f;
-            color: white;
-        }
-
-        .btn-danger:hover {
-            background: #b71c1c;
-        }
-
-        .file-browser {
-            background: #16213e;
-            border-radius: 8px;
-            padding: 1.5rem;
-        }
-
-        .file-browser h2 {
-            color: #00d9ff;
-            margin-bottom: 1rem;
-        }
-
-        .breadcrumb {
-            background: #0f3460;
-            padding: 0.8rem;
-            border-radius: 5px;
-            margin-bottom: 1rem;
-            font-size: 0.9rem;
-        }
-
-        .file-list {
-            background: #0f3460;
-            border-radius: 5px;
-            min-height: 400px;
-        }
-
-        .file-item {
-            display: flex;
-            align-items: center;
-            padding: 0.8rem 1rem;
-            border-bottom: 1px solid #1a4a7a;
-            cursor: pointer;
-            transition: background 0.2s;
-        }
-
-        .file-item:hover {
-            background: #1a4a7a;
-        }
-
-        .file-item:last-child {
-            border-bottom: none;
-        }
-
-        .file-icon {
-            margin-right: 1rem;
-            font-size: 1.2rem;
-        }
-
-        .file-name {
-            flex: 1;
-        }
-
-        .file-size {
-            color: #888;
-            font-size: 0.9rem;
-        }
-
-        .modal {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0, 0, 0, 0.7);
-            display: none;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .modal.active {
-            display: flex;
-        }
-
-        .modal-content {
-            background: #16213e;
-            padding: 2rem;
-            border-radius: 10px;
-            width: 400px;
-            max-width: 90%;
-        }
-
-        .modal-content h3 {
-            color: #00d9ff;
-            margin-bottom: 1.5rem;
-        }
-
-        .form-group {
-            margin-bottom: 1rem;
-        }
-
-        .form-group label {
-            display: block;
-            margin-bottom: 0.5rem;
-            font-size: 0.9rem;
-        }
-
-        .form-group input, .form-group select {
-            width: 100%;
-            padding: 0.8rem;
-            border: 1px solid #0f3460;
-            border-radius: 5px;
-            background: #1a1a2e;
-            color: #e0e0e0;
-            font-size: 0.9rem;
-        }
-
-        .form-group input:focus, .form-group select:focus {
-            outline: none;
-            border-color: #00d9ff;
-        }
-
-        .modal-actions {
-            display: flex;
-            gap: 1rem;
-            margin-top: 1.5rem;
-        }
-
-        .modal-actions .btn {
-            flex: 1;
-        }
-
-        .toolbar {
-            display: flex;
-            gap: 0.5rem;
-            margin-bottom: 1rem;
-        }
-
-        .toolbar .btn {
-            width: auto;
-            padding: 0.5rem 1rem;
-        }
-
-        .empty-state {
-            text-align: center;
-            padding: 3rem;
-            color: #888;
-        }
-
-        .empty-state h3 {
-            margin-bottom: 1rem;
-        }
-
-        .notification {
-            position: fixed;
-            top: 1rem;
-            right: 1rem;
-            padding: 1rem 1.5rem;
-            border-radius: 5px;
-            background: #4caf50;
-            color: white;
-            display: none;
+            position: absolute;
+            top: 0; left: 0;
+            -webkit-app-region: drag;
             z-index: 1000;
         }
 
-        .notification.error {
-            background: #d32f2f;
+        .main-container { display: flex; flex: 1; height: 100vh; }
+
+        /* --- Sidebar --- */
+        .sidebar {
+            width: 260px;
+            background-color: var(--mac-bg-sidebar);
+            backdrop-filter: blur(20px);
+            border-right: 1px solid #000;
+            display: flex;
+            flex-direction: column;
+            padding-top: 38px;
         }
 
-        .notification.active {
-            display: block;
+        .sidebar-section { padding: 0 10px; margin-bottom: 20px; }
+        .sidebar-header {
+            color: var(--mac-text-secondary);
+            font-size: 11px;
+            font-weight: 700;
+            padding: 8px 10px;
+            margin-bottom: 4px;
+        }
+
+        .vault-item {
+            display: flex; align-items: center;
+            padding: 6px 10px;
+            border-radius: var(--radius-s);
+            cursor: default;
+            color: #dfdfdf;
+            margin-bottom: 2px;
+        }
+        .vault-item:hover { background-color: rgba(255, 255, 255, 0.05); }
+        .vault-item.active { background-color: var(--mac-selected); color: white; }
+        .vault-item i { margin-right: 8px; opacity: 0.8; width: 16px; text-align: center; }
+
+        .vault-status-dot {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            margin-left: auto;
+            border: 2px solid var(--mac-text-secondary);
+        }
+        .vault-item.active .vault-status-dot { border-color: rgba(255,255,255,0.5); }
+        .vault-status-dot.mounted { background: #30d158; border: none; }
+
+        .sidebar-footer {
+            margin-top: auto; padding: 10px;
+            border-top: 1px solid rgba(0,0,0,0.2);
+            display: flex; gap: 8px;
+        }
+
+        .icon-btn {
+            background: transparent; border: none;
+            color: var(--mac-text-secondary);
+            padding: 6px; border-radius: 4px;
+            cursor: pointer; flex: 1; transition: color 0.2s;
+        }
+        .icon-btn:hover { color: var(--mac-text); background: rgba(255,255,255,0.05); }
+
+        /* --- Content --- */
+        .content { flex: 1; display: flex; flex-direction: column; background: var(--mac-bg-main); }
+
+        .toolbar {
+            height: 52px;
+            border-bottom: 1px solid var(--mac-border);
+            display: flex; align-items: center;
+            padding: 10px 20px 0 20px;
+            justify-content: space-between;
+        }
+
+        .toolbar-title { font-weight: 600; font-size: 14px; display: flex; align-items: center; gap: 8px; }
+        .toolbar-actions { display: flex; gap: 12px; }
+
+        .tool-btn {
+            background: var(--mac-button-bg);
+            border: 0.5px solid rgba(0,0,0,0.2);
+            color: var(--mac-text);
+            border-radius: 6px; padding: 4px 10px;
+            font-size: 12px; font-weight: 500;
+            cursor: pointer; display: flex; align-items: center; gap: 6px;
+        }
+        .tool-btn:hover { background: var(--mac-button-hover); }
+        .tool-btn:active { background: rgba(255,255,255,0.2); }
+
+        .path-bar {
+            background: var(--mac-bg-main);
+            border-bottom: 1px solid var(--mac-border);
+            padding: 6px 20px; font-size: 12px;
+            color: var(--mac-text-secondary); display: flex; gap: 5px;
+        }
+        .path-segment { color: var(--mac-text-secondary); }
+        .path-segment.current { color: var(--mac-text); font-weight: 500; }
+
+        .file-list-container { flex: 1; overflow-y: auto; }
+        .file-row {
+            display: flex; align-items: center;
+            padding: 8px 20px;
+            border-bottom: 1px solid rgba(255,255,255,0.03);
+        }
+        .file-row:nth-child(even) { background: rgba(255,255,255,0.02); }
+        .file-row:hover { background: rgba(255,255,255,0.05); }
+
+        .file-icon { width: 24px; margin-right: 10px; text-align: center; }
+        .file-icon.folder { color: #0a84ff; }
+        .file-icon.file { color: #98989d; }
+
+        .file-name { flex: 1; font-size: 13px; }
+        .file-meta { color: var(--mac-text-secondary); font-size: 12px; tabular-nums: true; }
+
+        .empty-state {
+            height: 100%; display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            color: var(--mac-text-secondary);
+        }
+        .empty-state i { font-size: 32px; margin-bottom: 16px; opacity: 0.2; }
+
+        /* --- Modals (Transition wrapper for Vue) --- */
+        .modal-enter-active, .modal-leave-active { transition: opacity 0.2s; }
+        .modal-enter-from, .modal-leave-to { opacity: 0; }
+
+        .sheet-enter-active, .sheet-leave-active { transition: transform 0.25s cubic-bezier(0.2, 0.8, 0.2, 1); }
+        .sheet-enter-from, .sheet-leave-to { transform: translateY(-20px); }
+
+        .modal-backdrop {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.4);
+            display: flex; justify-content: center; padding-top: 60px;
+            z-index: 2000;
+        }
+
+        .sheet {
+            background: #2c2c2c; width: 400px;
+            border-radius: 12px; padding: 20px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+            border: 1px solid rgba(0,0,0,0.3);
+        }
+
+        .sheet h3 { text-align: center; font-size: 15px; font-weight: 600; margin-bottom: 8px; }
+        .sheet p.subtitle { text-align: center; font-size: 12px; color: var(--mac-text-secondary); margin-bottom: 20px; }
+
+        .form-row { margin-bottom: 16px; }
+        .form-row label { display: block; font-size: 12px; margin-bottom: 6px; font-weight: 500; }
+
+        .mac-input, .mac-select {
+            width: 100%; background: #1c1c1c;
+            border: 1px solid #454545; border-radius: 6px;
+            padding: 6px 8px; color: white; font-size: 13px;
+        }
+        .mac-input:focus, .mac-select:focus { outline: none; border-color: var(--mac-blue); box-shadow: 0 0 0 3px var(--mac-blue-dim); }
+
+        .sheet-footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px; }
+
+        .mac-btn {
+            padding: 4px 14px; border-radius: 6px; font-size: 13px;
+            border: none; cursor: pointer; font-weight: 500;
+        }
+        .mac-btn.secondary { background: rgba(255,255,255,0.1); color: white; }
+        .mac-btn.primary { background: var(--mac-blue); color: white; }
+
+        /* --- Toast Transition --- */
+        .toast-enter-active, .toast-leave-active { transition: all 0.3s ease; }
+        .toast-enter-from, .toast-leave-to { transform: translateX(100%); opacity: 0; }
+
+        .toast {
+            position: fixed; top: 40px; right: 20px;
+            background: rgba(40, 40, 40, 0.9); backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.1);
+            padding: 10px 16px; border-radius: 8px;
+            font-size: 13px; box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+            display: flex; align-items: center; gap: 10px; z-index: 3000;
         }
     </style>
 </head>
 <body>
-    <div class="header">
-        <h1>AxiomVault</h1>
-        <div class="fuse-status" id="fuseStatus">Checking FUSE...</div>
-    </div>
+<div class="titlebar-drag-region"></div>
 
+<div id="app">
     <div class="main-container">
         <div class="sidebar">
-            <div class="vault-list">
-                <h3>Open Vaults</h3>
-                <div id="vaultList">
-                    <div class="empty-state">
-                        <p>No vaults open</p>
-                    </div>
+            <div class="sidebar-section">
+                <div class="sidebar-header">Vaults</div>
+
+                <div v-if="vaults.length === 0" style="padding: 10px; color: #666; font-size: 12px; text-align: center;">
+                    No Vaults
+                </div>
+
+                <div v-for="vault in vaults"
+                     :key="vault.id"
+                     :class="['vault-item', { active: currentVaultId === vault.id }]"
+                     @click="selectVault(vault.id)">
+                    <i class="fa-solid fa-cube"></i>
+                    <span style="flex:1; overflow:hidden; text-overflow:ellipsis;">{{ vault.id }}</span>
+                    <div :class="['vault-status-dot', { mounted: vault.is_mounted }]"
+                         :title="vault.is_mounted ? 'Mounted' : 'Unlocked'"></div>
                 </div>
             </div>
 
-            <div class="action-buttons">
-                <button class="btn btn-primary" onclick="showCreateVaultModal()">Create Vault</button>
-                <button class="btn btn-secondary" onclick="showUnlockVaultModal()">Unlock Vault</button>
+            <div class="sidebar-footer">
+                <button class="icon-btn" @click="showModal('create')" title="Create Vault">
+                    <i class="fa-solid fa-plus"></i>
+                </button>
+                <button class="icon-btn" @click="showModal('unlock')" title="Unlock Vault">
+                    <i class="fa-solid fa-key"></i>
+                </button>
             </div>
         </div>
 
         <div class="content">
-            <div id="welcomeScreen" class="empty-state">
-                <h3>Welcome to AxiomVault</h3>
-                <p>Create or unlock a vault to get started</p>
-            </div>
-
-            <div id="fileBrowser" class="file-browser" style="display: none;">
-                <h2 id="currentVaultName">Vault</h2>
-
-                <div class="toolbar">
-                    <button class="btn btn-secondary" onclick="createNewFile()">New File</button>
-                    <button class="btn btn-secondary" onclick="createNewFolder()">New Folder</button>
-                    <button class="btn btn-primary" onclick="toggleMount()">Mount</button>
-                    <button class="btn btn-danger" onclick="lockCurrentVault()">Lock</button>
+            <div class="toolbar">
+                <div class="toolbar-title">
+                    <template v-if="currentVaultId">
+                        <i class="fa-solid fa-box-archive" style="color:var(--mac-blue);"></i>
+                        {{ currentVaultId }}
+                    </template>
+                    <span v-else>AxiomVault</span>
                 </div>
 
-                <div class="breadcrumb" id="breadcrumb">/</div>
+                <div class="toolbar-actions" v-if="currentVaultId">
+                    <button class="tool-btn" @click="createNewFile">
+                        <i class="fa-regular fa-file"></i> New
+                    </button>
+                    <button class="tool-btn" @click="createNewFolder">
+                        <i class="fa-solid fa-folder-plus"></i> Folder
+                    </button>
+                    <button class="tool-btn" @click="toggleMount">
+                        <i class="fa-solid fa-hard-drive"></i> Mount
+                    </button>
+                    <button class="tool-btn" @click="lockVault" style="color: #ff453a;">
+                        <i class="fa-solid fa-lock"></i> Lock
+                    </button>
+                </div>
 
-                <div class="file-list" id="fileList">
-                    <div class="empty-state">
-                        <p>Empty directory</p>
+                <div style="font-size: 11px; color: var(--mac-text-secondary);">
+                    {{ fuseStatus }}
+                </div>
+            </div>
+
+            <div v-if="!currentVaultId" class="empty-state">
+                <i class="fa-solid fa-shield-halved"></i>
+                <h3>No Vault Selected</h3>
+                <p style="font-size: 13px;">Select a vault from the sidebar or create a new one.</p>
+            </div>
+
+            <div v-else style="display: flex; flex: 1; flex-direction: column;">
+                <div class="path-bar">
+                        <span v-for="(segment, index) in breadcrumbs" :key="index"
+                              :class="['path-segment', { current: index === breadcrumbs.length - 1 }]">
+                            <span v-if="index > 0" style="color:#666; margin:0 4px;">/</span>
+                            {{ segment || 'Root' }}
+                        </span>
+                </div>
+
+                <div class="file-list-container">
+                    <div v-if="files.length === 0" class="empty-state" style="height: 200px;">
+                        <p>Folder is empty</p>
                     </div>
-                </div>
-            </div>
-        </div>
-    </div>
 
-    <!-- Create Vault Modal -->
-    <div class="modal" id="createVaultModal">
-        <div class="modal-content">
-            <h3>Create New Vault</h3>
-            <div class="form-group">
-                <label>Vault Name</label>
-                <input type="text" id="newVaultName" placeholder="my-vault">
-            </div>
-            <div class="form-group">
-                <label>Password</label>
-                <input type="password" id="newVaultPassword">
-            </div>
-            <div class="form-group">
-                <label>Confirm Password</label>
-                <input type="password" id="newVaultPasswordConfirm">
-            </div>
-            <div class="form-group">
-                <label>Storage Provider</label>
-                <select id="newVaultProvider">
-                    <option value="memory">Local (Memory)</option>
-                    <option value="gdrive">Google Drive</option>
-                </select>
-            </div>
-            <div class="modal-actions">
-                <button class="btn btn-secondary" onclick="closeModal('createVaultModal')">Cancel</button>
-                <button class="btn btn-primary" onclick="createVault()">Create</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Unlock Vault Modal -->
-    <div class="modal" id="unlockVaultModal">
-        <div class="modal-content">
-            <h3>Unlock Vault</h3>
-            <div class="form-group">
-                <label>Vault ID</label>
-                <input type="text" id="unlockVaultId" placeholder="my-vault">
-            </div>
-            <div class="form-group">
-                <label>Password</label>
-                <input type="password" id="unlockVaultPassword">
-            </div>
-            <div class="modal-actions">
-                <button class="btn btn-secondary" onclick="closeModal('unlockVaultModal')">Cancel</button>
-                <button class="btn btn-primary" onclick="unlockVault()">Unlock</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Mount Vault Modal -->
-    <div class="modal" id="mountVaultModal">
-        <div class="modal-content">
-            <h3>Mount Vault</h3>
-            <div class="form-group">
-                <label>Mount Point</label>
-                <input type="text" id="mountPoint" placeholder="/mnt/vault">
-            </div>
-            <div class="modal-actions">
-                <button class="btn btn-secondary" onclick="closeModal('mountVaultModal')">Cancel</button>
-                <button class="btn btn-primary" onclick="mountVault()">Mount</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Notification -->
-    <div class="notification" id="notification"></div>
-
-    <script>
-        const { invoke } = window.__TAURI__.core;
-
-        let currentVaultId = null;
-        let currentPath = '/';
-        let openVaults = [];
-
-        // Initialize
-        async function init() {
-            await checkFuseStatus();
-            await refreshVaultList();
-        }
-
-        async function checkFuseStatus() {
-            try {
-                const info = await invoke('get_fuse_info');
-                document.getElementById('fuseStatus').textContent = info;
-            } catch (e) {
-                document.getElementById('fuseStatus').textContent = 'FUSE status unknown';
-            }
-        }
-
-        async function refreshVaultList() {
-            try {
-                openVaults = await invoke('list_vaults');
-                renderVaultList();
-            } catch (e) {
-                showNotification('Failed to load vaults: ' + e, true);
-            }
-        }
-
-        function renderVaultList() {
-            const container = document.getElementById('vaultList');
-            if (openVaults.length === 0) {
-                container.innerHTML = '<div class="empty-state"><p>No vaults open</p></div>';
-                return;
-            }
-
-            container.innerHTML = openVaults.map(vault => `
-                <div class="vault-item ${vault.id === currentVaultId ? 'active' : ''}"
-                     onclick="selectVault('${vault.id}')">
-                    <div class="vault-name">${vault.id}</div>
-                    <div class="vault-status ${vault.is_mounted ? 'mounted' : ''}">
-                        ${vault.is_mounted ? 'Mounted at ' + vault.mount_point : 'Unlocked'}
+                    <div v-if="currentPath !== '/'" class="file-row" @click="navigateUp">
+                        <div class="file-icon folder"><i class="fa-solid fa-folder"></i></div>
+                        <div class="file-name">..</div>
                     </div>
-                </div>
-            `).join('');
-        }
 
-        async function selectVault(id) {
-            currentVaultId = id;
-            currentPath = '/';
-            renderVaultList();
-            document.getElementById('welcomeScreen').style.display = 'none';
-            document.getElementById('fileBrowser').style.display = 'block';
-            document.getElementById('currentVaultName').textContent = id;
-            await refreshFiles();
-        }
-
-        async function refreshFiles() {
-            if (!currentVaultId) return;
-
-            document.getElementById('breadcrumb').textContent = currentPath;
-
-            try {
-                const files = await invoke('list_files', {
-                    id: currentVaultId,
-                    path: currentPath
-                });
-
-                const container = document.getElementById('fileList');
-                if (files.length === 0) {
-                    container.innerHTML = '<div class="empty-state"><p>Empty directory</p></div>';
-                    return;
-                }
-
-                let html = '';
-                if (currentPath !== '/') {
-                    html += `
-                        <div class="file-item" onclick="navigateUp()">
-                            <div class="file-icon">📁</div>
-                            <div class="file-name">..</div>
-                            <div class="file-size"></div>
+                    <div v-for="file in sortedFiles" :key="file.path" class="file-row" @click="handleItemClick(file)">
+                        <div :class="['file-icon', file.is_directory ? 'folder' : 'file']">
+                            <i :class="file.is_directory ? 'fa-solid fa-folder' : 'fa-regular fa-file'"></i>
                         </div>
-                    `;
-                }
-
-                html += files.map(file => `
-                    <div class="file-item" onclick="itemClick('${file.path}', ${file.is_directory})">
-                        <div class="file-icon">${file.is_directory ? '📁' : '📄'}</div>
-                        <div class="file-name">${file.name}</div>
-                        <div class="file-size">${file.size ? formatSize(file.size) : ''}</div>
+                        <div class="file-name">{{ file.name }}</div>
+                        <div class="file-meta">{{ file.size ? formatSize(file.size) : '--' }}</div>
                     </div>
-                `).join('');
+                </div>
+            </div>
+        </div>
+    </div>
 
-                container.innerHTML = html;
-            } catch (e) {
-                showNotification('Failed to list files: ' + e, true);
-            }
-        }
+    <transition name="modal">
+        <div v-if="activeModal" class="modal-backdrop" @click.self="closeModal">
+            <transition name="sheet" appear>
 
-        function itemClick(path, isDir) {
-            if (isDir) {
-                currentPath = path;
+                <div v-if="activeModal === 'create'" class="sheet">
+                    <h3>Create New Vault</h3>
+                    <p class="subtitle">Enter details for your new secure container.</p>
+                    <div class="form-row">
+                        <label>Vault Name</label>
+                        <input type="text" class="mac-input" v-model="forms.create.name" placeholder="Documents">
+                    </div>
+                    <div class="form-row">
+                        <label>Password</label>
+                        <input type="password" class="mac-input" v-model="forms.create.password">
+                    </div>
+                    <div class="form-row">
+                        <label>Verify</label>
+                        <input type="password" class="mac-input" v-model="forms.create.confirm">
+                    </div>
+                    <div class="form-row">
+                        <label>Provider</label>
+                        <select class="mac-select" v-model="forms.create.provider">
+                            <option value="memory">Local Memory</option>
+                            <option value="gdrive">Google Drive</option>
+                        </select>
+                    </div>
+                    <div class="sheet-footer">
+                        <button class="mac-btn secondary" @click="closeModal">Cancel</button>
+                        <button class="mac-btn primary" @click="createVault">Create</button>
+                    </div>
+                </div>
+
+                <div v-else-if="activeModal === 'unlock'" class="sheet">
+                    <h3>Unlock Vault</h3>
+                    <p class="subtitle">Enter your credentials.</p>
+                    <div class="form-row">
+                        <label>Vault ID</label>
+                        <input type="text" class="mac-input" v-model="forms.unlock.id" placeholder="Documents">
+                    </div>
+                    <div class="form-row">
+                        <label>Password</label>
+                        <input type="password" class="mac-input" v-model="forms.unlock.password">
+                    </div>
+                    <div class="sheet-footer">
+                        <button class="mac-btn secondary" @click="closeModal">Cancel</button>
+                        <button class="mac-btn primary" @click="unlockVault">Unlock</button>
+                    </div>
+                </div>
+
+                <div v-else-if="activeModal === 'mount'" class="sheet">
+                    <h3>Mount Volume</h3>
+                    <p class="subtitle">Select a mount point.</p>
+                    <div class="form-row">
+                        <label>Mount Point</label>
+                        <input type="text" class="mac-input" v-model="forms.mount.point" placeholder="/mnt/vault">
+                    </div>
+                    <div class="sheet-footer">
+                        <button class="mac-btn secondary" @click="closeModal">Cancel</button>
+                        <button class="mac-btn primary" @click="mountVault">Mount</button>
+                    </div>
+                </div>
+
+            </transition>
+        </div>
+    </transition>
+
+    <transition name="toast">
+        <div v-if="notification.show" class="toast">
+            <i :class="['fa-solid', notification.isError ? 'fa-circle-exclamation' : 'fa-circle-check']"
+               :style="{ color: notification.isError ? '#ff453a' : '#0a84ff' }"></i>
+            <span>{{ notification.message }}</span>
+        </div>
+    </transition>
+</div>
+
+<script type="module">
+    import { createApp, ref, computed, onMounted } from 'https://unpkg.com/vue@3/dist/vue.esm-browser.js';
+
+    const { invoke } = window.__TAURI__.core;
+
+    createApp({
+        setup() {
+            // State
+            const fuseStatus = ref('Checking...');
+            const vaults = ref([]);
+            const currentVaultId = ref(null);
+            const currentPath = ref('/');
+            const files = ref([]);
+            const activeModal = ref(null); // 'create', 'unlock', 'mount', or null
+
+            const forms = ref({
+                create: { name: '', password: '', confirm: '', provider: 'memory' },
+                unlock: { id: '', password: '' },
+                mount: { point: '' }
+            });
+
+            const notification = ref({ show: false, message: '', isError: false });
+
+            // Computed
+            const breadcrumbs = computed(() => currentPath.value.split('/'));
+
+            const sortedFiles = computed(() => {
+                return [...files.value].sort((a, b) => {
+                    if (a.is_directory === b.is_directory) return a.name.localeCompare(b.name);
+                    return a.is_directory ? -1 : 1;
+                });
+            });
+
+            // Actions
+            const showNotify = (msg, isError = false) => {
+                notification.value = { show: true, message: msg, isError };
+                setTimeout(() => notification.value.show = false, 3000);
+            };
+
+            const showModal = (type) => activeModal.value = type;
+            const closeModal = () => activeModal.value = null;
+
+            // API Calls
+            const refreshVaults = async () => {
+                try {
+                    vaults.value = await invoke('list_vaults');
+                } catch (e) {
+                    showNotify('Failed to load vaults: ' + e, true);
+                }
+            };
+
+            const refreshFiles = async () => {
+                if (!currentVaultId.value) return;
+                try {
+                    files.value = await invoke('list_files', {
+                        id: currentVaultId.value,
+                        path: currentPath.value
+                    });
+                } catch (e) {
+                    showNotify('Failed to list files: ' + e, true);
+                }
+            };
+
+            const selectVault = async (id) => {
+                currentVaultId.value = id;
+                currentPath.value = '/';
+                await refreshFiles();
+            };
+
+            // CRUD Operations
+            const createVault = async () => {
+                const f = forms.value.create;
+                if (!f.name || !f.password) return showNotify('Fill all fields', true);
+                if (f.password !== f.confirm) return showNotify('Passwords match error', true);
+
+                try {
+                    await invoke('create_vault', { id: f.name, password: f.password, providerType: f.provider });
+                    closeModal();
+                    showNotify('Vault created');
+                    await refreshVaults();
+                    selectVault(f.name);
+                    // Reset form
+                    forms.value.create = { name: '', password: '', confirm: '', provider: 'memory' };
+                } catch (e) {
+                    showNotify(e, true);
+                }
+            };
+
+            const unlockVault = async () => {
+                const f = forms.value.unlock;
+                try {
+                    await invoke('unlock_vault', { id: f.id, password: f.password });
+                    closeModal();
+                    showNotify('Unlocked');
+                    await refreshVaults();
+                    selectVault(f.id);
+                    forms.value.unlock = { id: '', password: '' };
+                } catch (e) {
+                    showNotify(e, true);
+                }
+            };
+
+            const lockVault = async () => {
+                try {
+                    await invoke('lock_vault', { id: currentVaultId.value });
+                    currentVaultId.value = null;
+                    showNotify('Locked');
+                    await refreshVaults();
+                } catch (e) {
+                    showNotify(e, true);
+                }
+            };
+
+            const toggleMount = () => {
+                const v = vaults.value.find(v => v.id === currentVaultId.value);
+                if (v && v.is_mounted) unmountVault();
+                else showModal('mount');
+            };
+
+            const mountVault = async () => {
+                try {
+                    await invoke('mount_vault', { id: currentVaultId.value, mountPoint: forms.value.mount.point });
+                    closeModal();
+                    showNotify('Mounted');
+                    await refreshVaults();
+                    forms.value.mount.point = '';
+                } catch (e) {
+                    showNotify(e, true);
+                }
+            };
+
+            const unmountVault = async () => {
+                try {
+                    await invoke('unmount_vault', { id: currentVaultId.value });
+                    showNotify('Unmounted');
+                    await refreshVaults();
+                } catch (e) {
+                    showNotify(e, true);
+                }
+            };
+
+            // File System Ops
+            const handleItemClick = (file) => {
+                if (file.is_directory) {
+                    currentPath.value = file.path;
+                    refreshFiles();
+                } else {
+                    showNotify('Selected: ' + file.name);
+                }
+            };
+
+            const navigateUp = () => {
+                const parts = currentPath.value.split('/').filter(p => p);
+                parts.pop();
+                currentPath.value = parts.length === 0 ? '/' : '/' + parts.join('/');
                 refreshFiles();
-            } else {
-                // TODO: Open file viewer/editor
-                showNotification('File: ' + path);
-            }
+            };
+
+            const createNewFile = async () => {
+                const name = prompt('File name:');
+                if (!name) return;
+                const path = currentPath.value === '/' ? '/' + name : currentPath.value + '/' + name;
+                try {
+                    await invoke('create_file', { vaultId: currentVaultId.value, path, content: [] });
+                    refreshFiles();
+                } catch(e) { showNotify(e, true); }
+            };
+
+            const createNewFolder = async () => {
+                const name = prompt('Folder name:');
+                if (!name) return;
+                const path = currentPath.value === '/' ? '/' + name : currentPath.value + '/' + name;
+                try {
+                    await invoke('create_directory', { vaultId: currentVaultId.value, path });
+                    refreshFiles();
+                } catch(e) { showNotify(e, true); }
+            };
+
+            // Utils
+            const formatSize = (bytes) => {
+                if (bytes < 1024) return bytes + ' B';
+                if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+                return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+            };
+
+            // Init
+            onMounted(async () => {
+                try {
+                    fuseStatus.value = await invoke('get_fuse_info');
+                } catch { fuseStatus.value = 'Offline'; }
+                await refreshVaults();
+            });
+
+            return {
+                fuseStatus, vaults, currentVaultId, currentPath, files, breadcrumbs, sortedFiles,
+                activeModal, forms, notification,
+                showModal, closeModal, createVault, unlockVault, lockVault,
+                toggleMount, mountVault, handleItemClick, navigateUp,
+                createNewFile, createNewFolder, formatSize
+            };
         }
-
-        function navigateUp() {
-            const parts = currentPath.split('/').filter(p => p);
-            parts.pop();
-            currentPath = parts.length === 0 ? '/' : '/' + parts.join('/');
-            refreshFiles();
-        }
-
-        function formatSize(bytes) {
-            if (bytes < 1024) return bytes + ' B';
-            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-            if (bytes < 1024 * 1024 * 1024) return (bytes / 1024 / 1024).toFixed(1) + ' MB';
-            return (bytes / 1024 / 1024 / 1024).toFixed(1) + ' GB';
-        }
-
-        // Modal functions
-        function showCreateVaultModal() {
-            document.getElementById('createVaultModal').classList.add('active');
-        }
-
-        function showUnlockVaultModal() {
-            document.getElementById('unlockVaultModal').classList.add('active');
-        }
-
-        function closeModal(id) {
-            document.getElementById(id).classList.remove('active');
-        }
-
-        async function createVault() {
-            const name = document.getElementById('newVaultName').value;
-            const password = document.getElementById('newVaultPassword').value;
-            const confirm = document.getElementById('newVaultPasswordConfirm').value;
-            const provider = document.getElementById('newVaultProvider').value;
-
-            if (!name || !password) {
-                showNotification('Please fill in all fields', true);
-                return;
-            }
-
-            if (password !== confirm) {
-                showNotification('Passwords do not match', true);
-                return;
-            }
-
-            try {
-                await invoke('create_vault', {
-                    id: name,
-                    password: password,
-                    providerType: provider
-                });
-                closeModal('createVaultModal');
-                showNotification('Vault created successfully');
-                await refreshVaultList();
-                selectVault(name);
-            } catch (e) {
-                showNotification('Failed to create vault: ' + e, true);
-            }
-        }
-
-        async function unlockVault() {
-            const id = document.getElementById('unlockVaultId').value;
-            const password = document.getElementById('unlockVaultPassword').value;
-
-            if (!id || !password) {
-                showNotification('Please fill in all fields', true);
-                return;
-            }
-
-            try {
-                await invoke('unlock_vault', {
-                    id: id,
-                    password: password
-                });
-                closeModal('unlockVaultModal');
-                showNotification('Vault unlocked successfully');
-                await refreshVaultList();
-                selectVault(id);
-            } catch (e) {
-                showNotification('Failed to unlock vault: ' + e, true);
-            }
-        }
-
-        async function lockCurrentVault() {
-            if (!currentVaultId) return;
-
-            try {
-                await invoke('lock_vault', { id: currentVaultId });
-                showNotification('Vault locked');
-                currentVaultId = null;
-                document.getElementById('welcomeScreen').style.display = 'block';
-                document.getElementById('fileBrowser').style.display = 'none';
-                await refreshVaultList();
-            } catch (e) {
-                showNotification('Failed to lock vault: ' + e, true);
-            }
-        }
-
-        function toggleMount() {
-            const vault = openVaults.find(v => v.id === currentVaultId);
-            if (vault && vault.is_mounted) {
-                unmountCurrentVault();
-            } else {
-                document.getElementById('mountVaultModal').classList.add('active');
-            }
-        }
-
-        async function mountVault() {
-            const mountPoint = document.getElementById('mountPoint').value;
-            if (!mountPoint) {
-                showNotification('Please specify mount point', true);
-                return;
-            }
-
-            try {
-                await invoke('mount_vault', {
-                    id: currentVaultId,
-                    mountPoint: mountPoint
-                });
-                closeModal('mountVaultModal');
-                showNotification('Vault mounted at ' + mountPoint);
-                await refreshVaultList();
-            } catch (e) {
-                showNotification('Failed to mount vault: ' + e, true);
-            }
-        }
-
-        async function unmountCurrentVault() {
-            try {
-                await invoke('unmount_vault', { id: currentVaultId });
-                showNotification('Vault unmounted');
-                await refreshVaultList();
-            } catch (e) {
-                showNotification('Failed to unmount vault: ' + e, true);
-            }
-        }
-
-        async function createNewFile() {
-            const name = prompt('Enter file name:');
-            if (!name) return;
-
-            const path = currentPath === '/' ? '/' + name : currentPath + '/' + name;
-
-            try {
-                await invoke('create_file', {
-                    vaultId: currentVaultId,
-                    path: path,
-                    content: []
-                });
-                showNotification('File created');
-                await refreshFiles();
-            } catch (e) {
-                showNotification('Failed to create file: ' + e, true);
-            }
-        }
-
-        async function createNewFolder() {
-            const name = prompt('Enter folder name:');
-            if (!name) return;
-
-            const path = currentPath === '/' ? '/' + name : currentPath + '/' + name;
-
-            try {
-                await invoke('create_directory', {
-                    vaultId: currentVaultId,
-                    path: path
-                });
-                showNotification('Folder created');
-                await refreshFiles();
-            } catch (e) {
-                showNotification('Failed to create folder: ' + e, true);
-            }
-        }
-
-        function showNotification(message, isError = false) {
-            const notification = document.getElementById('notification');
-            notification.textContent = message;
-            notification.className = 'notification active' + (isError ? ' error' : '');
-            setTimeout(() => {
-                notification.classList.remove('active');
-            }, 3000);
-        }
-
-        // Initialize on load
-        window.addEventListener('DOMContentLoaded', init);
-    </script>
+    }).mount('#app');
+</script>
 </body>
 </html>
