@@ -76,6 +76,9 @@ impl<'a> VaultOperations<'a> {
             .upload(&storage_path, encrypted_content)
             .await?;
 
+        // Save tree state
+        self.session.save_tree().await?;
+
         info!(path = %path, size = content.len(), "File created");
         Ok(())
     }
@@ -166,6 +169,9 @@ impl<'a> VaultOperations<'a> {
             .upload(&storage_path, encrypted_content)
             .await?;
 
+        // Save tree state
+        self.session.save_tree().await?;
+
         info!(path = %path, size = content.len(), "File updated");
         Ok(())
     }
@@ -201,6 +207,9 @@ impl<'a> VaultOperations<'a> {
         let storage_path = VaultPath::parse(DATA_DIRNAME)?.join(&encrypted_name)?;
         self.session.provider().delete(&storage_path).await?;
 
+        // Save tree state
+        self.session.save_tree().await?;
+
         info!(path = %path, "File deleted");
         Ok(())
     }
@@ -233,6 +242,9 @@ impl<'a> VaultOperations<'a> {
             let mut tree = self.session.tree().write().await;
             tree.create_directory(path, &encrypted_name)?;
         }
+
+        // Save tree state
+        self.session.save_tree().await?;
 
         info!(path = %path, "Directory created");
         Ok(())
@@ -276,18 +288,24 @@ impl<'a> VaultOperations<'a> {
     pub async fn delete_directory(&self, path: &VaultPath) -> Result<()> {
         debug!(path = %path, "Deleting directory");
 
-        let mut tree = self.session.tree().write().await;
-        let node = tree.get_node(path)?;
+        {
+            let mut tree = self.session.tree().write().await;
+            let node = tree.get_node(path)?;
 
-        if !node.is_directory() {
-            return Err(Error::InvalidInput("Not a directory".to_string()));
+            if !node.is_directory() {
+                return Err(Error::InvalidInput("Not a directory".to_string()));
+            }
+
+            if !node.children.is_empty() {
+                return Err(Error::InvalidInput("Directory not empty".to_string()));
+            }
+
+            tree.remove(path)?;
         }
 
-        if !node.children.is_empty() {
-            return Err(Error::InvalidInput("Directory not empty".to_string()));
-        }
+        // Save tree state
+        self.session.save_tree().await?;
 
-        tree.remove(path)?;
         info!(path = %path, "Directory deleted");
         Ok(())
     }
@@ -334,7 +352,14 @@ mod tests {
             .await
             .unwrap();
 
-        VaultSession::unlock(config, password, provider).unwrap()
+        // Create metadata directory
+        provider
+            .create_dir(&VaultPath::parse("/m").unwrap())
+            .await
+            .unwrap();
+
+        use crate::tree::VaultTree;
+        VaultSession::unlock(config, password, provider, VaultTree::new()).unwrap()
     }
 
     #[tokio::test]

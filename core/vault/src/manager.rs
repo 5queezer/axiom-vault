@@ -2,8 +2,9 @@
 
 use std::sync::Arc;
 
-use crate::config::{VaultConfig, CONFIG_FILENAME, DATA_DIRNAME, META_DIRNAME};
+use crate::config::{VaultConfig, CONFIG_FILENAME, DATA_DIRNAME, META_DIRNAME, TREE_FILENAME};
 use crate::session::VaultSession;
+use crate::tree::VaultTree;
 use axiomvault_common::{Error, Result, VaultId, VaultPath};
 use axiomvault_crypto::KdfParams;
 use axiomvault_storage::{create_default_registry, ProviderRegistry, StorageProvider};
@@ -77,8 +78,8 @@ impl VaultManager {
         // Initialize vault structure
         self.initialize_vault_structure(&provider, &config).await?;
 
-        // Create and return session
-        VaultSession::unlock(config, password, provider)
+        // Create and return session with empty tree
+        VaultSession::unlock(config, password, provider, VaultTree::new())
     }
 
     /// Initialize vault directory structure.
@@ -138,8 +139,11 @@ impl VaultManager {
         let config_bytes = provider.download(&config_path).await?;
         let config = VaultConfig::from_bytes(&config_bytes)?;
 
+        // Load tree
+        let tree = self.load_tree(&provider).await?;
+
         // Create and return session
-        VaultSession::unlock(config, password, provider)
+        VaultSession::unlock(config, password, provider, tree)
     }
 
     /// Check if a vault exists at the given location.
@@ -162,6 +166,34 @@ impl VaultManager {
             .upload(&config_path, config_bytes)
             .await?;
         Ok(())
+    }
+
+    /// Save vault tree to storage.
+    pub async fn save_tree(&self, session: &VaultSession) -> Result<()> {
+        let tree = session.tree().read().await;
+        let tree_json = tree.to_json()?;
+        let tree_path = VaultPath::parse(META_DIRNAME)?.join(TREE_FILENAME)?;
+        session
+            .provider()
+            .upload(&tree_path, tree_json.into_bytes())
+            .await?;
+        Ok(())
+    }
+
+    /// Load vault tree from storage, or return empty tree if not found.
+    pub async fn load_tree(&self, provider: &Arc<dyn StorageProvider>) -> Result<VaultTree> {
+        let tree_path = VaultPath::parse(META_DIRNAME)?.join(TREE_FILENAME)?;
+
+        // If tree file doesn't exist, return a new empty tree
+        if !provider.exists(&tree_path).await? {
+            return Ok(VaultTree::new());
+        }
+
+        // Load and deserialize tree
+        let tree_bytes = provider.download(&tree_path).await?;
+        let tree_json = String::from_utf8(tree_bytes)
+            .map_err(|e| Error::Serialization(format!("Invalid UTF-8 in tree data: {}", e)))?;
+        VaultTree::from_json(&tree_json)
     }
 }
 
@@ -223,7 +255,7 @@ mod tests {
         let config_bytes = provider.download(&config_path).await.unwrap();
         let config = VaultConfig::from_bytes(&config_bytes).unwrap();
 
-        let reopened = VaultSession::unlock(config, password, provider).unwrap();
+        let reopened = VaultSession::unlock(config, password, provider, VaultTree::new()).unwrap();
         assert!(reopened.is_active());
         assert_eq!(reopened.vault_id().as_str(), vault_id.as_str());
     }

@@ -7,9 +7,9 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
-use crate::config::VaultConfig;
+use crate::config::{VaultConfig, META_DIRNAME, TREE_FILENAME};
 use crate::tree::VaultTree;
-use axiomvault_common::{Error, Result, VaultId};
+use axiomvault_common::{Error, Result, VaultId, VaultPath};
 use axiomvault_crypto::{derive_key, MasterKey};
 use axiomvault_storage::StorageProvider;
 
@@ -83,6 +83,7 @@ impl VaultSession {
         config: VaultConfig,
         password: &[u8],
         provider: Arc<dyn StorageProvider>,
+        tree: VaultTree,
     ) -> Result<Self> {
         // Verify vault version
         if !config.version.is_compatible() {
@@ -100,7 +101,7 @@ impl VaultSession {
         // Derive master key
         let master_key = derive_key(password, &config.salt, &config.kdf_params)?;
 
-        let tree = Arc::new(RwLock::new(VaultTree::new()));
+        let tree = Arc::new(RwLock::new(tree));
 
         Ok(Self {
             handle: SessionHandle::new(),
@@ -218,6 +219,21 @@ impl VaultSession {
 
         Ok(())
     }
+
+    /// Save the current tree state to storage.
+    ///
+    /// # Errors
+    /// - Serialization failure
+    /// - Storage failure
+    pub async fn save_tree(&self) -> Result<()> {
+        let tree = self.tree.read().await;
+        let tree_json = tree.to_json()?;
+        let tree_path = VaultPath::parse(META_DIRNAME)?.join(TREE_FILENAME)?;
+        self.provider
+            .upload(&tree_path, tree_json.into_bytes())
+            .await?;
+        Ok(())
+    }
 }
 
 impl Drop for VaultSession {
@@ -240,7 +256,7 @@ mod tests {
             VaultConfig::new(id, password, "memory", serde_json::Value::Null, params).unwrap();
 
         let provider = Arc::new(MemoryProvider::new());
-        let session = VaultSession::unlock(config.clone(), password, provider).unwrap();
+        let session = VaultSession::unlock(config.clone(), password, provider, VaultTree::new()).unwrap();
 
         (session, config)
     }
@@ -271,7 +287,7 @@ mod tests {
             VaultConfig::new(id, password, "memory", serde_json::Value::Null, params).unwrap();
 
         let provider = Arc::new(MemoryProvider::new());
-        let result = VaultSession::unlock(config, b"wrong", provider);
+        let result = VaultSession::unlock(config, b"wrong", provider, VaultTree::new());
 
         assert!(result.is_err());
     }
