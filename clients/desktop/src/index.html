@@ -395,11 +395,19 @@
 </div>
 
 <script type="module">
-    import { createApp, ref, computed, onMounted } from 'https://unpkg.com/vue@3/dist/vue.esm-browser.js';
+    try {
+        const { createApp, ref, computed, onMounted } = await import('https://unpkg.com/vue@3/dist/vue.esm-browser.js');
 
-    const { invoke } = window.__TAURI__.core;
+        // Check if Tauri API is available
+        if (!window.__TAURI__ || !window.__TAURI__.core) {
+            console.error('Tauri API not available');
+            document.body.innerHTML = '<div style="color: white; padding: 20px; text-align: center;">Error: Tauri API not loaded. Please restart the application.</div>';
+            throw new Error('Tauri API not available');
+        }
 
-    createApp({
+        const { invoke } = window.__TAURI__.core;
+
+        const app = createApp({
         setup() {
             // State
             const fuseStatus = ref('Checking...');
@@ -592,10 +600,17 @@
                 activeModal, forms, notification,
                 showModal, closeModal, createVault, unlockVault, lockVault,
                 toggleMount, mountVault, handleItemClick, navigateUp,
-                createNewFile, createNewFolder, formatSize
+                createNewFile, createNewFolder, formatSize, selectVault
             };
         }
-    }).mount('#app');
+    });
+
+        app.mount('#app');
+        console.log('Vue app mounted successfully');
+    } catch (error) {
+        console.error('Failed to initialize Vue app:', error);
+        document.body.innerHTML = '<div style="color: white; padding: 20px; text-align: center;"><h2>Initialization Error</h2><p>' + error.message + '</p><p>Check the console for details.</p></div>';
+    }
 </script>
 </body>
 </html>
