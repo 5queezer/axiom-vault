@@ -20,3 +20,6 @@ Thumbs.db
 # Test vaults (don't commit test data)
 /test_vaults/
 *.vault/
+
+# Tauri generated files
+**/src-tauri/gen/
