@@ -61,12 +61,10 @@ impl VaultManager {
         provider_config: serde_json::Value,
         kdf_params: KdfParams,
     ) -> Result<VaultSession> {
-        // Resolve provider
         let provider = self
             .registry
             .resolve(provider_type, provider_config.clone())?;
 
-        // Create vault config
         let config = VaultConfig::new(
             vault_id,
             password,
@@ -75,10 +73,8 @@ impl VaultManager {
             kdf_params,
         )?;
 
-        // Initialize vault structure
         self.initialize_vault_structure(&provider, &config).await?;
 
-        // Create and return session with empty tree
         VaultSession::unlock(config, password, provider, VaultTree::new())
     }
 
@@ -88,19 +84,16 @@ impl VaultManager {
         provider: &Arc<dyn StorageProvider>,
         config: &VaultConfig,
     ) -> Result<()> {
-        // Create data directory
         let data_path = VaultPath::parse(DATA_DIRNAME)?;
         if !provider.exists(&data_path).await? {
             provider.create_dir(&data_path).await?;
         }
 
-        // Create metadata directory
         let meta_path = VaultPath::parse(META_DIRNAME)?;
         if !provider.exists(&meta_path).await? {
             provider.create_dir(&meta_path).await?;
         }
 
-        // Save vault config
         let config_path = VaultPath::parse(CONFIG_FILENAME)?;
         let config_bytes = config.to_bytes()?;
         provider.upload(&config_path, config_bytes).await?;
@@ -127,10 +120,8 @@ impl VaultManager {
         provider_config: serde_json::Value,
         password: &[u8],
     ) -> Result<VaultSession> {
-        // Resolve provider
         let provider = self.registry.resolve(provider_type, provider_config)?;
 
-        // Load vault config
         let config_path = VaultPath::parse(CONFIG_FILENAME)?;
         if !provider.exists(&config_path).await? {
             return Err(Error::NotFound("Vault configuration not found".to_string()));
@@ -139,10 +130,8 @@ impl VaultManager {
         let config_bytes = provider.download(&config_path).await?;
         let config = VaultConfig::from_bytes(&config_bytes)?;
 
-        // Load tree
         let tree = self.load_tree(&provider).await?;
 
-        // Create and return session
         VaultSession::unlock(config, password, provider, tree)
     }
 
@@ -189,7 +178,6 @@ impl VaultManager {
             return Ok(VaultTree::new());
         }
 
-        // Load and deserialize tree
         let tree_bytes = provider.download(&tree_path).await?;
         let tree_json = String::from_utf8(tree_bytes)
             .map_err(|e| Error::Serialization(format!("Invalid UTF-8 in tree data: {}", e)))?;
@@ -234,7 +222,6 @@ mod tests {
         let vault_id = VaultId::new("test-vault").unwrap();
         let password = b"secure-password";
 
-        // Create vault
         let session = manager
             .create_vault(
                 vault_id.clone(),
@@ -264,7 +251,6 @@ mod tests {
     async fn test_vault_exists() {
         let manager = VaultManager::new();
 
-        // Should not exist initially
         let exists = manager
             .vault_exists("memory", serde_json::Value::Null)
             .await;

@@ -55,28 +55,23 @@ impl<'a> VaultOperations<'a> {
 
         debug!(path = %path, "Creating encrypted file");
 
-        // Encrypt filename
         let encrypted_name = self.encrypt_name(name)?;
 
-        // Encrypt content
         let master_key = self.session.master_key()?;
         let file_key = master_key.derive_file_key(encrypted_name.as_bytes());
         let encrypted_content = encrypt(file_key.as_bytes(), content)?;
 
-        // Update tree
         {
             let mut tree = self.session.tree().write().await;
             tree.create_file(path, &encrypted_name, content.len() as u64)?;
         }
 
-        // Upload to storage
         let storage_path = VaultPath::parse(DATA_DIRNAME)?.join(&encrypted_name)?;
         self.session
             .provider()
             .upload(&storage_path, encrypted_content)
             .await?;
 
-        // Save tree state
         self.session.save_tree().await?;
 
         info!(path = %path, size = content.len(), "File created");
@@ -99,7 +94,6 @@ impl<'a> VaultOperations<'a> {
     pub async fn read_file(&self, path: &VaultPath) -> Result<Vec<u8>> {
         debug!(path = %path, "Reading encrypted file");
 
-        // Get encrypted name from tree
         let encrypted_name = {
             let tree = self.session.tree().read().await;
             let node = tree.get_node(path)?;
@@ -109,11 +103,9 @@ impl<'a> VaultOperations<'a> {
             node.metadata.encrypted_name.clone()
         };
 
-        // Download from storage
         let storage_path = VaultPath::parse(DATA_DIRNAME)?.join(&encrypted_name)?;
         let encrypted_content = self.session.provider().download(&storage_path).await?;
 
-        // Decrypt content
         let master_key = self.session.master_key()?;
         let file_key = master_key.derive_file_key(encrypted_name.as_bytes());
         let content = decrypt(file_key.as_bytes(), &encrypted_content)?;
@@ -139,7 +131,6 @@ impl<'a> VaultOperations<'a> {
     pub async fn update_file(&self, path: &VaultPath, content: &[u8]) -> Result<()> {
         debug!(path = %path, "Updating encrypted file");
 
-        // Get encrypted name
         let encrypted_name = {
             let tree = self.session.tree().read().await;
             let node = tree.get_node(path)?;
@@ -149,12 +140,10 @@ impl<'a> VaultOperations<'a> {
             node.metadata.encrypted_name.clone()
         };
 
-        // Encrypt new content
         let master_key = self.session.master_key()?;
         let file_key = master_key.derive_file_key(encrypted_name.as_bytes());
         let encrypted_content = encrypt(file_key.as_bytes(), content)?;
 
-        // Update tree metadata
         {
             let mut tree = self.session.tree().write().await;
             let node = tree.get_node_mut(path)?;
@@ -162,14 +151,12 @@ impl<'a> VaultOperations<'a> {
             node.metadata.modified_at = chrono::Utc::now();
         }
 
-        // Upload to storage
         let storage_path = VaultPath::parse(DATA_DIRNAME)?.join(&encrypted_name)?;
         self.session
             .provider()
             .upload(&storage_path, encrypted_content)
             .await?;
 
-        // Save tree state
         self.session.save_tree().await?;
 
         info!(path = %path, size = content.len(), "File updated");
@@ -191,7 +178,6 @@ impl<'a> VaultOperations<'a> {
     pub async fn delete_file(&self, path: &VaultPath) -> Result<()> {
         debug!(path = %path, "Deleting file");
 
-        // Get encrypted name and remove from tree
         let encrypted_name = {
             let mut tree = self.session.tree().write().await;
             let node = tree.get_node(path)?;
@@ -203,11 +189,9 @@ impl<'a> VaultOperations<'a> {
             name
         };
 
-        // Delete from storage
         let storage_path = VaultPath::parse(DATA_DIRNAME)?.join(&encrypted_name)?;
         self.session.provider().delete(&storage_path).await?;
 
-        // Save tree state
         self.session.save_tree().await?;
 
         info!(path = %path, "File deleted");
@@ -234,16 +218,13 @@ impl<'a> VaultOperations<'a> {
 
         debug!(path = %path, "Creating directory");
 
-        // Encrypt directory name
         let encrypted_name = self.encrypt_name(name)?;
 
-        // Update tree
         {
             let mut tree = self.session.tree().write().await;
             tree.create_directory(path, &encrypted_name)?;
         }
 
-        // Save tree state
         self.session.save_tree().await?;
 
         info!(path = %path, "Directory created");
@@ -303,7 +284,6 @@ impl<'a> VaultOperations<'a> {
             tree.remove(path)?;
         }
 
-        // Save tree state
         self.session.save_tree().await?;
 
         info!(path = %path, "Directory deleted");
@@ -346,13 +326,11 @@ mod tests {
 
         let provider = Arc::new(MemoryProvider::new());
 
-        // Create data directory
         provider
             .create_dir(&VaultPath::parse("/d").unwrap())
             .await
             .unwrap();
 
-        // Create metadata directory
         provider
             .create_dir(&VaultPath::parse("/m").unwrap())
             .await

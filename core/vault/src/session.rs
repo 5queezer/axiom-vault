@@ -85,7 +85,6 @@ impl VaultSession {
         provider: Arc<dyn StorageProvider>,
         tree: VaultTree,
     ) -> Result<Self> {
-        // Verify vault version
         if !config.version.is_compatible() {
             return Err(Error::Vault(format!(
                 "Incompatible vault version: {:?}",
@@ -93,12 +92,10 @@ impl VaultSession {
             )));
         }
 
-        // Verify password
         if !config.verify_password(password)? {
             return Err(Error::NotPermitted("Invalid password".to_string()));
         }
 
-        // Derive master key
         let master_key = derive_key(password, &config.salt, &config.kdf_params)?;
 
         let tree = Arc::new(RwLock::new(tree));
@@ -196,12 +193,10 @@ impl VaultSession {
             return Err(Error::NotPermitted("Session is locked".to_string()));
         }
 
-        // Verify old password
         if !self.config.verify_password(old_password)? {
             return Err(Error::NotPermitted("Invalid old password".to_string()));
         }
 
-        // Create new config with new password
         let new_config = VaultConfig::new(
             self.config.id.clone(),
             new_password,
@@ -210,10 +205,8 @@ impl VaultSession {
             self.config.kdf_params.clone(),
         )?;
 
-        // Derive new master key
         let new_master_key = derive_key(new_password, &new_config.salt, &new_config.kdf_params)?;
 
-        // Update session
         self.config = new_config;
         self.master_key = Some(new_master_key);
 
@@ -238,7 +231,6 @@ impl VaultSession {
 
 impl Drop for VaultSession {
     fn drop(&mut self) {
-        // Ensure keys are zeroized
         self.lock();
     }
 }
