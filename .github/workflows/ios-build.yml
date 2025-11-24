@@ -23,7 +23,7 @@ jobs:
     name: Build Rust iOS Libraries
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -94,7 +94,7 @@ jobs:
     name: Swift Lint
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install SwiftLint
         run: brew install swiftlint
@@ -127,7 +127,7 @@ jobs:
     name: Swift Syntax Check
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Check Swift syntax
         run: |
@@ -143,7 +143,7 @@ jobs:
     runs-on: macos-latest
     needs: build-ios-rust
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Download iOS libraries
         uses: actions/download-artifact@v4
