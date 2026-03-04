@@ -92,11 +92,10 @@ impl VaultSession {
             )));
         }
 
-        if !config.verify_password(password)? {
-            return Err(Error::NotPermitted("Invalid password".to_string()));
-        }
-
-        let master_key = derive_key(password, &config.salt, &config.kdf_params)?;
+        // verify_password derives the key and returns it on success, avoiding a double KDF round
+        let master_key = config
+            .verify_password(password)?
+            .ok_or_else(|| Error::NotPermitted("Invalid password".to_string()))?;
 
         let tree = Arc::new(RwLock::new(tree));
 
@@ -193,7 +192,7 @@ impl VaultSession {
             return Err(Error::NotPermitted("Session is locked".to_string()));
         }
 
-        if !self.config.verify_password(old_password)? {
+        if self.config.verify_password(old_password)?.is_none() {
             return Err(Error::NotPermitted("Invalid old password".to_string()));
         }
 
@@ -293,7 +292,15 @@ mod tests {
 
         session.change_password(old_password, new_password).unwrap();
 
-        assert!(session.config().verify_password(new_password).unwrap());
-        assert!(!session.config().verify_password(old_password).unwrap());
+        assert!(session
+            .config()
+            .verify_password(new_password)
+            .unwrap()
+            .is_some());
+        assert!(session
+            .config()
+            .verify_password(old_password)
+            .unwrap()
+            .is_none());
     }
 }

@@ -89,7 +89,27 @@ impl StorageProvider for LocalProvider {
             }
         }
 
-        fs::write(&fs_path, &data).await?;
+        // Write atomically: write to a temp file in the same directory, then rename.
+        // This prevents partial/corrupt files if the process is interrupted mid-write.
+        let parent_dir = fs_path
+            .parent()
+            .ok_or_else(|| Error::InvalidInput("Cannot write to root path".to_string()))?;
+        let tmp_path = parent_dir.join(format!(
+            ".{}.tmp.{}",
+            fs_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("file"),
+            uuid::Uuid::new_v4()
+        ));
+
+        fs::write(&tmp_path, &data).await?;
+
+        if let Err(e) = fs::rename(&tmp_path, &fs_path).await {
+            // Best-effort cleanup; ignore secondary error
+            let _ = std::fs::remove_file(&tmp_path);
+            return Err(e.into());
+        }
 
         let fs_meta = fs::metadata(&fs_path).await?;
         Ok(self.create_metadata(path, fs_meta))

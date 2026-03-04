@@ -5,6 +5,7 @@
 
 use argon2::{Algorithm, Argon2, Params, Version};
 use serde::{Deserialize, Serialize};
+use subtle::ConstantTimeEq;
 
 use crate::keys::{MasterKey, Salt, KEY_LENGTH};
 use axiomvault_common::{Error, Result};
@@ -111,13 +112,8 @@ pub fn verify_password(
 ) -> Result<bool> {
     let derived = derive_key(password, salt, params)?;
 
-    // Constant-time comparison
-    let mut equal = true;
-    for (a, b) in derived.as_bytes().iter().zip(expected.as_bytes().iter()) {
-        equal &= a == b;
-    }
-
-    Ok(equal)
+    // Constant-time comparison using subtle to prevent timing attacks
+    Ok(derived.as_bytes().ct_eq(expected.as_bytes()).into())
 }
 
 #[cfg(test)]
