@@ -663,14 +663,29 @@ async fn cmd_gdrive_auth(
 ) -> Result<()> {
     info!("Starting Google Drive authentication");
 
-    let auth_config = if let (Some(id), Some(secret)) = (client_id, client_secret) {
-        AuthConfig {
-            client_id: id,
-            client_secret: secret,
-            redirect_url: "http://localhost:8080/callback".to_string(),
-        }
-    } else {
-        AuthConfig::default()
+    // Build auth config: CLI flags take precedence over environment variables.
+    let client_id = client_id
+        .or_else(|| std::env::var("AXIOMVAULT_GOOGLE_CLIENT_ID").ok())
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "Google OAuth2 client ID not provided. \
+                 Use --client-id or set AXIOMVAULT_GOOGLE_CLIENT_ID"
+            )
+        })?;
+
+    let client_secret = client_secret
+        .or_else(|| std::env::var("AXIOMVAULT_GOOGLE_CLIENT_SECRET").ok())
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "Google OAuth2 client secret not provided. \
+                 Use --client-secret or set AXIOMVAULT_GOOGLE_CLIENT_SECRET"
+            )
+        })?;
+
+    let auth_config = AuthConfig {
+        client_id,
+        client_secret,
+        redirect_url: "http://localhost:8080/callback".to_string(),
     };
 
     let auth_manager = AuthManager::new(auth_config).context("Failed to create auth manager")?;

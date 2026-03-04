@@ -9,10 +9,6 @@ use serde::{Deserialize, Serialize};
 
 use axiomvault_common::{Error, Result};
 
-/// OAuth2 client ID for Google Drive API.
-const GOOGLE_CLIENT_ID: &str = "YOUR_CLIENT_ID";
-/// OAuth2 client secret (note: in production, this should be securely managed).
-const GOOGLE_CLIENT_SECRET: &str = "YOUR_CLIENT_SECRET";
 /// OAuth2 authorization endpoint.
 const GOOGLE_AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 /// OAuth2 token endpoint.
@@ -55,11 +51,36 @@ pub struct AuthConfig {
 
 impl Default for AuthConfig {
     fn default() -> Self {
+        let client_id = std::env::var("AXIOMVAULT_GOOGLE_CLIENT_ID")
+            .unwrap_or_default();
+        let client_secret = std::env::var("AXIOMVAULT_GOOGLE_CLIENT_SECRET")
+            .unwrap_or_default();
         Self {
-            client_id: GOOGLE_CLIENT_ID.to_string(),
-            client_secret: GOOGLE_CLIENT_SECRET.to_string(),
+            client_id,
+            client_secret,
             redirect_url: REDIRECT_URL.to_string(),
         }
+    }
+}
+
+impl AuthConfig {
+    /// Validate that required credentials are set.
+    pub fn validate(&self) -> crate::Result<()> {
+        if self.client_id.is_empty() {
+            return Err(axiomvault_common::Error::InvalidInput(
+                "Google OAuth2 client ID not configured. \
+                 Set the AXIOMVAULT_GOOGLE_CLIENT_ID environment variable."
+                    .to_string(),
+            ));
+        }
+        if self.client_secret.is_empty() {
+            return Err(axiomvault_common::Error::InvalidInput(
+                "Google OAuth2 client secret not configured. \
+                 Set the AXIOMVAULT_GOOGLE_CLIENT_SECRET environment variable."
+                    .to_string(),
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -90,9 +111,14 @@ impl AuthManager {
         Ok(Self { client, config })
     }
 
-    /// Create with default configuration.
+    /// Create with default configuration (reads credentials from environment variables).
+    ///
+    /// Requires `AXIOMVAULT_GOOGLE_CLIENT_ID` and `AXIOMVAULT_GOOGLE_CLIENT_SECRET`
+    /// to be set in the environment.
     pub fn with_defaults() -> Result<Self> {
-        Self::new(AuthConfig::default())
+        let config = AuthConfig::default();
+        config.validate()?;
+        Self::new(config)
     }
 
     /// Generate the authorization URL for the user to visit.
