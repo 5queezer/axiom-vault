@@ -65,7 +65,7 @@ impl Default for AuthConfig {
 
 impl AuthConfig {
     /// Validate that required credentials are set.
-    pub fn validate(&self) -> crate::Result<()> {
+    pub fn validate(&self) -> axiomvault_common::Result<()> {
         if self.client_id.is_empty() {
             return Err(axiomvault_common::Error::InvalidInput(
                 "Google OAuth2 client ID not configured. \
