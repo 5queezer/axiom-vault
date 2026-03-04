@@ -51,10 +51,8 @@ pub struct AuthConfig {
 
 impl Default for AuthConfig {
     fn default() -> Self {
-        let client_id = std::env::var("AXIOMVAULT_GOOGLE_CLIENT_ID")
-            .unwrap_or_default();
-        let client_secret = std::env::var("AXIOMVAULT_GOOGLE_CLIENT_SECRET")
-            .unwrap_or_default();
+        let client_id = std::env::var("AXIOMVAULT_GOOGLE_CLIENT_ID").unwrap_or_default();
+        let client_secret = std::env::var("AXIOMVAULT_GOOGLE_CLIENT_SECRET").unwrap_or_default();
         Self {
             client_id,
             client_secret,
