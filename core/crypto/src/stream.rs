@@ -142,6 +142,15 @@ impl<'a> DecryptingStream<'a> {
         reader.read_exact(&mut chunk_size_bytes)?;
         let chunk_size = u32::from_le_bytes(chunk_size_bytes) as usize;
 
+        // Validate chunk size to prevent malicious headers causing huge allocations (e.g. 4GB)
+        const MAX_CHUNK_SIZE: usize = 64 * 1024 * 1024; // 64 MiB
+        if chunk_size > MAX_CHUNK_SIZE {
+            return Err(Error::Crypto(format!(
+                "Chunk size {} exceeds maximum allowed ({} bytes)",
+                chunk_size, MAX_CHUNK_SIZE
+            )));
+        }
+
         let mut total_chunks_bytes = [0u8; 8];
         reader.read_exact(&mut total_chunks_bytes)?;
         let total_chunks = u64::from_le_bytes(total_chunks_bytes);
