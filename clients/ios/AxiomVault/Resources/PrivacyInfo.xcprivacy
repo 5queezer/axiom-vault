@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  PrivacyInfo.xcprivacy — Apple Privacy Manifest (iOS 17+ required)
+  https://developer.apple.com/documentation/bundleresources/privacy_manifest_files
+
+  AxiomVault collects NO user data. There is no tracking, no analytics,
+  and no third-party SDKs with required-reason API usage.
+-->
+<plist version="1.0">
+<dict>
+    <!-- NSPrivacyTracking: whether this app or any third-party SDK tracks users -->
+    <key>NSPrivacyTracking</key>
+    <false/>
+
+    <!-- NSPrivacyTrackingDomains: domains used for tracking (empty — none) -->
+    <key>NSPrivacyTrackingDomains</key>
+    <array/>
+
+    <!-- NSPrivacyCollectedDataTypes: data types collected (none) -->
+    <key>NSPrivacyCollectedDataTypes</key>
+    <array/>
+
+    <!--
+      NSPrivacyAccessedAPITypes: APIs that require a declared reason.
+      AxiomVault uses:
+        - UserDefaults (NSUserDefaults) — to store encrypted token state and UI preferences
+          Reason code: CA92.1 (app functionality — the app cannot function without it)
+        - File timestamp APIs — to maintain vault entry metadata
+          Reason code: C617.1 (app functionality — required for vault directory listings)
+    -->
+    <key>NSPrivacyAccessedAPITypes</key>
+    <array>
+        <dict>
+            <key>NSPrivacyAccessedAPIType</key>
+            <string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+            <key>NSPrivacyAccessedAPITypeReasons</key>
+            <array>
+                <!-- CA92.1: Access info from the same app that wrote it -->
+                <string>CA92.1</string>
+            </array>
+        </dict>
+        <dict>
+            <key>NSPrivacyAccessedAPIType</key>
+            <string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
+            <key>NSPrivacyAccessedAPITypeReasons</key>
+            <array>
+                <!-- C617.1: Display to user, or process file timestamps the app has access to -->
+                <string>C617.1</string>
+            </array>
+        </dict>
+    </array>
+</dict>
+</plist>
