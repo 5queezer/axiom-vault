@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use axiomvault_common::{Error, Result, VaultId};
-use axiomvault_crypto::{KdfParams, Salt};
+use axiomvault_crypto::{KdfParams, MasterKey, Salt};
 
 /// Vault format version for migration support.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -105,11 +105,14 @@ impl VaultConfig {
 
     /// Verify a password against this configuration.
     ///
+    /// Returns the derived `MasterKey` on success so the caller does not need
+    /// to derive it a second time (avoids double-KDF cost on unlock).
+    ///
     /// # Returns
-    /// - `Ok(true)` if password is correct
-    /// - `Ok(false)` if password is incorrect
+    /// - `Ok(Some(key))` if password is correct
+    /// - `Ok(None)` if password is incorrect
     /// - `Err(_)` if verification failed for other reasons
-    pub fn verify_password(&self, password: &[u8]) -> Result<bool> {
+    pub fn verify_password(&self, password: &[u8]) -> Result<Option<MasterKey>> {
         use axiomvault_crypto::{decrypt, derive_key};
 
         let master_key = derive_key(password, &self.salt, &self.kdf_params)?;
@@ -117,9 +120,13 @@ impl VaultConfig {
         match decrypt(master_key.as_bytes(), &self.key_verification) {
             Ok(plaintext) => {
                 let expected = b"AXIOMVAULT_KEY_VERIFICATION_V1";
-                Ok(plaintext == expected)
+                if plaintext == expected {
+                    Ok(Some(master_key))
+                } else {
+                    Ok(None)
+                }
             }
-            Err(_) => Ok(false), // Decryption failed = wrong password
+            Err(_) => Ok(None), // Decryption failed = wrong password
         }
     }
 
@@ -178,8 +185,8 @@ mod tests {
         let config =
             VaultConfig::new(id, password, "memory", serde_json::Value::Null, params).unwrap();
 
-        assert!(config.verify_password(password).unwrap());
-        assert!(!config.verify_password(b"wrong-password").unwrap());
+        assert!(config.verify_password(password).unwrap().is_some());
+        assert!(config.verify_password(b"wrong-password").unwrap().is_none());
     }
 
     #[test]
