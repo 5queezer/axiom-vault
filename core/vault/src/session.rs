@@ -292,7 +292,15 @@ mod tests {
 
         session.change_password(old_password, new_password).unwrap();
 
-        assert!(session.config().verify_password(new_password).unwrap().is_some());
-        assert!(session.config().verify_password(old_password).unwrap().is_none());
+        assert!(session
+            .config()
+            .verify_password(new_password)
+            .unwrap()
+            .is_some());
+        assert!(session
+            .config()
+            .verify_password(old_password)
+            .unwrap()
+            .is_none());
     }
 }

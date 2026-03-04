@@ -96,7 +96,10 @@ impl StorageProvider for LocalProvider {
             .ok_or_else(|| Error::InvalidInput("Cannot write to root path".to_string()))?;
         let tmp_path = parent_dir.join(format!(
             ".{}.tmp.{}",
-            fs_path.file_name().and_then(|n| n.to_str()).unwrap_or("file"),
+            fs_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("file"),
             uuid::Uuid::new_v4()
         ));
 

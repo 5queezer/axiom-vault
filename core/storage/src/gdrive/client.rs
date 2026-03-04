@@ -157,9 +157,9 @@ impl DriveClient {
             let auth = self.auth_header().await?;
 
             let query = format!(
-            "'{}' in parents and trashed = false",
-            folder_id.replace('\'', "\\'")
-        );
+                "'{}' in parents and trashed = false",
+                folder_id.replace('\'', "\\'")
+            );
 
             let mut request = self
                 .http
