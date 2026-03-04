@@ -322,6 +322,12 @@ async fn main() -> Result<()> {
 
 /// Prompt for password securely.
 fn prompt_password(prompt: &str) -> Result<Vec<u8>> {
+    // Allow non-interactive use via environment variable (useful for scripting/testing)
+    if let Ok(pw) = std::env::var("AXIOMVAULT_PASSWORD") {
+        if !pw.is_empty() {
+            return Ok(pw.into_bytes());
+        }
+    }
     let password = rpassword::prompt_password(prompt).context("Failed to read password")?;
     Ok(password.into_bytes())
 }
