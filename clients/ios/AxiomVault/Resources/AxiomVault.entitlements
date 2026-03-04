@@ -10,5 +10,10 @@
     <array>
         <string>$(AppIdentifierPrefix)com.axiomvault.ios</string>
     </array>
+    <!-- Sign in with Apple — required by App Store Guidelines §4.8 -->
+    <key>com.apple.developer.applesignin</key>
+    <array>
+        <string>Default</string>
+    </array>
 </dict>
 </plist>
