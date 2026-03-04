@@ -212,4 +212,4 @@ RUST_BACKTRACE=1         # Enable backtraces for debugging
 
 ## License
 
-MIT OR Apache-2.0
+MIT
