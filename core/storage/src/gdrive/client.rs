@@ -156,7 +156,10 @@ impl DriveClient {
             let url = format!("{}/files", DRIVE_API_BASE);
             let auth = self.auth_header().await?;
 
-            let query = format!("'{}' in parents and trashed = false", folder_id);
+            let query = format!(
+            "'{}' in parents and trashed = false",
+            folder_id.replace('\'', "\\'")
+        );
 
             let mut request = self
                 .http
@@ -197,7 +200,7 @@ impl DriveClient {
         let query = format!(
             "name = '{}' and '{}' in parents and trashed = false",
             name.replace('\'', "\\'"),
-            parent_id
+            parent_id.replace('\'', "\\'")
         );
 
         let response = self
