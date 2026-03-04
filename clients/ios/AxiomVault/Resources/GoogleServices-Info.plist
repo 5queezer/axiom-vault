@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  GoogleServices-Info.plist — PLACEHOLDER
+  ========================================
+  To enable Google Drive sync in AxiomVault:
+
+  1. Go to https://console.cloud.google.com/
+  2. Create or select a project
+  3. Enable the "Google Drive API"
+  4. Go to APIs & Services > Credentials
+  5. Create credentials → OAuth 2.0 Client ID → iOS
+  6. Enter your app's Bundle ID (com.axiomvault.ios)
+  7. Download the generated GoogleServices-Info.plist and replace this file
+
+  DO NOT commit the real plist to source control — add it to .gitignore.
+
+  This placeholder file keeps the build valid but Google Drive sync will be
+  disabled until a real plist with valid credentials is supplied.
+-->
+<plist version="1.0">
+<dict>
+    <key>CLIENT_ID</key>
+    <string>YOUR_CLIENT_ID.apps.googleusercontent.com</string>
+    <key>BUNDLE_ID</key>
+    <string>com.axiomvault.ios</string>
+</dict>
+</plist>

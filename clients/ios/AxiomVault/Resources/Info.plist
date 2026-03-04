@@ -54,7 +54,7 @@
 
     <!-- Privacy Usage Descriptions -->
     <key>NSFaceIDUsageDescription</key>
-    <string>AxiomVault uses Face ID to securely unlock your encrypted vault without entering your password.</string>
+    <string>AxiomVault uses Face ID to unlock your vault without entering your password.</string>
     <key>NSPhotoLibraryUsageDescription</key>
     <string>AxiomVault needs access to your photo library to add photos to your encrypted vault.</string>
     <key>NSPhotoLibraryAddUsageDescription</key>
@@ -93,6 +93,11 @@
         <key>NSAllowsArbitraryLoads</key>
         <false/>
     </dict>
+
+    <!-- Export Compliance -->
+    <!-- XChaCha20-Poly1305 is used for encryption — qualifies for ENC license exception -->
+    <key>ITSAppUsesNonExemptEncryption</key>
+    <true/>
 
     <!-- File Provider Extension Support -->
     <key>UIFileSharingEnabled</key>

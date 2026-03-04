@@ -1,22 +1,26 @@
 import Foundation
 import AuthenticationServices
 
-/// Manages Google Drive OAuth2 authentication
+/// Manages Google Drive OAuth2 authentication.
+///
+/// Client credentials are loaded from `GoogleServices-Info.plist` (standard Google pattern).
+/// To enable Google Drive sync:
+///   1. Create a project in Google Cloud Console
+///   2. Enable the Google Drive API
+///   3. Create OAuth 2.0 credentials (iOS app type)
+///   4. Download the generated `GoogleServices-Info.plist` and add it to the Xcode project
 class GoogleDriveAuth: NSObject, ObservableObject {
     /// Singleton instance
     static let shared = GoogleDriveAuth()
+
+    /// Placeholder string used when no real Client ID is configured.
+    private static let placeholderClientId = "YOUR_CLIENT_ID.apps.googleusercontent.com"
 
     /// OAuth2 configuration
     struct Config {
         let clientId: String
         let redirectUri: String
         let scope: String
-
-        static let defaultConfig = Config(
-            clientId: "YOUR_CLIENT_ID.apps.googleusercontent.com",
-            redirectUri: "com.axiomvault.ios:/oauth2callback",
-            scope: "https://www.googleapis.com/auth/drive.file"
-        )
     }
 
     /// OAuth2 tokens
@@ -36,27 +40,49 @@ class GoogleDriveAuth: NSObject, ObservableObject {
     @Published var tokens: Tokens?
     @Published var error: Error?
 
-    private var config = Config.defaultConfig
+    private var config: Config?
     private var webAuthSession: ASWebAuthenticationSession?
-    private var presentationContextProvider: ASWebAuthenticationPresentationContextProviding?
 
     private override init() {
         super.init()
+        loadConfig()
         loadTokens()
     }
 
-    /// Configure OAuth2 with custom client ID
-    func configure(clientId: String, redirectUri: String? = nil) {
-        self.config = Config(
+    // MARK: - Configuration
+
+    /// Load OAuth2 configuration from GoogleServices-Info.plist.
+    private func loadConfig() {
+        guard let plistURL = Bundle.main.url(forResource: "GoogleServices-Info", withExtension: "plist"),
+              let plist = NSDictionary(contentsOf: plistURL),
+              let clientId = plist["CLIENT_ID"] as? String else {
+            // GoogleServices-Info.plist not present — Google Drive sync disabled
+            return
+        }
+
+        config = Config(
             clientId: clientId,
-            redirectUri: redirectUri ?? "com.axiomvault.ios:/oauth2callback",
-            scope: Config.defaultConfig.scope
+            redirectUri: "com.axiomvault.ios:/oauth2callback",
+            scope: "https://www.googleapis.com/auth/drive.file"
         )
     }
 
-    /// Start the OAuth2 authentication flow
+    /// Validate that Google Drive sync is properly configured.
+    private func validateConfig() throws {
+        guard let config = config else {
+            throw GoogleDriveError.notConfigured
+        }
+        if config.clientId == GoogleDriveAuth.placeholderClientId || config.clientId.isEmpty {
+            throw GoogleDriveError.notConfigured
+        }
+    }
+
+    /// Start the OAuth2 authentication flow.
     func authenticate() async throws -> Tokens {
-        let authURL = buildAuthorizationURL()
+        try validateConfig()
+        guard let config = config else { throw GoogleDriveError.notConfigured }
+
+        let authURL = buildAuthorizationURL(config: config)
 
         return try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.main.async { [weak self] in
@@ -67,7 +93,7 @@ class GoogleDriveAuth: NSObject, ObservableObject {
 
                 let session = ASWebAuthenticationSession(
                     url: authURL,
-                    callbackURLScheme: self.extractScheme(from: self.config.redirectUri)
+                    callbackURLScheme: self.extractScheme(from: config.redirectUri)
                 ) { [weak self] callbackURL, error in
                     guard let self = self else {
                         continuation.resume(throwing: GoogleDriveError.authenticationFailed("Self is nil"))
@@ -90,10 +116,9 @@ class GoogleDriveAuth: NSObject, ObservableObject {
                         return
                     }
 
-                    // Exchange code for tokens
                     Task {
                         do {
-                            let tokens = try await self.exchangeCodeForTokens(code)
+                            let tokens = try await self.exchangeCodeForTokens(code, config: config)
                             await MainActor.run {
                                 self.tokens = tokens
                                 self.isAuthenticated = true
@@ -108,7 +133,6 @@ class GoogleDriveAuth: NSObject, ObservableObject {
 
                 session.presentationContextProvider = self
                 session.prefersEphemeralWebBrowserSession = false
-
                 self.webAuthSession = session
 
                 if !session.start() {
@@ -118,8 +142,11 @@ class GoogleDriveAuth: NSObject, ObservableObject {
         }
     }
 
-    /// Refresh the access token
+    /// Refresh the access token.
     func refreshAccessToken() async throws -> Tokens {
+        try validateConfig()
+        guard let config = config else { throw GoogleDriveError.notConfigured }
+
         guard let currentTokens = tokens, let refreshToken = currentTokens.refreshToken else {
             throw GoogleDriveError.noRefreshToken
         }
@@ -157,16 +184,16 @@ class GoogleDriveAuth: NSObject, ObservableObject {
             createdAt: Date()
         )
 
-        await MainActor.run {
-            self.tokens = newTokens
-        }
+        await MainActor.run { self.tokens = newTokens }
         saveTokens(newTokens)
 
         return newTokens
     }
 
-    /// Get a valid access token (refreshing if necessary)
+    /// Get a valid access token (refreshing if necessary).
     func getValidAccessToken() async throws -> String {
+        try validateConfig()
+
         guard var currentTokens = tokens else {
             throw GoogleDriveError.notAuthenticated
         }
@@ -178,7 +205,13 @@ class GoogleDriveAuth: NSObject, ObservableObject {
         return currentTokens.accessToken
     }
 
-    /// Sign out and clear tokens
+    /// Whether Google Drive sync is available (plist present and not placeholder).
+    var isSyncAvailable: Bool {
+        guard let config = config else { return false }
+        return !config.clientId.isEmpty && config.clientId != GoogleDriveAuth.placeholderClientId
+    }
+
+    /// Sign out and clear tokens.
     func signOut() {
         tokens = nil
         isAuthenticated = false
@@ -187,7 +220,7 @@ class GoogleDriveAuth: NSObject, ObservableObject {
 
     // MARK: - Private Helpers
 
-    private func buildAuthorizationURL() -> URL {
+    private func buildAuthorizationURL(config: Config) -> URL {
         var components = URLComponents(string: "https://accounts.google.com/o/oauth2/v2/auth")!
         components.queryItems = [
             URLQueryItem(name: "client_id", value: config.clientId),
@@ -212,7 +245,7 @@ class GoogleDriveAuth: NSObject, ObservableObject {
         return components?.queryItems?.first { $0.name == "code" }?.value
     }
 
-    private func exchangeCodeForTokens(_ code: String) async throws -> Tokens {
+    private func exchangeCodeForTokens(_ code: String, config: Config) async throws -> Tokens {
         let tokenURL = URL(string: "https://oauth2.googleapis.com/token")!
         var request = URLRequest(url: tokenURL)
         request.httpMethod = "POST"
@@ -250,9 +283,7 @@ class GoogleDriveAuth: NSObject, ObservableObject {
 
     // MARK: - Token Persistence
 
-    private var tokensKey: String {
-        "com.axiomvault.googledrive.tokens"
-    }
+    private var tokensKey: String { "com.axiomvault.googledrive.tokens" }
 
     private func saveTokens(_ tokens: Tokens) {
         if let data = try? JSONEncoder().encode(tokens) {
@@ -287,6 +318,7 @@ extension GoogleDriveAuth: ASWebAuthenticationPresentationContextProviding {
 // MARK: - Errors
 
 enum GoogleDriveError: Error, LocalizedError {
+    case notConfigured
     case authenticationFailed(String)
     case userCancelled
     case noAuthorizationCode
@@ -298,6 +330,8 @@ enum GoogleDriveError: Error, LocalizedError {
 
     var errorDescription: String? {
         switch self {
+        case .notConfigured:
+            return "Google Drive sync not configured. Add GoogleServices-Info.plist with your OAuth2 credentials."
         case .authenticationFailed(let message):
             return "Authentication failed: \(message)"
         case .userCancelled:
