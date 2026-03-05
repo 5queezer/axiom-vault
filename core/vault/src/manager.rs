@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use crate::config::{VaultConfig, CONFIG_FILENAME, DATA_DIRNAME, META_DIRNAME, TREE_FILENAME};
+use crate::config::{VaultConfig, CONFIG_FILENAME, DATA_DIRNAME, META_DIRNAME};
 use crate::session::VaultSession;
 use crate::tree::VaultTree;
 use axiomvault_common::{Error, Result, VaultId, VaultPath};
@@ -103,6 +103,9 @@ impl VaultManager {
 
     /// Open an existing vault.
     ///
+    /// Verifies the password, derives the master key exactly once (Argon2id is
+    /// expensive), then uses that key to decrypt the encrypted tree index.
+    ///
     /// # Preconditions
     /// - Vault must exist at provider location
     /// - Password must be correct
@@ -130,9 +133,16 @@ impl VaultManager {
         let config_bytes = provider.download(&config_path).await?;
         let config = VaultConfig::from_bytes(&config_bytes)?;
 
-        let tree = self.load_tree(&provider).await?;
+        // Derive the master key once — `verify_password` runs Argon2id and
+        // authenticates the result, so we do NOT run it again in `unlock`.
+        let master_key = config
+            .verify_password(password)?
+            .ok_or_else(|| Error::NotPermitted("Invalid password".to_string()))?;
 
-        VaultSession::unlock(config, password, provider, tree)
+        // Load and decrypt the tree index using the verified master key.
+        let tree = VaultSession::load_and_decrypt_tree(&provider, &master_key).await?;
+
+        VaultSession::from_master_key(config, master_key, provider, tree)
     }
 
     /// Check if a vault exists at the given location.
@@ -157,31 +167,12 @@ impl VaultManager {
         Ok(())
     }
 
-    /// Save vault tree to storage.
+    /// Save vault tree to storage (encrypted).
+    ///
+    /// Delegates to [`VaultSession::save_tree`] which encrypts the tree index
+    /// with a key derived from the master key.
     pub async fn save_tree(&self, session: &VaultSession) -> Result<()> {
-        let tree = session.tree().read().await;
-        let tree_json = tree.to_json()?;
-        let tree_path = VaultPath::parse(META_DIRNAME)?.join(TREE_FILENAME)?;
-        session
-            .provider()
-            .upload(&tree_path, tree_json.into_bytes())
-            .await?;
-        Ok(())
-    }
-
-    /// Load vault tree from storage, or return empty tree if not found.
-    pub async fn load_tree(&self, provider: &Arc<dyn StorageProvider>) -> Result<VaultTree> {
-        let tree_path = VaultPath::parse(META_DIRNAME)?.join(TREE_FILENAME)?;
-
-        // If tree file doesn't exist, return a new empty tree
-        if !provider.exists(&tree_path).await? {
-            return Ok(VaultTree::new());
-        }
-
-        let tree_bytes = provider.download(&tree_path).await?;
-        let tree_json = String::from_utf8(tree_bytes)
-            .map_err(|e| Error::Serialization(format!("Invalid UTF-8 in tree data: {}", e)))?;
-        VaultTree::from_json(&tree_json)
+        session.save_tree().await
     }
 }
 
@@ -236,13 +227,22 @@ mod tests {
         let provider = session.provider();
         drop(session);
 
-        // Re-open using same provider (memory provider in this case)
-        // Note: In real usage, provider would be reconstructed from config
+        // Re-open using same provider (memory provider in this case).
+        // Config is re-loaded from storage; tree is loaded+decrypted via the master key.
         let config_path = VaultPath::parse(CONFIG_FILENAME).unwrap();
         let config_bytes = provider.download(&config_path).await.unwrap();
         let config = VaultConfig::from_bytes(&config_bytes).unwrap();
 
-        let reopened = VaultSession::unlock(config, password, provider, VaultTree::new()).unwrap();
+        let master_key = config
+            .verify_password(password)
+            .unwrap()
+            .expect("password should be correct");
+
+        let tree = VaultSession::load_and_decrypt_tree(&provider, &master_key)
+            .await
+            .unwrap();
+
+        let reopened = VaultSession::from_master_key(config, master_key, provider, tree).unwrap();
         assert!(reopened.is_active());
         assert_eq!(reopened.vault_id().as_str(), vault_id.as_str());
     }

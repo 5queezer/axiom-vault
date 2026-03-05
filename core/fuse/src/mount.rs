@@ -4,9 +4,8 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::thread::JoinHandle;
 
-use fuser::MountOption;
+use fuser::{BackgroundSession, MountOption};
 use tokio::runtime::Handle;
 use tracing::{error, info};
 
@@ -41,10 +40,12 @@ impl Default for MountOptions {
 /// Handle to a mounted FUSE filesystem.
 ///
 /// The mount is automatically unmounted when this handle is dropped.
+/// Internally backed by a `fuser::BackgroundSession` which owns the OS mount
+/// and the FUSE request-servicing thread.
 pub struct MountHandle {
     mount_point: PathBuf,
-    _session: Arc<fuser::Session<VaultFilesystem>>,
-    _thread: Option<JoinHandle<()>>,
+    /// Keeps the background FUSE thread alive. Dropping this unmounts.
+    _session: BackgroundSession,
 }
 
 impl MountHandle {
@@ -65,7 +66,7 @@ impl MountHandle {
 impl Drop for MountHandle {
     fn drop(&mut self) {
         info!("Unmounting vault from {:?}", self.mount_point);
-        // Session drop will handle unmounting
+        // BackgroundSession::drop() joins the background thread and calls umount2.
     }
 }
 
@@ -141,21 +142,21 @@ pub fn mount(
         fuse_options.push(MountOption::DefaultPermissions);
     }
 
-    // Mount the filesystem in background thread
-    let mount_point_clone = mount_point.clone();
-    let session = fuser::Session::new(fs, &mount_point_clone, &fuse_options).map_err(|e| {
-        error!("Failed to create FUSE session: {}", e);
+    // Spawn the FUSE request-servicing thread via fuser::spawn_mount2.
+    // The BackgroundSession returned here:
+    //   1. performs the kernel mount syscall,
+    //   2. starts a dedicated OS thread to service /dev/fuse read/write,
+    //   3. unmounts and joins the thread on drop.
+    let bg_session = fuser::spawn_mount2(fs, &mount_point, &fuse_options).map_err(|e| {
+        error!("Failed to mount vault at {:?}: {}", mount_point, e);
         Error::Io(e)
     })?;
-
-    let session = Arc::new(session);
 
     info!("Vault mounted successfully at {:?}", mount_point);
 
     Ok(MountHandle {
         mount_point,
-        _session: session,
-        _thread: None,
+        _session: bg_session,
     })
 }
 

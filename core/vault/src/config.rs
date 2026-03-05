@@ -3,6 +3,8 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use subtle::ConstantTimeEq;
+
 use axiomvault_common::{Error, Result, VaultId};
 use axiomvault_crypto::{KdfParams, MasterKey, Salt};
 
@@ -120,7 +122,11 @@ impl VaultConfig {
         match decrypt(master_key.as_bytes(), &self.key_verification) {
             Ok(plaintext) => {
                 let expected = b"AXIOMVAULT_KEY_VERIFICATION_V1";
-                if plaintext == expected {
+                // Use constant-time comparison to avoid timing side-channels.
+                // AEAD authentication is the primary guard; this is defence-in-depth.
+                if plaintext.len() == expected.len()
+                    && bool::from(plaintext.as_slice().ct_eq(expected))
+                {
                     Ok(Some(master_key))
                 } else {
                     Ok(None)
