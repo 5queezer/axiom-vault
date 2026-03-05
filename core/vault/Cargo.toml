@@ -8,6 +8,7 @@ axiomvault-common = { path = "../common" }
 axiomvault-crypto = { path = "../crypto" }
 axiomvault-storage = { path = "../storage" }
 
+subtle.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

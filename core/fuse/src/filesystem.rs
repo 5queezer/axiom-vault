@@ -53,6 +53,13 @@ struct InodeMap {
 }
 
 impl InodeMap {
+    /// Return the inode for a path, if it has been assigned.
+    fn get_inode_for_path(&self, path: &str) -> Option<u64> {
+        self.path_to_inode.get(path).copied()
+    }
+}
+
+impl InodeMap {
     fn new() -> Self {
         let mut map = Self {
             path_to_inode: HashMap::new(),
@@ -347,7 +354,28 @@ impl Filesystem for VaultFilesystem {
                 i += 1;
             }
             if i == 1 {
-                let parent_ino = if ino == 1 { 1 } else { 1 }; // Simplified parent lookup
+                // Look up the actual parent inode instead of always returning 1.
+                let parent_ino = {
+                    let map = inodes.read().await;
+                    if path_str == "/" {
+                        // Root's parent is itself (POSIX convention).
+                        1u64
+                    } else {
+                        // Walk up one component to find the parent path string.
+                        let parent_path = path_str
+                            .rfind('/')
+                            .map(|idx| {
+                                let p = &path_str[..idx];
+                                if p.is_empty() {
+                                    "/"
+                                } else {
+                                    p
+                                }
+                            })
+                            .unwrap_or("/");
+                        map.get_inode_for_path(parent_path).unwrap_or(1)
+                    }
+                };
                 if reply.add(parent_ino, 2, FileType::Directory, "..") {
                     reply.ok();
                     return;

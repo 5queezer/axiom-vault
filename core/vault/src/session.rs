@@ -10,8 +10,11 @@ use uuid::Uuid;
 use crate::config::{VaultConfig, META_DIRNAME, TREE_FILENAME};
 use crate::tree::VaultTree;
 use axiomvault_common::{Error, Result, VaultId, VaultPath};
-use axiomvault_crypto::{derive_key, MasterKey};
+use axiomvault_crypto::{decrypt, derive_key, encrypt, MasterKey};
 use axiomvault_storage::StorageProvider;
+
+/// Context tag for tree index key derivation. Changing this invalidates all existing vaults.
+const TREE_KEY_CONTEXT: &[u8] = b"vault_tree_index_v1";
 
 /// Session handle for tracking active sessions.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -64,7 +67,46 @@ pub struct VaultSession {
 }
 
 impl VaultSession {
+    /// Create a new vault session from an already-derived master key.
+    ///
+    /// This is the preferred constructor for `open_vault` paths where the key has
+    /// already been derived (verified against `key_verification`) so we avoid
+    /// running the expensive Argon2id KDF a second time.
+    ///
+    /// # Preconditions
+    /// - Config must be valid
+    /// - master_key must correspond to the password used to create the config
+    /// - Provider must be connected
+    ///
+    /// # Errors
+    /// - Incompatible vault version
+    pub fn from_master_key(
+        config: VaultConfig,
+        master_key: MasterKey,
+        provider: Arc<dyn StorageProvider>,
+        tree: VaultTree,
+    ) -> Result<Self> {
+        if !config.version.is_compatible() {
+            return Err(Error::Vault(format!(
+                "Incompatible vault version: {:?}",
+                config.version
+            )));
+        }
+
+        Ok(Self {
+            handle: SessionHandle::new(),
+            config,
+            master_key: Some(master_key),
+            provider,
+            tree: Arc::new(RwLock::new(tree)),
+            state: SessionState::Active,
+        })
+    }
+
     /// Create a new vault session by unlocking with password.
+    ///
+    /// Derives the master key via Argon2id. Prefer `from_master_key` when the
+    /// key has already been derived (e.g. in `open_vault`), to avoid a double KDF.
     ///
     /// # Preconditions
     /// - Config must be valid
@@ -85,28 +127,46 @@ impl VaultSession {
         provider: Arc<dyn StorageProvider>,
         tree: VaultTree,
     ) -> Result<Self> {
-        if !config.version.is_compatible() {
-            return Err(Error::Vault(format!(
-                "Incompatible vault version: {:?}",
-                config.version
-            )));
-        }
-
         // verify_password derives the key and returns it on success, avoiding a double KDF round
         let master_key = config
             .verify_password(password)?
             .ok_or_else(|| Error::NotPermitted("Invalid password".to_string()))?;
 
-        let tree = Arc::new(RwLock::new(tree));
+        Self::from_master_key(config, master_key, provider, tree)
+    }
 
-        Ok(Self {
-            handle: SessionHandle::new(),
-            config,
-            master_key: Some(master_key),
-            provider,
-            tree,
-            state: SessionState::Active,
-        })
+    /// Load and decrypt the vault tree index from storage.
+    ///
+    /// The tree is encrypted with a key derived from the master key.
+    /// Returns an empty tree if no tree file exists (new vault).
+    ///
+    /// # Errors
+    /// - Decryption failure (wrong key / tampered data)
+    /// - I/O errors
+    pub async fn load_and_decrypt_tree(
+        provider: &Arc<dyn StorageProvider>,
+        master_key: &MasterKey,
+    ) -> Result<VaultTree> {
+        let tree_path = VaultPath::parse(META_DIRNAME)?.join(TREE_FILENAME)?;
+
+        if !provider.exists(&tree_path).await? {
+            return Ok(VaultTree::new());
+        }
+
+        let encrypted_bytes = provider.download(&tree_path).await?;
+
+        let tree_key = master_key.derive_file_key(TREE_KEY_CONTEXT);
+        let tree_bytes = decrypt(tree_key.as_bytes(), &encrypted_bytes).map_err(|e| {
+            Error::Crypto(format!(
+                "Failed to decrypt tree index (wrong password or corrupted vault): {}",
+                e
+            ))
+        })?;
+
+        let tree_json = String::from_utf8(tree_bytes)
+            .map_err(|e| Error::Serialization(format!("Invalid UTF-8 in tree data: {}", e)))?;
+
+        VaultTree::from_json(&tree_json)
     }
 
     /// Get the session handle.
@@ -212,18 +272,27 @@ impl VaultSession {
         Ok(())
     }
 
-    /// Save the current tree state to storage.
+    /// Save the current tree state to storage (encrypted).
+    ///
+    /// The tree index is encrypted with a key derived from the master key so that
+    /// cleartext filenames, sizes, and directory structure are not visible to
+    /// observers with access to the storage backend (e.g. Google Drive).
     ///
     /// # Errors
     /// - Serialization failure
+    /// - Encryption failure (session must be active)
     /// - Storage failure
     pub async fn save_tree(&self) -> Result<()> {
         let tree = self.tree.read().await;
         let tree_json = tree.to_json()?;
+
+        // Derive tree-specific key from the master key, then AEAD-encrypt the index.
+        let tree_key = self.master_key()?.derive_file_key(TREE_KEY_CONTEXT);
+        let encrypted = encrypt(tree_key.as_bytes(), tree_json.as_bytes())
+            .map_err(|e| Error::Crypto(format!("Failed to encrypt tree index: {}", e)))?;
+
         let tree_path = VaultPath::parse(META_DIRNAME)?.join(TREE_FILENAME)?;
-        self.provider
-            .upload(&tree_path, tree_json.into_bytes())
-            .await?;
+        self.provider.upload(&tree_path, encrypted).await?;
         Ok(())
     }
 }

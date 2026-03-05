@@ -52,44 +52,58 @@ impl<'a> EncryptingStream<'a> {
     ///
     /// # Format
     /// - Header: version (1 byte) + chunk_size (4 bytes) + total_chunks (8 bytes)
-    /// - Chunks: [nonce + ciphertext + tag] for each chunk
+    /// - Chunks: nonce (24 B) || encrypt(index_le64 || plaintext) || tag (16 B)
+    ///
+    /// The chunk index is prepended to the plaintext (and therefore authenticated
+    /// by Poly1305) to detect chunk reordering or injection attacks.
+    ///
+    /// # Known limitation
+    /// The current implementation reads all encrypted chunks into a `Vec` before
+    /// writing, because `total_chunks` is written in the header and cannot be
+    /// known until all chunks are processed. For large files this doubles
+    /// peak memory usage. A future revision should either write chunks to a
+    /// temporary file and seek back to fill in the header, or remove the
+    /// `total_chunks` field from the header (using EOF instead).
     ///
     /// # Postconditions
     /// - All data is encrypted and authenticated
-    /// - Each chunk can be decrypted independently
+    /// - Chunk ordering is verified on decryption
     ///
     /// # Errors
     /// - I/O errors from reader/writer
     /// - Encryption errors
     pub fn encrypt_stream<R: Read, W: Write>(&self, mut reader: R, mut writer: W) -> Result<u64> {
         let mut buffer = vec![0u8; self.chunk_size];
-        let mut chunks = Vec::new();
+        let mut encrypted_chunks: Vec<Vec<u8>> = Vec::new();
         let mut total_bytes = 0u64;
 
-        // Read all chunks first to know total count
+        // Encrypt each chunk as it arrives; store encrypted output until we know
+        // the total count (needed for the header).
         loop {
             let bytes_read = reader.read(&mut buffer)?;
             if bytes_read == 0 {
                 break;
             }
+            let chunk_index = encrypted_chunks.len() as u64;
             total_bytes += bytes_read as u64;
-            chunks.push(buffer[..bytes_read].to_vec());
+
+            // Prepend chunk index to the plaintext so it is authenticated.
+            let mut plaintext = Vec::with_capacity(8 + bytes_read);
+            plaintext.extend_from_slice(&chunk_index.to_le_bytes());
+            plaintext.extend_from_slice(&buffer[..bytes_read]);
+
+            let encrypted = encrypt(self.key, &plaintext)?;
+            encrypted_chunks.push(encrypted);
         }
 
         // Write header
         writer.write_all(&[STREAM_VERSION])?;
         writer.write_all(&(self.chunk_size as u32).to_le_bytes())?;
-        writer.write_all(&(chunks.len() as u64).to_le_bytes())?;
+        writer.write_all(&(encrypted_chunks.len() as u64).to_le_bytes())?;
 
-        // Encrypt and write each chunk
-        for (i, chunk) in chunks.iter().enumerate() {
-            // Include chunk index in authenticated data
-            let mut aad = Vec::with_capacity(chunk.len() + 8);
-            aad.extend_from_slice(&(i as u64).to_le_bytes());
-            aad.extend_from_slice(chunk);
-
-            let encrypted = encrypt(self.key, &aad)?;
-            writer.write_all(&encrypted)?;
+        // Write encrypted chunks
+        for chunk in encrypted_chunks {
+            writer.write_all(&chunk)?;
         }
 
         Ok(total_bytes)
@@ -188,25 +202,24 @@ impl<'a> DecryptingStream<'a> {
 }
 
 /// Read a complete encrypted chunk from the reader.
+///
+/// Reads as many bytes as possible into `buffer`, returning the count.
+/// Returns 0 only if the reader is immediately at EOF (no data for this chunk).
+///
+/// For all but the last chunk the buffer will be filled completely.
+/// For the last (partial) chunk fewer bytes are returned — the caller must
+/// pass only `buffer[..bytes_read]` to the decryption function.
+///
+/// Note: `Read::read` may return partial data on a single call (this is
+/// legal for file/network I/O). We loop until the buffer is full or we hit
+/// EOF, correctly handling short reads.
 fn read_chunk<R: Read>(reader: &mut R, buffer: &mut [u8]) -> Result<usize> {
     let mut total_read = 0;
 
-    // First read the nonce
-    reader.read_exact(&mut buffer[..NONCE_SIZE])?;
-    total_read += NONCE_SIZE;
-
-    // Then try to read up to the rest of the buffer
-    loop {
+    while total_read < buffer.len() {
         match reader.read(&mut buffer[total_read..]) {
-            Ok(0) => break,
-            Ok(n) => {
-                total_read += n;
-                // Check if we've read enough (at minimum nonce + tag)
-                if total_read >= NONCE_SIZE + TAG_SIZE {
-                    // Try to detect end of chunk by checking if next read would be a new nonce
-                    break;
-                }
-            }
+            Ok(0) => break, // EOF
+            Ok(n) => total_read += n,
             Err(e) => return Err(e.into()),
         }
     }
