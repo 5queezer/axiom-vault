@@ -1,0 +1,37 @@
+# Pre-commit hooks for axiom-vault (Rust)
+# Install: pre-commit install
+# Run manually: pre-commit run --all-files
+
+default_stages: [pre-commit]
+
+repos:
+  # ── Secrets & security ───────────────────────────────────────────────────
+  - repo: local
+    hooks:
+      - id: gitleaks
+        name: gitleaks (secrets scan)
+        language: system
+        entry: gitleaks protect --staged --redact --log-level warn
+        pass_filenames: false
+
+      - id: cargo-fmt-check
+        name: cargo fmt (format check)
+        language: system
+        entry: /root/.cargo/bin/cargo fmt --check
+        pass_filenames: false
+        types: [rust]
+
+  # ── General file hygiene ─────────────────────────────────────────────────
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: detect-private-key
+      - id: check-added-large-files
+        args: ["--maxkb=512"]   # 0.5 MB — Rust source should be tiny; target/ is gitignored
+      - id: check-merge-conflict
+      - id: end-of-file-fixer
+        exclude: "^target/"
+      - id: trailing-whitespace
+        exclude: "^target/"
+      - id: check-toml              # Cargo.toml validation
+      - id: check-yaml
