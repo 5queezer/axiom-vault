@@ -191,30 +191,96 @@
                 <div v-else-if="activeModal === 'unlock'" class="sheet">
                     <h3>Unlock Vault</h3>
                     <p class="subtitle">Enter your credentials.</p>
+                    
+                    <!-- Error Display -->
+                    <div v-if="modalErrors.unlock" class="modal-error">
+                        <i class="fa-solid fa-circle-exclamation"></i>
+                        <span>{{ modalErrors.unlock }}</span>
+                        <button class="error-dismiss" @click="modalErrors.unlock = null">
+                            <i class="fa-solid fa-xmark"></i>
+                        </button>
+                    </div>
+                    
                     <div class="form-row">
                         <label>Vault ID</label>
-                        <input type="text" class="mac-input" v-model="forms.unlock.id" placeholder="Documents">
+                        <input 
+                            type="text" 
+                            class="mac-input" 
+                            :class="{ 'error': validationErrors.unlock.id }"
+                            v-model="forms.unlock.id" 
+                            placeholder="Documents"
+                            @input="clearValidationErrors('unlock')"
+                            @keydown.enter="unlockVault"
+                            tabindex="1">
+                        <div v-if="validationErrors.unlock.id" class="field-error">
+                            {{ validationErrors.unlock.id }}
+                        </div>
                     </div>
                     <div class="form-row">
                         <label>Password</label>
-                        <input type="password" class="mac-input" v-model="forms.unlock.password">
+                        <input 
+                            type="password" 
+                            class="mac-input" 
+                            :class="{ 'error': validationErrors.unlock.password }"
+                            v-model="forms.unlock.password"
+                            @input="clearValidationErrors('unlock')"
+                            @keydown.enter="unlockVault"
+                            tabindex="2">
+                        <div v-if="validationErrors.unlock.password" class="field-error">
+                            {{ validationErrors.unlock.password }}
+                        </div>
                     </div>
                     <div class="sheet-footer">
-                        <button class="mac-btn secondary" @click="closeModal">Cancel</button>
-                        <button class="mac-btn primary" @click="unlockVault">Unlock</button>
+                        <button class="mac-btn secondary" @click="closeModal" :disabled="isLoading">Cancel</button>
+                        <button 
+                            class="mac-btn primary" 
+                            @click="unlockVault" 
+                            :disabled="isLoading"
+                            tabindex="3">
+                            <span v-if="isLoading" class="loading-spinner"></span>
+                            {{ isLoading ? 'Unlocking...' : 'Unlock' }}
+                        </button>
                     </div>
                 </div>
 
                 <div v-else-if="activeModal === 'mount'" class="sheet">
                     <h3>Mount Volume</h3>
                     <p class="subtitle">Select a mount point.</p>
+                    
+                    <!-- Error Display -->
+                    <div v-if="modalErrors.mount" class="modal-error">
+                        <i class="fa-solid fa-circle-exclamation"></i>
+                        <span>{{ modalErrors.mount }}</span>
+                        <button class="error-dismiss" @click="modalErrors.mount = null">
+                            <i class="fa-solid fa-xmark"></i>
+                        </button>
+                    </div>
+                    
                     <div class="form-row">
                         <label>Mount Point</label>
-                        <input type="text" class="mac-input" v-model="forms.mount.point" placeholder="/mnt/vault">
+                        <input 
+                            type="text" 
+                            class="mac-input" 
+                            :class="{ 'error': validationErrors.mount.point }"
+                            v-model="forms.mount.point" 
+                            placeholder="/mnt/vault"
+                            @input="clearValidationErrors('mount')"
+                            @keydown.enter="mountVault"
+                            tabindex="1">
+                        <div v-if="validationErrors.mount.point" class="field-error">
+                            {{ validationErrors.mount.point }}
+                        </div>
                     </div>
                     <div class="sheet-footer">
-                        <button class="mac-btn secondary" @click="closeModal">Cancel</button>
-                        <button class="mac-btn primary" @click="mountVault">Mount</button>
+                        <button class="mac-btn secondary" @click="closeModal" :disabled="isLoading">Cancel</button>
+                        <button 
+                            class="mac-btn primary" 
+                            @click="mountVault" 
+                            :disabled="isLoading"
+                            tabindex="2">
+                            <span v-if="isLoading" class="loading-spinner"></span>
+                            {{ isLoading ? 'Mounting...' : 'Mount' }}
+                        </button>
                     </div>
                 </div>
 

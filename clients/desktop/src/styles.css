@@ -191,9 +191,76 @@ body {
 .mac-btn {
     padding: 4px 14px; border-radius: 6px; font-size: 13px;
     border: none; cursor: pointer; font-weight: 500;
+    display: flex; align-items: center; gap: 8px; justify-content: center;
+    transition: all 0.2s;
 }
+.mac-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 .mac-btn.secondary { background: rgba(255,255,255,0.1); color: white; }
 .mac-btn.primary { background: var(--mac-blue); color: white; }
+
+/* Loading Spinner */
+.loading-spinner {
+    width: 14px; height: 14px;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-top: 2px solid white;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Form Validation Styles */
+.mac-input.error, .mac-select.error {
+    border-color: #ff453a;
+    box-shadow: 0 0 0 3px rgba(255, 69, 58, 0.2);
+}
+
+.field-error {
+    color: #ff453a;
+    font-size: 11px;
+    margin-top: 4px;
+    font-weight: 500;
+}
+
+/* Modal Error Display */
+.modal-error {
+    background: rgba(255, 69, 58, 0.1);
+    border: 1px solid rgba(255, 69, 58, 0.3);
+    border-radius: 6px;
+    padding: 12px;
+    margin-bottom: 20px;
+    color: #ff453a;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.modal-error i {
+    flex-shrink: 0;
+}
+
+.modal-error span {
+    flex: 1;
+}
+
+.error-dismiss {
+    background: none;
+    border: none;
+    color: #ff453a;
+    cursor: pointer;
+    padding: 2px;
+    border-radius: 3px;
+    opacity: 0.7;
+    transition: opacity 0.2s;
+}
+
+.error-dismiss:hover {
+    opacity: 1;
+}
 
 /* --- Toast Transition --- */
 .toast-enter-active, .toast-leave-active { transition: all 0.3s ease; }
