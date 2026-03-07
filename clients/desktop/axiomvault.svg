@@ -6,25 +6,25 @@
       <stop offset="100%" style="stop-color:#0071e3;stop-opacity:1" />
     </linearGradient>
   </defs>
-  
+
   <!-- Rounded background -->
   <rect width="256" height="256" fill="url(#blueGrad)" rx="48"/>
-  
+
   <!-- Outer vault door frame -->
   <rect x="68" y="84" width="120" height="120" fill="none" stroke="white" stroke-width="8" rx="8"/>
-  
+
   <!-- Inner vault door -->
   <rect x="76" y="92" width="104" height="104" fill="rgba(255,255,255,0.15)" rx="4"/>
-  
+
   <!-- Lock bolt (horizontal) -->
   <rect x="88" y="130" width="80" height="12" fill="white" rx="6"/>
-  
+
   <!-- Lock bolt (vertical) -->
   <rect x="130" y="88" width="12" height="80" fill="white" rx="6"/>
-  
+
   <!-- Keyhole circle -->
   <circle cx="128" cy="144" r="8" fill="rgba(10,132,255,0.8)"/>
-  
+
   <!-- Security accent dots -->
   <circle cx="96" cy="104" r="3" fill="white" opacity="0.8"/>
   <circle cx="160" cy="104" r="3" fill="white" opacity="0.8"/>

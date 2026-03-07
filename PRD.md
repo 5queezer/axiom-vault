@@ -255,5 +255,3 @@ Coding Standards
     Reject unscoped feature additions.
     Reject patches that modify formatting or naming without functional need.
     Require explicit reasoning for all structural changes.
-
-

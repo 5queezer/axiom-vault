@@ -5,15 +5,15 @@ exit_code=0
 
 for file in "$@"; do
     [ "${file##*.}" = "rs" ] || continue
-    
+
     # Get all lines with 'unsafe'
     while IFS= read -r line_num; do
         # Check 3 lines before and the current line for SAFETY comment
         start=$((line_num - 3))
         [ $start -lt 1 ] && start=1
-        
+
         context=$(sed -n "${start},$((line_num))p" "$file")
-        
+
         if ! echo "$context" | grep -q "SAFETY:"; then
             echo "❌ unsafe without SAFETY comment at $file:$line_num"
             sed -n "$((line_num))p" "$file" | sed 's/^/    /'

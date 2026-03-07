@@ -1,13 +1,29 @@
-// Wait for Tauri API to be ready
-async function waitForTauri(timeout = 5000) {
-    const startTime = Date.now();
-    while (!window.__TAURI__ || !window.__TAURI__.core) {
-        if (Date.now() - startTime > timeout) {
-            throw new Error('Tauri API not available after timeout');
+// Wait for Tauri API with retries and extended timeout
+async function waitForTauri(timeout = 8000, maxRetries = 3) {
+    let retries = 0;
+
+    while (retries < maxRetries) {
+        const startTime = Date.now();
+
+        while (!window.__TAURI__ || !window.__TAURI__.core) {
+            if (Date.now() - startTime > timeout) {
+                retries++;
+                if (retries < maxRetries) {
+                    console.warn(`[App Init] Attempt ${retries}: Tauri API timeout (${timeout}ms), retrying in 500ms...`);
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                }
+                break;
+            }
+            await new Promise(resolve => setTimeout(resolve, 50));
         }
-        await new Promise(resolve => setTimeout(resolve, 50));
+
+        if (window.__TAURI__?.core) {
+            console.log(`[App Init] Tauri API ready on attempt ${retries + 1}`);
+            return window.__TAURI__.core;
+        }
     }
-    return window.__TAURI__.core;
+
+    throw new Error(`Tauri API failed to initialize after ${maxRetries} retries (${timeout}ms timeout each)`);
 }
 
 // Show error message to user
@@ -28,15 +44,20 @@ function showInitError(error) {
 
 // Initialize and mount the Vue application
 async function initApp() {
+    const startTime = Date.now();
     try {
-        console.log('Waiting for Tauri API...');
+        console.log('[App Init] Starting initialization at', new Date().toISOString());
+        console.log('[App Init] Waiting for Tauri API...');
+
         const tauriCore = await waitForTauri();
         const { invoke } = tauriCore;
-        console.log('Tauri API ready');
 
-        console.log('Loading Vue...');
+        console.log(`[App Init] ✓ Tauri API ready (${Date.now() - startTime}ms)`);
+        console.log('[App Init] Loading Vue framework...');
+
+        console.log(`[App Init] Loading Vue framework (${Date.now() - startTime}ms)...`);
         const { createApp, ref, computed, onMounted } = await import('https://unpkg.com/vue@3/dist/vue.esm-browser.js');
-        console.log('Vue loaded');
+        console.log(`[App Init] ✓ Vue loaded (${Date.now() - startTime}ms)`);
 
         const app = createApp({
             setup() {
@@ -55,7 +76,7 @@ async function initApp() {
                 });
 
                 const notification = ref({ show: false, message: '', isError: false });
-                
+
                 // Loading states and validation
                 const isLoading = ref(false);
                 const validationErrors = ref({
@@ -89,57 +110,57 @@ async function initApp() {
                 const validateCreateForm = () => {
                     const errors = {};
                     const f = forms.value.create;
-                    
+
                     if (!f.name || f.name.trim().length === 0) {
                         errors.name = 'Vault name is required';
                     } else if (f.name.trim().length < 3) {
                         errors.name = 'Vault name must be at least 3 characters';
                     }
-                    
+
                     if (!f.password || f.password.length === 0) {
                         errors.password = 'Password is required';
                     } else if (f.password.length < 8) {
                         errors.password = 'Password must be at least 8 characters';
                     }
-                    
+
                     if (!f.confirm || f.confirm.length === 0) {
                         errors.confirm = 'Password confirmation is required';
                     } else if (f.password !== f.confirm) {
                         errors.confirm = 'Passwords do not match';
                     }
-                    
+
                     validationErrors.value.create = errors;
                     return Object.keys(errors).length === 0;
                 };
-                
+
                 const validateUnlockForm = () => {
                     const errors = {};
                     const f = forms.value.unlock;
-                    
+
                     if (!f.id || f.id.trim().length === 0) {
                         errors.id = 'Vault ID is required';
                     }
-                    
+
                     if (!f.password || f.password.length === 0) {
                         errors.password = 'Password is required';
                     }
-                    
+
                     validationErrors.value.unlock = errors;
                     return Object.keys(errors).length === 0;
                 };
-                
+
                 const validateMountForm = () => {
                     const errors = {};
                     const f = forms.value.mount;
-                    
+
                     if (!f.point || f.point.trim().length === 0) {
                         errors.point = 'Mount point is required';
                     }
-                    
+
                     validationErrors.value.mount = errors;
                     return Object.keys(errors).length === 0;
                 };
-                
+
                 // Clear validation errors and modal errors when form changes
                 const clearValidationErrors = (formType) => {
                     validationErrors.value[formType] = {};
@@ -151,7 +172,7 @@ async function initApp() {
                     // Clear any existing errors when opening modal
                     clearValidationErrors(type);
                 };
-                
+
                 const closeModal = () => {
                     activeModal.value = null;
                     // Clear all validation errors and modal errors when closing
@@ -194,7 +215,7 @@ async function initApp() {
                 const createVault = async () => {
                     // Clear any existing modal errors
                     modalErrors.value.create = null;
-                    
+
                     // Validate form
                     if (!validateCreateForm()) {
                         return;
@@ -221,7 +242,7 @@ async function initApp() {
                 const unlockVault = async () => {
                     // Clear any existing modal errors
                     modalErrors.value.unlock = null;
-                    
+
                     // Validate form
                     if (!validateUnlockForm()) {
                         return;
@@ -264,7 +285,7 @@ async function initApp() {
                 const mountVault = async () => {
                     // Clear any existing modal errors
                     modalErrors.value.mount = null;
-                    
+
                     // Validate form
                     if (!validateMountForm()) {
                         return;
@@ -358,13 +379,17 @@ async function initApp() {
             }
         });
 
-        console.log('Mounting Vue app...');
+        console.log(`[App Init] Mounting Vue app (${Date.now() - startTime}ms)...`);
         app.mount('#app');
-        console.log('Vue app mounted successfully');
+        console.log(`[App Init] ✓ Vue app mounted successfully (${Date.now() - startTime}ms total)`);
     } catch (error) {
+        console.error('[App Init] ✗ Initialization failed:', error);
         showInitError(error);
     }
 }
 
 // Start the application
-initApp();
+console.log('[Bootstrap] Calling initApp()...');
+initApp().catch(err => {
+    console.error('[Bootstrap] Uncaught error in initApp():', err);
+});
