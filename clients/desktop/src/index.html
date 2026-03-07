@@ -115,28 +115,76 @@
                 <div v-if="activeModal === 'create'" class="sheet">
                     <h3>Create New Vault</h3>
                     <p class="subtitle">Enter details for your new secure container.</p>
+                    
+                    <!-- Error Display -->
+                    <div v-if="modalErrors.create" class="modal-error">
+                        <i class="fa-solid fa-circle-exclamation"></i>
+                        <span>{{ modalErrors.create }}</span>
+                        <button class="error-dismiss" @click="modalErrors.create = null">
+                            <i class="fa-solid fa-xmark"></i>
+                        </button>
+                    </div>
+                    
                     <div class="form-row">
                         <label>Vault Name</label>
-                        <input type="text" class="mac-input" v-model="forms.create.name" placeholder="Documents">
+                        <input 
+                            type="text" 
+                            class="mac-input" 
+                            :class="{ 'error': validationErrors.create.name }"
+                            v-model="forms.create.name" 
+                            placeholder="Documents"
+                            @input="clearValidationErrors('create')"
+                            @keydown.enter="createVault"
+                            tabindex="1">
+                        <div v-if="validationErrors.create.name" class="field-error">
+                            {{ validationErrors.create.name }}
+                        </div>
                     </div>
                     <div class="form-row">
                         <label>Password</label>
-                        <input type="password" class="mac-input" v-model="forms.create.password">
+                        <input 
+                            type="password" 
+                            class="mac-input" 
+                            :class="{ 'error': validationErrors.create.password }"
+                            v-model="forms.create.password"
+                            @input="clearValidationErrors('create')"
+                            @keydown.enter="createVault"
+                            tabindex="2">
+                        <div v-if="validationErrors.create.password" class="field-error">
+                            {{ validationErrors.create.password }}
+                        </div>
                     </div>
                     <div class="form-row">
                         <label>Verify</label>
-                        <input type="password" class="mac-input" v-model="forms.create.confirm">
+                        <input 
+                            type="password" 
+                            class="mac-input" 
+                            :class="{ 'error': validationErrors.create.confirm }"
+                            v-model="forms.create.confirm"
+                            @input="clearValidationErrors('create')"
+                            @keydown.enter="createVault"
+                            tabindex="3">
+                        <div v-if="validationErrors.create.confirm" class="field-error">
+                            {{ validationErrors.create.confirm }}
+                        </div>
                     </div>
                     <div class="form-row">
                         <label>Provider</label>
-                        <select class="mac-select" v-model="forms.create.provider">
+                        <select class="mac-select" v-model="forms.create.provider" tabindex="4">
                             <option value="memory">Local Memory</option>
                             <option value="gdrive">Google Drive</option>
                         </select>
                     </div>
                     <div class="sheet-footer">
-                        <button class="mac-btn secondary" @click="closeModal">Cancel</button>
-                        <button class="mac-btn primary" @click="createVault">Create</button>
+                        <button class="mac-btn secondary" @click="closeModal" :disabled="isLoading">Cancel</button>
+                        <button 
+                            class="mac-btn primary" 
+                            @click="createVault" 
+                            :disabled="isLoading"
+                            tabindex="5">
+                            <span v-if="isLoading" class="loading-spinner"></span>
+                            {{ isLoading ? 'Creating...' : 'Create' }}
+                        </button>
                     </div>
                 </div>
 

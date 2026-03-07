@@ -55,6 +55,19 @@ async function initApp() {
                 });
 
                 const notification = ref({ show: false, message: '', isError: false });
+                
+                // Loading states and validation
+                const isLoading = ref(false);
+                const validationErrors = ref({
+                    create: {},
+                    unlock: {},
+                    mount: {}
+                });
+                const modalErrors = ref({
+                    create: null,
+                    unlock: null,
+                    mount: null
+                });
 
                 // Computed
                 const breadcrumbs = computed(() => currentPath.value.split('/'));
@@ -72,8 +85,83 @@ async function initApp() {
                     setTimeout(() => notification.value.show = false, 3000);
                 };
 
-                const showModal = (type) => activeModal.value = type;
-                const closeModal = () => activeModal.value = null;
+                // Form validation functions
+                const validateCreateForm = () => {
+                    const errors = {};
+                    const f = forms.value.create;
+                    
+                    if (!f.name || f.name.trim().length === 0) {
+                        errors.name = 'Vault name is required';
+                    } else if (f.name.trim().length < 3) {
+                        errors.name = 'Vault name must be at least 3 characters';
+                    }
+                    
+                    if (!f.password || f.password.length === 0) {
+                        errors.password = 'Password is required';
+                    } else if (f.password.length < 8) {
+                        errors.password = 'Password must be at least 8 characters';
+                    }
+                    
+                    if (!f.confirm || f.confirm.length === 0) {
+                        errors.confirm = 'Password confirmation is required';
+                    } else if (f.password !== f.confirm) {
+                        errors.confirm = 'Passwords do not match';
+                    }
+                    
+                    validationErrors.value.create = errors;
+                    return Object.keys(errors).length === 0;
+                };
+                
+                const validateUnlockForm = () => {
+                    const errors = {};
+                    const f = forms.value.unlock;
+                    
+                    if (!f.id || f.id.trim().length === 0) {
+                        errors.id = 'Vault ID is required';
+                    }
+                    
+                    if (!f.password || f.password.length === 0) {
+                        errors.password = 'Password is required';
+                    }
+                    
+                    validationErrors.value.unlock = errors;
+                    return Object.keys(errors).length === 0;
+                };
+                
+                const validateMountForm = () => {
+                    const errors = {};
+                    const f = forms.value.mount;
+                    
+                    if (!f.point || f.point.trim().length === 0) {
+                        errors.point = 'Mount point is required';
+                    }
+                    
+                    validationErrors.value.mount = errors;
+                    return Object.keys(errors).length === 0;
+                };
+                
+                // Clear validation errors and modal errors when form changes
+                const clearValidationErrors = (formType) => {
+                    validationErrors.value[formType] = {};
+                    modalErrors.value[formType] = null;
+                };
+
+                const showModal = (type) => {
+                    activeModal.value = type;
+                    // Clear any existing errors when opening modal
+                    clearValidationErrors(type);
+                };
+                
+                const closeModal = () => {
+                    activeModal.value = null;
+                    // Clear all validation errors and modal errors when closing
+                    Object.keys(validationErrors.value).forEach(key => {
+                        validationErrors.value[key] = {};
+                    });
+                    Object.keys(modalErrors.value).forEach(key => {
+                        modalErrors.value[key] = null;
+                    });
+                };
 
                 // API Calls
                 const refreshVaults = async () => {
@@ -104,9 +192,16 @@ async function initApp() {
 
                 // CRUD Operations
                 const createVault = async () => {
+                    // Clear any existing modal errors
+                    modalErrors.value.create = null;
+                    
+                    // Validate form
+                    if (!validateCreateForm()) {
+                        return;
+                    }
+
                     const f = forms.value.create;
-                    if (!f.name || !f.password) return showNotify('Fill all fields', true);
-                    if (f.password !== f.confirm) return showNotify('Passwords match error', true);
+                    isLoading.value = true;
 
                     try {
                         await invoke('create_vault', { id: f.name, password: f.password, providerType: f.provider });
@@ -117,12 +212,24 @@ async function initApp() {
                         // Reset form
                         forms.value.create = { name: '', password: '', confirm: '', provider: 'memory' };
                     } catch (e) {
-                        showNotify(e, true);
+                        modalErrors.value.create = typeof e === 'string' ? e : e.toString();
+                    } finally {
+                        isLoading.value = false;
                     }
                 };
 
                 const unlockVault = async () => {
+                    // Clear any existing modal errors
+                    modalErrors.value.unlock = null;
+                    
+                    // Validate form
+                    if (!validateUnlockForm()) {
+                        return;
+                    }
+
                     const f = forms.value.unlock;
+                    isLoading.value = true;
+
                     try {
                         await invoke('unlock_vault', { id: f.id, password: f.password });
                         closeModal();
@@ -131,7 +238,9 @@ async function initApp() {
                         selectVault(f.id);
                         forms.value.unlock = { id: '', password: '' };
                     } catch (e) {
-                        showNotify(e, true);
+                        modalErrors.value.unlock = typeof e === 'string' ? e : e.toString();
+                    } finally {
+                        isLoading.value = false;
                     }
                 };
 
@@ -153,6 +262,16 @@ async function initApp() {
                 };
 
                 const mountVault = async () => {
+                    // Clear any existing modal errors
+                    modalErrors.value.mount = null;
+                    
+                    // Validate form
+                    if (!validateMountForm()) {
+                        return;
+                    }
+
+                    isLoading.value = true;
+
                     try {
                         await invoke('mount_vault', { id: currentVaultId.value, mountPoint: forms.value.mount.point });
                         closeModal();
@@ -160,7 +279,9 @@ async function initApp() {
                         await refreshVaults();
                         forms.value.mount.point = '';
                     } catch (e) {
-                        showNotify(e, true);
+                        modalErrors.value.mount = typeof e === 'string' ? e : e.toString();
+                    } finally {
+                        isLoading.value = false;
                     }
                 };
 
@@ -228,10 +349,11 @@ async function initApp() {
 
                 return {
                     fuseStatus, vaults, currentVaultId, currentPath, files, breadcrumbs, sortedFiles,
-                    activeModal, forms, notification,
+                    activeModal, forms, notification, isLoading, validationErrors, modalErrors,
                     showModal, closeModal, createVault, unlockVault, lockVault,
                     toggleMount, mountVault, handleItemClick, navigateUp,
-                    createNewFile, createNewFolder, formatSize, selectVault
+                    createNewFile, createNewFolder, formatSize, selectVault,
+                    clearValidationErrors
                 };
             }
         });
