@@ -115,6 +115,17 @@ pub struct VaultFilesystem {
     ttl: Duration,
 }
 
+// SAFETY: VaultFilesystem is safe to send across threads
+// - All components are either Arc (thread-safe) or owned
+// - RwLock ensures exclusive access to mutable state
+// - Tokio Handle is thread-safe
+unsafe impl Send for VaultFilesystem {}
+
+// SAFETY: VaultFilesystem is safe to share between threads
+// - All mutable state is protected by RwLock
+// - No non-thread-safe pointers are stored directly
+unsafe impl Sync for VaultFilesystem {}
+
 impl VaultFilesystem {
     /// Create a new FUSE filesystem for a vault session.
     ///
