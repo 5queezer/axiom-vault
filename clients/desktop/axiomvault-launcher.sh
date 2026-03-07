@@ -1,12 +1,14 @@
 #!/bin/bash
 # AxiomVault launcher wrapper - handles display server compatibility
 
-set -e
+# Deactivate conda if active (can interfere with display)
+if [ -n "$CONDA_PREFIX" ]; then
+    eval "$(conda shell.bash hook)" 2>/dev/null
+    conda deactivate 2>/dev/null || true
+fi
 
-# Resolve script directory
+# Find the binary
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-# Try to find the binary
 if [ -x "$SCRIPT_DIR/../../target/release/axiomvault-desktop" ]; then
     BINARY="$SCRIPT_DIR/../../target/release/axiomvault-desktop"
 elif [ -x "/usr/local/bin/axiomvault-desktop" ]; then
@@ -18,24 +20,29 @@ else
     exit 1
 fi
 
-# Deactivate conda if active (can interfere with display)
-if [ -n "$CONDA_PREFIX" ]; then
-    echo "Deactivating conda environment..."
-    eval "$(conda shell.bash hook)"
-    conda deactivate 2>/dev/null || true
-fi
+# GTK/WebKit backend preferences for compatibility
+# Use X11 backend if available (more stable for WebKit in virtual environments)
+export GDK_BACKEND=x11
 
-# Try to detect and use appropriate display server
-if [ -z "$DISPLAY" ] && [ -z "$WAYLAND_DISPLAY" ]; then
-    # No display found, try to use X11
+# Force X11 over Wayland for QT apps
+export QT_QPA_PLATFORM=xcb
+
+# GTK settings for WebKit
+export GTK_DEBUG=
+export GTK_CSD=1
+
+# Disable Wayland
+unset WAYLAND_DISPLAY
+unset WAYLAND_SOCKET
+
+# Ensure DISPLAY is set
+if [ -z "$DISPLAY" ]; then
     export DISPLAY=:0
 fi
 
-# Prefer X11 if Wayland is causing issues
-# Comment out the line below if you prefer Wayland
-if command -v xcb-xwayland >/dev/null 2>&1 || [ "$XDG_SESSION_TYPE" = "x11" ]; then
-    export QT_QPA_PLATFORM=xcb 2>/dev/null || true
-fi
+# Prevent GTK warnings in headless/virtual environments
+export GTK_THEME=Adwaita
+export XDG_SESSION_TYPE=x11
 
 # Run the application
 exec "$BINARY" "$@"
