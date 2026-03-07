@@ -40,6 +40,10 @@ help:
 	@echo "  PREFIX=/opt/axiom make install  - Install to /opt/axiom"
 	@echo "  DESTDIR=/staging make install   - Stage install to /staging"
 	@echo ""
+	@echo "Troubleshooting:"
+	@echo "  sudo make uninstall && sudo make install  - Full reinstall"
+	@echo "  sudo kbuildsycoca5 --noincremental      - Force KDE cache update"
+	@echo ""
 	@echo "iOS (macOS only):"
 	@echo "  make ios             - Build complete iOS project"
 	@echo "  make ios-framework   - Build Rust XCFramework for iOS"
@@ -72,12 +76,18 @@ install: desktop-release install-desktop
 	@echo "Launch with: axiomvault-desktop"
 	@echo "Or find in your application menu"
 
-install-desktop: $(APP_BINARY) | create-desktop-entry create-icon update-cache
+install-desktop: $(APP_BINARY) | create-launcher create-desktop-entry create-icon update-cache
 	@echo "Installing binary to $(BINDIR)..."
 	@mkdir -p $(BINDIR)
 	@install -m 755 $(APP_BINARY) $(BINDIR)/$(APP_NAME)
 	@ln -sf $(BINDIR)/$(APP_NAME) $(BINDIR)/axiomvault 2>/dev/null || true
 	@echo "✓ Binary installed"
+
+create-launcher:
+	@echo "Installing launcher wrapper..."
+	@mkdir -p $(BINDIR)
+	@install -m 755 clients/desktop/axiomvault-launcher.sh $(BINDIR)/axiomvault-launcher.sh
+	@echo "✓ Launcher installed"
 
 create-desktop-entry: $(APP_DESKTOP)
 	@echo "Installing desktop entry..."
@@ -113,6 +123,7 @@ uninstall-desktop:
 	@echo "Removing installed files..."
 	@rm -f $(BINDIR)/$(APP_NAME)
 	@rm -f $(BINDIR)/axiomvault
+	@rm -f $(BINDIR)/axiomvault-launcher.sh
 	@rm -f $(DESKTOPDIR)/axiomvault.desktop
 	@rm -f $(ICONDIR)/scalable/apps/axiomvault.svg
 	@echo "✓ Files removed"
