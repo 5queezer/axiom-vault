@@ -37,6 +37,7 @@ pub struct FileEntry {
 
 /// Error response.
 #[derive(Debug, Clone, Serialize)]
+#[allow(dead_code)]
 pub struct ErrorResponse {
     pub message: String,
 }

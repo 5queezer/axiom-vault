@@ -14,6 +14,7 @@ use crate::local_index::LocalIndex;
 pub struct OpenVault {
     pub session: Arc<VaultSession>,
     pub index: Arc<LocalIndex>,
+    #[allow(dead_code)]
     pub config_path: PathBuf,
     pub mount_handle: Option<MountHandle>,
 }

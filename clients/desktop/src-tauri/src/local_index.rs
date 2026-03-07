@@ -24,6 +24,7 @@ pub struct LocalIndex {
     conn: Mutex<Connection>,
 }
 
+#[allow(dead_code)]
 impl LocalIndex {
     /// Create or open a local index database.
     ///
@@ -129,7 +130,7 @@ impl LocalIndex {
 
     /// List children of a directory.
     pub fn list_children(&self, parent_path: &str) -> SqliteResult<Vec<IndexEntry>> {
-        let pattern = if parent_path == "/" {
+        let _pattern = if parent_path == "/" {
             "/[^/]+$".to_string()
         } else {
             format!("{}[/][^/]+$", regex::escape(parent_path))
