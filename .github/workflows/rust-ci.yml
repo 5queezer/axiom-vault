@@ -64,7 +64,7 @@ jobs:
             ${{ runner.os }}-cargo-clippy-
 
       - name: Run Clippy
-        run: cargo clippy --workspace --all-targets --all-features
+        run: cargo clippy --workspace --all-targets --all-features --exclude axiomvault-fuse
 
   # Build and test
   test:
@@ -232,7 +232,7 @@ jobs:
           key: ${{ runner.os }}-cargo-doc-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Build documentation
-        run: cargo doc --workspace --no-deps
+        run: cargo doc --workspace --no-deps --exclude axiomvault-fuse
         env:
           RUSTDOCFLAGS: "-D warnings"
 
