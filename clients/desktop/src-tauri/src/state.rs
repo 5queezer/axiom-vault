@@ -19,6 +19,11 @@ pub struct OpenVault {
     pub mount_handle: Option<MountHandle>,
 }
 
+// SAFETY: OpenVault is safe to share across threads.
+// MountHandle pointers are managed safely by the FUSE library.
+unsafe impl Send for OpenVault {}
+unsafe impl Sync for OpenVault {}
+
 /// Global application state.
 pub struct AppState {
     /// Map of vault ID to open vault.
@@ -26,6 +31,12 @@ pub struct AppState {
     /// Application data directory.
     pub data_dir: PathBuf,
 }
+
+// SAFETY: AppState is safe to share across threads.
+// The MountHandle contains FUSE pointers which are managed safely by the FUSE library.
+// All access to vaults is guarded by RwLock which ensures thread-safe access.
+unsafe impl Send for AppState {}
+unsafe impl Sync for AppState {}
 
 impl AppState {
     pub fn new(data_dir: PathBuf) -> Self {
