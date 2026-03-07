@@ -19,9 +19,11 @@ pub struct OpenVault {
     pub mount_handle: Option<MountHandle>,
 }
 
-// SAFETY: OpenVault is safe to share across threads.
-// MountHandle pointers are managed safely by the FUSE library.
+// SAFETY: All fields except mount_handle are Arc/owned. MountHandle pointers
+// are managed safely by the FUSE library, which is thread-safe.
 unsafe impl Send for OpenVault {}
+
+// SAFETY: All mutable access is through Arc/RwLock, making it safe for concurrent access.
 unsafe impl Sync for OpenVault {}
 
 /// Global application state.
@@ -32,10 +34,11 @@ pub struct AppState {
     pub data_dir: PathBuf,
 }
 
-// SAFETY: AppState is safe to share across threads.
-// The MountHandle contains FUSE pointers which are managed safely by the FUSE library.
-// All access to vaults is guarded by RwLock which ensures thread-safe access.
+// SAFETY: All fields are arc/rwlock-wrapped or tokio types that are Send+Sync.
+// MountHandle pointers are managed safely by the FUSE library, and all
+// access to state is guarded by RwLock, ensuring thread-safe access.
 unsafe impl Send for AppState {}
+// SAFETY: All fields are arc/rwlock-wrapped or tokio types that are Sync.
 unsafe impl Sync for AppState {}
 
 impl AppState {

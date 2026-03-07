@@ -21,6 +21,19 @@ repos:
         pass_filenames: false
         types: [rust]
 
+      - id: check-unsafe-blocks
+        name: unsafe blocks must have SAFETY comment
+        language: system
+        entry: bash .githooks/check-unsafe.sh
+        types: [rust]
+        
+      - id: cargo-clippy
+        name: cargo clippy (lint check)
+        language: system
+        entry: /root/.cargo/bin/cargo clippy --workspace --all-targets --all-features --
+        pass_filenames: false
+        types: [rust]
+
   # ── General file hygiene ─────────────────────────────────────────────────
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
