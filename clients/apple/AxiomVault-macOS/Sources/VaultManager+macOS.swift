@@ -48,6 +48,8 @@ extension VaultManager {
     // MARK: - macOS system event observers
 
     func registerMacOSAutoLockObservers() {
+        guard !didRegisterObservers else { return }
+        didRegisterObservers = true
         let workspace = NSWorkspace.shared.notificationCenter
         workspace.addObserver(
             forName: NSWorkspace.willSleepNotification,

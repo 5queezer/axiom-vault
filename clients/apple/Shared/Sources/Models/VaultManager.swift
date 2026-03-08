@@ -34,17 +34,23 @@ class VaultManager: ObservableObject {
 
     @Published var autoLockDuration: AutoLockDuration {
         didSet {
-            UserDefaults.standard.set(autoLockDuration.rawValue, forKey: "autoLockDuration")
+            UserDefaults.standard.set(autoLockDuration.rawValue, forKey: Self.autoLockKey)
             resetAutoLockTimer()
         }
     }
 
     private var autoLockTimer: Timer?
+    private var didRegisterObservers = false
+    static let autoLockKey = "autoLockDuration"
 
     init() {
-        UserDefaults.standard.register(defaults: ["autoLockDuration": AutoLockDuration.fifteenMinutes.rawValue])
-        let saved = UserDefaults.standard.integer(forKey: "autoLockDuration")
-        self.autoLockDuration = AutoLockDuration(rawValue: saved) ?? .fifteenMinutes
+        if let stored = UserDefaults.standard.object(forKey: Self.autoLockKey) as? Int,
+           let duration = AutoLockDuration(rawValue: stored) {
+            self.autoLockDuration = duration
+        } else {
+            self.autoLockDuration = .fifteenMinutes
+            UserDefaults.standard.set(AutoLockDuration.fifteenMinutes.rawValue, forKey: Self.autoLockKey)
+        }
     }
 
     // MARK: - Auto-lock timer
@@ -56,10 +62,9 @@ class VaultManager: ObservableObject {
         }
         if let timer = autoLockTimer, timer.isValid {
             timer.fireDate = Date().addingTimeInterval(TimeInterval(autoLockDuration.rawValue))
-        } else {
-            cancelAutoLockTimer()
-            startAutoLockTimer()
+            return
         }
+        startAutoLockTimer()
     }
 
     func startAutoLockTimer() {

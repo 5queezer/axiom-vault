@@ -5,6 +5,8 @@ extension VaultManager {
     // MARK: - iOS system event observers
 
     func registeriOSAutoLockObservers() {
+        guard !didRegisterObservers else { return }
+        didRegisterObservers = true
         NotificationCenter.default.addObserver(
             forName: UIApplication.didEnterBackgroundNotification,
             object: nil, queue: .main
