@@ -3,6 +3,7 @@ import os.log
 
 class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
     private let logger = Logger(subsystem: "com.axiomvault.macos.fileprovider", category: "extension")
+    private let cacheManager = CacheManager.shared
     let domain: NSFileProviderDomain
 
     required init(domain: NSFileProviderDomain) {
@@ -17,7 +18,15 @@ class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
     }
 
     func invalidate() {
+        if cacheManager.clearOnLock {
+            cacheManager.clearAll(forVault: currentVaultId)
+        }
         VaultCore.shared.closeVault()
+    }
+
+    /// The vault ID for the currently open vault, used as cache partition key.
+    private var currentVaultId: String {
+        (try? VaultCore.shared.getVaultInfo().vaultId) ?? "default"
     }
 
     // MARK: - Item lookup
@@ -96,26 +105,41 @@ class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
         let progress = Progress(totalUnitCount: 1)
 
         let vaultPath = FileProviderItem.vaultPath(from: itemIdentifier)
+        let vaultId = currentVaultId
+
+        // Build the item metadata (needed for both cache hit and miss paths)
+        func buildItem() -> FileProviderItem? {
+            let parentPath = (vaultPath as NSString).deletingLastPathComponent
+            let name = (vaultPath as NSString).lastPathComponent
+            guard let entries = try? VaultCore.shared.listDirectory(at: parentPath.isEmpty ? "/" : parentPath),
+                  let entry = entries.first(where: { $0.name == name })
+            else { return nil }
+            return FileProviderItem(
+                entry: entry,
+                parentIdentifier: FileProviderItem.identifier(for: parentPath.isEmpty ? "/" : parentPath),
+                vaultPath: vaultPath
+            )
+        }
+
+        // Check cache first
+        if let cachedURL = cacheManager.cachedURL(forVault: vaultId, path: vaultPath) {
+            logger.info("Serving \(vaultPath) from cache")
+            completionHandler(cachedURL, buildItem(), nil)
+            progress.completedUnitCount = 1
+            return progress
+        }
+
+        // Cache miss: extract from vault
         let tempDir = FileManager.default.temporaryDirectory
         let tempFile = tempDir.appendingPathComponent(UUID().uuidString)
 
         do {
             try VaultCore.shared.extractFile(from: vaultPath, to: tempFile.path)
 
-            let parentPath = (vaultPath as NSString).deletingLastPathComponent
-            let name = (vaultPath as NSString).lastPathComponent
-            let entries = try VaultCore.shared.listDirectory(at: parentPath.isEmpty ? "/" : parentPath)
+            // Store in cache for future requests
+            cacheManager.cache(from: tempFile, forVault: vaultId, path: vaultPath)
 
-            if let entry = entries.first(where: { $0.name == name }) {
-                let item = FileProviderItem(
-                    entry: entry,
-                    parentIdentifier: FileProviderItem.identifier(for: parentPath.isEmpty ? "/" : parentPath),
-                    vaultPath: vaultPath
-                )
-                completionHandler(tempFile, item, nil)
-            } else {
-                completionHandler(tempFile, nil, nil)
-            }
+            completionHandler(tempFile, buildItem(), nil)
         } catch {
             logger.error("fetchContents failed: \(error.localizedDescription)")
             completionHandler(nil, nil, error)
@@ -187,6 +211,8 @@ class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
                 // Remove old, add new
                 try VaultCore.shared.removeEntry(at: vaultPath)
                 try VaultCore.shared.addFile(from: fileURL.path, to: vaultPath)
+                // Invalidate stale cache entry
+                cacheManager.invalidate(forVault: currentVaultId, path: vaultPath)
             }
 
             let entry = VaultEntry(
@@ -222,6 +248,7 @@ class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
 
         do {
             try VaultCore.shared.removeEntry(at: vaultPath)
+            cacheManager.invalidate(forVault: currentVaultId, path: vaultPath)
             completionHandler(nil)
         } catch {
             logger.error("deleteItem failed: \(error.localizedDescription)")

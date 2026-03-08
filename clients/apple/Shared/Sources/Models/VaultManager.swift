@@ -1,4 +1,5 @@
 import Foundation
+import os.log
 import SwiftUI
 
 // MARK: - Auto-lock duration
@@ -24,6 +25,7 @@ enum AutoLockDuration: Int, CaseIterable {
 /// Base vault manager with shared logic for iOS and macOS
 @MainActor
 class VaultManager: ObservableObject {
+    private let logger = Logger(subsystem: "com.axiomvault", category: "vault-manager")
     @Published var isVaultOpen = false
     @Published var currentPath = "/"
     @Published var entries: [VaultEntry] = []
@@ -31,6 +33,7 @@ class VaultManager: ObservableObject {
     @Published var errorMessage: String?
     @Published var isLoading = false
     @Published var pathStack: [String] = ["/"]
+    @Published var cacheSize: Int64 = 0
 
     /// Set after a successful password unlock to offer biometric enrollment
     @Published var shouldOfferBiometricSave = false
@@ -206,6 +209,7 @@ class VaultManager: ObservableObject {
     func refreshState() async {
         await refreshVaultInfo()
         await refreshEntries()
+        refreshCacheSize()
     }
 
     func refreshVaultInfo() async {
@@ -222,6 +226,21 @@ class VaultManager: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    // MARK: - Cache
+
+    func refreshCacheSize() {
+        cacheSize = CacheManager.shared.totalCacheSize()
+    }
+
+    func clearCache() {
+        guard let info = vaultInfo else {
+            logger.warning("clearCache called with no open vault; nothing to clear")
+            return
+        }
+        CacheManager.shared.clearAll(forVault: info.vaultId)
+        cacheSize = 0
     }
 
     // MARK: - Helpers
