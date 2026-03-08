@@ -45,6 +45,32 @@ extension VaultManager {
         }
     }
 
+    // MARK: - macOS system event observers
+
+    func registerMacOSAutoLockObservers() {
+        guard !didRegisterObservers else { return }
+        didRegisterObservers = true
+        let workspace = NSWorkspace.shared.notificationCenter
+        workspace.addObserver(
+            forName: NSWorkspace.willSleepNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, self.isVaultOpen else { return }
+                self.closeVault()
+            }
+        }
+        workspace.addObserver(
+            forName: NSWorkspace.sessionDidResignActiveNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, self.isVaultOpen else { return }
+                self.closeVault()
+            }
+        }
+    }
+
     // MARK: - macOS vault operations
 
     func createVault(at url: URL, password: String) async {
@@ -57,6 +83,8 @@ extension VaultManager {
             currentVaultName = url.lastPathComponent
             saveBookmark(for: url)
             await refreshState()
+            registerMacOSAutoLockObservers()
+            startAutoLockTimer()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -75,6 +103,8 @@ extension VaultManager {
             currentVaultName = url.lastPathComponent
             updateBookmarkLastOpened(for: url)
             await refreshState()
+            registerMacOSAutoLockObservers()
+            startAutoLockTimer()
         } catch {
             errorMessage = error.localizedDescription
         }
