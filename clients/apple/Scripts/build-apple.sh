@@ -64,10 +64,27 @@ done
 rm -rf "$STAGING_DIR"
 mkdir -p "$STAGING_DIR"
 
+# Deployment targets (must match project.yml)
+MACOS_DEPLOYMENT_TARGET="13.0"
+IOS_DEPLOYMENT_TARGET="16.0"
+
 # Build each target
 for target in "${TARGETS[@]}"; do
     echo ""
     echo "--- Building for $target ---"
+
+    # Set deployment target so object files match Xcode's expected minimum OS
+    case "$target" in
+        *-apple-darwin)
+            export MACOSX_DEPLOYMENT_TARGET="$MACOS_DEPLOYMENT_TARGET"
+            unset IPHONEOS_DEPLOYMENT_TARGET
+            ;;
+        *-apple-ios*)
+            export IPHONEOS_DEPLOYMENT_TARGET="$IOS_DEPLOYMENT_TARGET"
+            unset MACOSX_DEPLOYMENT_TARGET
+            ;;
+    esac
+
     "$CARGO" +stable build \
         --manifest-path "$FFI_CRATE/Cargo.toml" \
         --target "$target" \

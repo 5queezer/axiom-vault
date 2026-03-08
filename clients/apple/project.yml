@@ -59,6 +59,8 @@ targets:
           - "-lresolv"
           - "-lSystem"
           - "-lc++"
+          - "-framework SystemConfiguration"
+          - "-framework Security"
         FRAMEWORK_SEARCH_PATHS:
           - "$(inherited)"
           - "$(PROJECT_DIR)/Frameworks"
@@ -137,6 +139,8 @@ targets:
           - "-lresolv"
           - "-lSystem"
           - "-lc++"
+          - "-framework SystemConfiguration"
+          - "-framework Security"
         FRAMEWORK_SEARCH_PATHS:
           - "$(inherited)"
           - "$(PROJECT_DIR)/Frameworks"
@@ -213,6 +217,8 @@ targets:
           - "-lresolv"
           - "-lSystem"
           - "-lc++"
+          - "-framework SystemConfiguration"
+          - "-framework Security"
         FRAMEWORK_SEARCH_PATHS:
           - "$(inherited)"
           - "$(PROJECT_DIR)/Frameworks"

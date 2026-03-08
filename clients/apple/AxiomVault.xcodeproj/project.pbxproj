@@ -88,7 +88,7 @@
 		A3DC4556318D26F8E2BE9BD3 /* FileProviderExtension.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileProviderExtension.swift; sourceTree = "<group>"; };
 		B073F2954E6B5549FB483C15 /* AxiomVault-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "AxiomVault-Bridging-Header.h"; sourceTree = "<group>"; };
 		BB6FBDC147FD51D3F0F7C002 /* OpenVaultView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenVaultView.swift; sourceTree = "<group>"; };
-		C2459183250E5EC720F372A9 /* AxiomVault-iOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "AxiomVault-iOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		C2459183250E5EC720F372A9 /* AxiomVault-iOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = "AxiomVault-iOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		D2A6E88EC540AA59A7621562 /* SidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarView.swift; sourceTree = "<group>"; };
 		D2C6A8C969C81CC2A93D90F9 /* FileProviderEnumerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileProviderEnumerator.swift; sourceTree = "<group>"; };
 		D4FF3A7F38919CE4B6C938E2 /* AxiomVaultFileProvider.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = AxiomVaultFileProvider.appex; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -364,7 +364,7 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
-				LastUpgradeCheck = 2630;
+				LastUpgradeCheck = 1500;
 				TargetAttributes = {
 					50045249DB0F3C9ED305108F = {
 						DevelopmentTeam = "";
@@ -535,6 +535,8 @@
 					"-lresolv",
 					"-lSystem",
 					"-lc++",
+					"-framework SystemConfiguration",
+					"-framework Security",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.axiomvault.macos;
 				SDKROOT = macosx;
@@ -599,7 +601,6 @@
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 5.9;
@@ -668,7 +669,6 @@
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.9;
@@ -703,6 +703,8 @@
 					"-lresolv",
 					"-lSystem",
 					"-lc++",
+					"-framework SystemConfiguration",
+					"-framework Security",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.axiomvault.macos.fileprovider;
 				SDKROOT = macosx;
@@ -740,6 +742,8 @@
 					"-lresolv",
 					"-lSystem",
 					"-lc++",
+					"-framework SystemConfiguration",
+					"-framework Security",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.axiomvault.macos.fileprovider;
 				SDKROOT = macosx;
@@ -779,6 +783,8 @@
 					"-lresolv",
 					"-lSystem",
 					"-lc++",
+					"-framework SystemConfiguration",
+					"-framework Security",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.axiomvault.ios;
 				SDKROOT = iphoneos;
@@ -821,6 +827,8 @@
 					"-lresolv",
 					"-lSystem",
 					"-lc++",
+					"-framework SystemConfiguration",
+					"-framework Security",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.axiomvault.macos;
 				SDKROOT = macosx;
@@ -860,6 +868,8 @@
 					"-lresolv",
 					"-lSystem",
 					"-lc++",
+					"-framework SystemConfiguration",
+					"-framework Security",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.axiomvault.ios;
 				SDKROOT = iphoneos;

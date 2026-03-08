@@ -149,7 +149,7 @@ struct VaultBrowserView: View {
                 handleDoubleClick(entry)
             }
         }
-        .onChange(of: sortOrder) { _, newOrder in
+        .onChange(of: sortOrder) { newOrder in
             vaultManager.entries.sort(using: newOrder)
         }
     }
