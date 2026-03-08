@@ -16,6 +16,7 @@ APP_ICON = clients/desktop/axiomvault.svg
 
 .PHONY: all desktop desktop-release check-desktop-deps cli core install install-desktop uninstall uninstall-desktop clean-install help
 .PHONY: ios ios-framework ios-project check-ios-deps
+.PHONY: macos macos-framework macos-project check-macos-deps
 
 # Default target
 all: help
@@ -50,16 +51,40 @@ help:
 	@echo "  make ios-project     - Generate Xcode project"
 	@echo "  make check-ios-deps  - Check iOS build dependencies"
 	@echo ""
+	@echo "macOS (native):"
+	@echo "  make macos           - Build complete macOS project"
+	@echo "  make macos-framework - Build Rust XCFramework for macOS"
+	@echo "  make macos-project   - Generate Xcode project"
+	@echo "  make check-macos-deps - Check macOS build dependencies"
+	@echo ""
 	@echo "Cleanup:"
 	@echo "  make clean-install   - Remove all installed files"
 	@echo ""
 
+# Auto-detect FUSE support
+FUSE_FEATURE :=
+ifeq ($(shell uname),Darwin)
+  ifneq ($(wildcard /Library/Frameworks/macFUSE.framework),)
+    FUSE_FEATURE := --features fuse
+  else ifneq ($(wildcard /usr/local/include/fuse/fuse.h),)
+    FUSE_FEATURE := --features fuse
+  else ifneq ($(wildcard /opt/homebrew/include/fuse/fuse.h),)
+    FUSE_FEATURE := --features fuse
+  endif
+else ifeq ($(shell uname),Linux)
+  ifneq ($(shell pkg-config --exists fuse3 2>/dev/null && echo yes),)
+    FUSE_FEATURE := --features fuse
+  else ifneq ($(shell pkg-config --exists fuse 2>/dev/null && echo yes),)
+    FUSE_FEATURE := --features fuse
+  endif
+endif
+
 # Desktop client with dependency check
 desktop: check-desktop-deps
-	cargo build --package axiomvault-desktop
+	cargo build --package axiomvault-desktop $(FUSE_FEATURE)
 
 desktop-release: check-desktop-deps
-	cargo build --package axiomvault-desktop --release
+	cargo build --package axiomvault-desktop --release $(FUSE_FEATURE)
 
 # CLI tool
 cli:
@@ -220,3 +245,38 @@ check-ios-deps:
 		echo "ERROR: iOS development requires macOS"; \
 		exit 1; \
 	fi
+
+# macOS native client targets
+macos: macos-framework macos-project
+	@echo "macOS project ready! Open clients/macos/AxiomVault.xcodeproj in Xcode"
+
+macos-framework: check-macos-deps
+	@echo "Building Rust XCFramework for macOS..."
+	@cd clients/macos/Scripts && ./build-macos.sh
+
+macos-project: check-macos-deps
+	@echo "Generating Xcode project with XcodeGen..."
+	@cd clients/macos && xcodegen generate
+	@echo "✓ Generated AxiomVault.xcodeproj"
+
+check-macos-deps:
+	@if [ "$$(uname)" != "Darwin" ]; then \
+		echo "ERROR: macOS client requires macOS"; \
+		exit 1; \
+	fi
+	@echo "Checking macOS build dependencies..."
+	@command -v xcodegen >/dev/null 2>&1 || { \
+		echo ""; \
+		echo "ERROR: xcodegen not found"; \
+		echo "Install with: brew install xcodegen"; \
+		echo ""; \
+		exit 1; \
+	}
+	@command -v rustup >/dev/null 2>&1 || { \
+		echo ""; \
+		echo "ERROR: rustup not found"; \
+		echo "Install from: https://rustup.rs"; \
+		echo ""; \
+		exit 1; \
+	}
+	@echo "✓ All macOS build dependencies found"
