@@ -10,7 +10,8 @@ use tokio::sync::RwLock;
 use axiomvault_common::{VaultId, VaultPath};
 use axiomvault_crypto::KdfParams;
 use axiomvault_vault::{
-    check_vault_health, check_vault_structure, VaultManager as CoreVaultManager, VaultOperations,
+    check_migration_needed, check_vault_health, check_vault_structure, MigrationRegistry,
+    MigrationStatus, VaultConfig, VaultManager as CoreVaultManager, VaultOperations, VaultVersion,
 };
 
 use crate::error::{FFIError, FFIResult};
@@ -264,6 +265,47 @@ pub async fn remove_entry(handle: &FFIVaultHandle, vault_path: &str) -> FFIResul
             .await
             .map_err(|e| FFIError::VaultError(e.to_string()))
     }
+}
+
+/// Check migration status for a vault at the given path.
+///
+/// Returns:
+/// - 0: up to date
+/// - 1: needs migration
+/// - -1 (via error): incompatible or error
+pub fn check_migration(path: &str) -> FFIResult<i32> {
+    let vault_path = std::path::Path::new(path);
+    let config_path = vault_path.join("vault.config");
+
+    let config_bytes = std::fs::read(&config_path).map_err(|e| FFIError::IOError(e.to_string()))?;
+    let config =
+        VaultConfig::from_bytes(&config_bytes).map_err(|e| FFIError::VaultError(e.to_string()))?;
+
+    match check_migration_needed(&config) {
+        MigrationStatus::UpToDate => Ok(0),
+        MigrationStatus::NeedsMigration { .. } => Ok(1),
+        MigrationStatus::Incompatible { version } => Err(FFIError::VaultError(format!(
+            "Incompatible vault version: {}",
+            version
+        ))),
+    }
+}
+
+/// Run migrations on a vault at the given path.
+pub fn run_migration(path: &str, _password: &str) -> FFIResult<()> {
+    let vault_path = std::path::Path::new(path);
+    let config_path = vault_path.join("vault.config");
+
+    let config_bytes = std::fs::read(&config_path).map_err(|e| FFIError::IOError(e.to_string()))?;
+    let mut config =
+        VaultConfig::from_bytes(&config_bytes).map_err(|e| FFIError::VaultError(e.to_string()))?;
+
+    let registry = MigrationRegistry::default();
+    let target = VaultVersion::CURRENT;
+
+    registry
+        .migrate(vault_path, &mut config, &target)
+        .map_err(|e| FFIError::VaultError(e.to_string()))
 }
 
 /// Change the vault password.
