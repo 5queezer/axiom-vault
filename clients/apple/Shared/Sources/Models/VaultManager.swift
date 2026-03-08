@@ -1,6 +1,26 @@
 import Foundation
 import SwiftUI
 
+// MARK: - Auto-lock duration
+
+enum AutoLockDuration: Int, CaseIterable {
+    case oneMinute = 60
+    case fiveMinutes = 300
+    case fifteenMinutes = 900
+    case thirtyMinutes = 1800
+    case never = 0
+
+    var displayName: String {
+        switch self {
+        case .oneMinute: return "1 Minute"
+        case .fiveMinutes: return "5 Minutes"
+        case .fifteenMinutes: return "15 Minutes"
+        case .thirtyMinutes: return "30 Minutes"
+        case .never: return "Never"
+        }
+    }
+}
+
 /// Base vault manager with shared logic for iOS and macOS
 @MainActor
 class VaultManager: ObservableObject {
@@ -16,6 +36,26 @@ class VaultManager: ObservableObject {
     @Published var shouldOfferBiometricSave = false
     /// The vault path that was just unlocked (used for biometric save prompt)
     var lastUnlockedVaultPath: String?
+
+    @Published var autoLockDuration: AutoLockDuration {
+        didSet {
+            UserDefaults.standard.set(autoLockDuration.rawValue, forKey: Self.autoLockKey)
+            resetAutoLockTimer()
+        }
+    }
+
+    private var autoLockTimer: Timer?
+    static let autoLockKey = "autoLockDuration"
+
+    init() {
+        if let stored = UserDefaults.standard.object(forKey: Self.autoLockKey) as? Int,
+           let duration = AutoLockDuration(rawValue: stored) {
+            self.autoLockDuration = duration
+        } else {
+            self.autoLockDuration = .fifteenMinutes
+            UserDefaults.standard.set(AutoLockDuration.fifteenMinutes.rawValue, forKey: Self.autoLockKey)
+        }
+    }
 
     // MARK: - Biometric helpers
 
@@ -49,9 +89,39 @@ class VaultManager: ObservableObject {
         shouldOfferBiometricSave = false
     }
 
+    // MARK: - Auto-lock timer
+
+    func resetAutoLockTimer() {
+        guard isVaultOpen, autoLockDuration != .never else {
+            cancelAutoLockTimer()
+            return
+        }
+        if let timer = autoLockTimer, timer.isValid {
+            timer.fireDate = Date().addingTimeInterval(TimeInterval(autoLockDuration.rawValue))
+            return
+        }
+        startAutoLockTimer()
+    }
+
+    func startAutoLockTimer() {
+        guard isVaultOpen, autoLockDuration != .never else { return }
+        let duration = TimeInterval(autoLockDuration.rawValue)
+        autoLockTimer = Timer.scheduledTimer(withTimeInterval: duration, repeats: false) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.closeVault()
+            }
+        }
+    }
+
+    func cancelAutoLockTimer() {
+        autoLockTimer?.invalidate()
+        autoLockTimer = nil
+    }
+
     // MARK: - Vault lifecycle
 
     func closeVault() {
+        cancelAutoLockTimer()
         VaultCore.shared.closeVault()
         isVaultOpen = false
         currentPath = "/"
@@ -67,6 +137,7 @@ class VaultManager: ObservableObject {
     // MARK: - Navigation
 
     func navigateTo(directory: String) async {
+        resetAutoLockTimer()
         if directory == ".." {
             if pathStack.count > 1 {
                 pathStack.removeLast()
@@ -82,6 +153,7 @@ class VaultManager: ObservableObject {
     }
 
     func navigateToStackIndex(_ index: Int) async {
+        resetAutoLockTimer()
         guard index < pathStack.count else { return }
         pathStack = Array(pathStack.prefix(index + 1))
         currentPath = pathStack.last ?? "/"
@@ -91,6 +163,7 @@ class VaultManager: ObservableObject {
     // MARK: - File operations
 
     func createDirectory(name: String) async {
+        resetAutoLockTimer()
         let vaultPath = currentPath == "/"
             ? "/\(name)"
             : "\(currentPath)/\(name)"
@@ -104,6 +177,7 @@ class VaultManager: ObservableObject {
     }
 
     func deleteEntry(_ entry: VaultEntry) async {
+        resetAutoLockTimer()
         let vaultPath = currentPath == "/"
             ? "/\(entry.name)"
             : "\(currentPath)/\(entry.name)"
