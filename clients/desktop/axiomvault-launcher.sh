@@ -1,10 +1,10 @@
 #!/bin/bash
 # AxiomVault launcher - handles display and rendering compatibility
 
-# Deactivate conda if active (interferes with GTK)
+# Remove conda library paths (conda's libgcc_s conflicts with system libs)
 if [ -n "$CONDA_PREFIX" ]; then
-    eval "$(conda shell.bash hook)" 2>/dev/null
-    conda deactivate 2>/dev/null || true
+    LD_LIBRARY_PATH=$(echo "$LD_LIBRARY_PATH" | tr ':' '\n' | grep -v conda | tr '\n' ':' | sed 's/:$//')
+    export LD_LIBRARY_PATH
 fi
 
 # Find the binary
@@ -21,40 +21,22 @@ else
 fi
 
 # === Display Server Configuration ===
-# Force X11 backend (more stable than Wayland for WebKit)
-export GDK_BACKEND=x11
-
-# Disable Wayland
-unset WAYLAND_DISPLAY
-unset WAYLAND_SOCKET
-
-# Ensure DISPLAY is set
-if [ -z "$DISPLAY" ]; then
-    export DISPLAY=:0
+if [ -n "$WAYLAND_DISPLAY" ]; then
+    # Wayland session - disable DMA-BUF renderer in WebKit2GTK
+    # (fixes protocol errors with NVIDIA proprietary drivers)
+    export WEBKIT_DISABLE_DMABUF_RENDERER=1
+else
+    # X11 session - ensure DISPLAY is set
+    if [ -z "$DISPLAY" ]; then
+        export DISPLAY=:0
+    fi
 fi
 
-# === WebKit/GTK Rendering Configuration ===
-# CRITICAL: Disable GPU acceleration (prevents "Failed to create GBM buffer" errors)
-export WEBKIT_DISABLE_COMPOSITING_MODE=1
-export COGL_DRIVER=gl
-export COGL_DISABLE_GL_EXTENSIONS=OES_EGL_image_external
-
-# Disable hardware acceleration in WebKit
-export WEBKIT_USE_SANDBOX=0
-
-# Use software rendering if needed
-export LIBGL_ALWAYS_INDIRECT=1
-
 # === GTK Configuration ===
-# Don't set GTK_DEBUG (causes warnings)
 unset GTK_DEBUG
 
-# Use Adwaita theme
-export GTK_THEME=Adwaita:light
-export GTK_CSD=1
-
-# Set session type
-export XDG_SESSION_TYPE=x11
+# Use Adwaita theme (dark variant to match the app's dark UI)
+export GTK_THEME=Adwaita:dark
 
 # === Application Launch ===
 exec "$BINARY" "$@"
