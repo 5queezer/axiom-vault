@@ -53,6 +53,12 @@ struct VaultBrowserView: View {
                         showChangePassword = true
                     }
                     Divider()
+                    Picker("Auto-Lock", selection: $vaultManager.autoLockDuration) {
+                        ForEach(AutoLockDuration.allCases, id: \.self) { duration in
+                            Text(duration.displayName).tag(duration)
+                        }
+                    }
+                    Divider()
                     Button("Lock Vault", systemImage: "lock.fill") {
                         vaultManager.closeVault()
                     }

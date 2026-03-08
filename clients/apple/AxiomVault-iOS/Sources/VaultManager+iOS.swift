@@ -1,6 +1,21 @@
 import Foundation
+import UIKit
 
 extension VaultManager {
+    // MARK: - iOS system event observers
+
+    func registeriOSAutoLockObservers() {
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didEnterBackgroundNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, self.isVaultOpen else { return }
+                self.closeVault()
+            }
+        }
+    }
+
     /// Documents/Vaults directory for iOS vault storage
     var vaultsDirectory: URL {
         let paths = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)
@@ -22,6 +37,7 @@ extension VaultManager {
             try VaultCore.shared.createVault(at: vaultPath, password: password)
             isVaultOpen = true
             await refreshState()
+            resetAutoLockTimer()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -35,6 +51,7 @@ extension VaultManager {
             try VaultCore.shared.openVault(at: path, password: password)
             isVaultOpen = true
             await refreshState()
+            resetAutoLockTimer()
         } catch {
             errorMessage = error.localizedDescription
         }

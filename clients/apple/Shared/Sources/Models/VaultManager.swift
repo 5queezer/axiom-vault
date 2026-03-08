@@ -1,6 +1,26 @@
 import Foundation
 import SwiftUI
 
+// MARK: - Auto-lock duration
+
+enum AutoLockDuration: Int, CaseIterable {
+    case oneMinute = 60
+    case fiveMinutes = 300
+    case fifteenMinutes = 900
+    case thirtyMinutes = 1800
+    case never = 0
+
+    var displayName: String {
+        switch self {
+        case .oneMinute: return "1 Minute"
+        case .fiveMinutes: return "5 Minutes"
+        case .fifteenMinutes: return "15 Minutes"
+        case .thirtyMinutes: return "30 Minutes"
+        case .never: return "Never"
+        }
+    }
+}
+
 /// Base vault manager with shared logic for iOS and macOS
 @MainActor
 class VaultManager: ObservableObject {
@@ -12,9 +32,46 @@ class VaultManager: ObservableObject {
     @Published var isLoading = false
     @Published var pathStack: [String] = ["/"]
 
+    @Published var autoLockDuration: AutoLockDuration {
+        didSet {
+            UserDefaults.standard.set(autoLockDuration.rawValue, forKey: "autoLockDuration")
+            resetAutoLockTimer()
+        }
+    }
+
+    private var autoLockTimer: Timer?
+
+    init() {
+        let saved = UserDefaults.standard.integer(forKey: "autoLockDuration")
+        self.autoLockDuration = AutoLockDuration(rawValue: saved) ?? .fifteenMinutes
+    }
+
+    // MARK: - Auto-lock timer
+
+    func resetAutoLockTimer() {
+        cancelAutoLockTimer()
+        startAutoLockTimer()
+    }
+
+    func startAutoLockTimer() {
+        guard isVaultOpen, autoLockDuration != .never else { return }
+        let duration = TimeInterval(autoLockDuration.rawValue)
+        autoLockTimer = Timer.scheduledTimer(withTimeInterval: duration, repeats: false) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.closeVault()
+            }
+        }
+    }
+
+    func cancelAutoLockTimer() {
+        autoLockTimer?.invalidate()
+        autoLockTimer = nil
+    }
+
     // MARK: - Vault lifecycle
 
     func closeVault() {
+        cancelAutoLockTimer()
         VaultCore.shared.closeVault()
         isVaultOpen = false
         currentPath = "/"
@@ -29,6 +86,7 @@ class VaultManager: ObservableObject {
     // MARK: - Navigation
 
     func navigateTo(directory: String) async {
+        resetAutoLockTimer()
         if directory == ".." {
             if pathStack.count > 1 {
                 pathStack.removeLast()
@@ -44,6 +102,7 @@ class VaultManager: ObservableObject {
     }
 
     func navigateToStackIndex(_ index: Int) async {
+        resetAutoLockTimer()
         guard index < pathStack.count else { return }
         pathStack = Array(pathStack.prefix(index + 1))
         currentPath = pathStack.last ?? "/"
@@ -53,6 +112,7 @@ class VaultManager: ObservableObject {
     // MARK: - File operations
 
     func createDirectory(name: String) async {
+        resetAutoLockTimer()
         let vaultPath = currentPath == "/"
             ? "/\(name)"
             : "\(currentPath)/\(name)"
@@ -66,6 +126,7 @@ class VaultManager: ObservableObject {
     }
 
     func deleteEntry(_ entry: VaultEntry) async {
+        resetAutoLockTimer()
         let vaultPath = currentPath == "/"
             ? "/\(entry.name)"
             : "\(currentPath)/\(entry.name)"
