@@ -10,7 +10,7 @@ extension VaultManager {
             object: nil, queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
-                guard let self, self.isVaultOpen else { return }
+                guard let self, self.isVaultOpen, self.autoLockDuration != .never else { return }
                 self.closeVault()
             }
         }
@@ -37,7 +37,8 @@ extension VaultManager {
             try VaultCore.shared.createVault(at: vaultPath, password: password)
             isVaultOpen = true
             await refreshState()
-            resetAutoLockTimer()
+            registeriOSAutoLockObservers()
+            startAutoLockTimer()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -51,7 +52,8 @@ extension VaultManager {
             try VaultCore.shared.openVault(at: path, password: password)
             isVaultOpen = true
             await refreshState()
-            resetAutoLockTimer()
+            registeriOSAutoLockObservers()
+            startAutoLockTimer()
         } catch {
             errorMessage = error.localizedDescription
         }

@@ -42,6 +42,7 @@ class VaultManager: ObservableObject {
     private var autoLockTimer: Timer?
 
     init() {
+        UserDefaults.standard.register(defaults: ["autoLockDuration": AutoLockDuration.fifteenMinutes.rawValue])
         let saved = UserDefaults.standard.integer(forKey: "autoLockDuration")
         self.autoLockDuration = AutoLockDuration(rawValue: saved) ?? .fifteenMinutes
     }
@@ -49,8 +50,16 @@ class VaultManager: ObservableObject {
     // MARK: - Auto-lock timer
 
     func resetAutoLockTimer() {
-        cancelAutoLockTimer()
-        startAutoLockTimer()
+        guard isVaultOpen, autoLockDuration != .never else {
+            cancelAutoLockTimer()
+            return
+        }
+        if let timer = autoLockTimer, timer.isValid {
+            timer.fireDate = Date().addingTimeInterval(TimeInterval(autoLockDuration.rawValue))
+        } else {
+            cancelAutoLockTimer()
+            startAutoLockTimer()
+        }
     }
 
     func startAutoLockTimer() {

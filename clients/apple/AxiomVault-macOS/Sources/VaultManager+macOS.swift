@@ -81,7 +81,8 @@ extension VaultManager {
             currentVaultName = url.lastPathComponent
             saveBookmark(for: url)
             await refreshState()
-            resetAutoLockTimer()
+            registerMacOSAutoLockObservers()
+            startAutoLockTimer()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -100,7 +101,8 @@ extension VaultManager {
             currentVaultName = url.lastPathComponent
             updateBookmarkLastOpened(for: url)
             await refreshState()
-            resetAutoLockTimer()
+            registerMacOSAutoLockObservers()
+            startAutoLockTimer()
         } catch {
             errorMessage = error.localizedDescription
         }
