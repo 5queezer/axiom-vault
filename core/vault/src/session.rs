@@ -10,6 +10,7 @@ use uuid::Uuid;
 use crate::config::{VaultConfig, META_DIRNAME, TREE_FILENAME};
 use crate::tree::VaultTree;
 use axiomvault_common::{Error, Result, VaultId, VaultPath};
+use axiomvault_crypto::recovery::RecoveryKey;
 use axiomvault_crypto::{decrypt, derive_key, encrypt, MasterKey};
 use axiomvault_storage::StorageProvider;
 
@@ -73,11 +74,6 @@ impl VaultSession {
     /// already been derived (verified against `key_verification`) so we avoid
     /// running the expensive Argon2id KDF a second time.
     ///
-    /// # Preconditions
-    /// - Config must be valid
-    /// - master_key must correspond to the password used to create the config
-    /// - Provider must be connected
-    ///
     /// # Errors
     /// - Incompatible vault version
     pub fn from_master_key(
@@ -107,27 +103,12 @@ impl VaultSession {
     ///
     /// Derives the master key via Argon2id. Prefer `from_master_key` when the
     /// key has already been derived (e.g. in `open_vault`), to avoid a double KDF.
-    ///
-    /// # Preconditions
-    /// - Config must be valid
-    /// - Password must be correct
-    /// - Provider must be connected
-    ///
-    /// # Postconditions
-    /// - Returns active session with decrypted master key
-    /// - Session handle is unique
-    ///
-    /// # Errors
-    /// - Invalid password
-    /// - Incompatible vault version
-    /// - Storage access failure
     pub fn unlock(
         config: VaultConfig,
         password: &[u8],
         provider: Arc<dyn StorageProvider>,
         tree: VaultTree,
     ) -> Result<Self> {
-        // verify_password derives the key and returns it on success, avoiding a double KDF round
         let master_key = config
             .verify_password(password)?
             .ok_or_else(|| Error::NotPermitted("Invalid password".to_string()))?;
@@ -136,13 +117,6 @@ impl VaultSession {
     }
 
     /// Load and decrypt the vault tree index from storage.
-    ///
-    /// The tree is encrypted with a key derived from the master key.
-    /// Returns an empty tree if no tree file exists (new vault).
-    ///
-    /// # Errors
-    /// - Decryption failure (wrong key / tampered data)
-    /// - I/O errors
     pub async fn load_and_decrypt_tree(
         provider: &Arc<dyn StorageProvider>,
         master_key: &MasterKey,
@@ -184,6 +158,11 @@ impl VaultSession {
         &self.config
     }
 
+    /// Get mutable reference to the vault configuration.
+    pub fn config_mut(&mut self) -> &mut VaultConfig {
+        &mut self.config
+    }
+
     /// Get the storage provider.
     pub fn provider(&self) -> Arc<dyn StorageProvider> {
         self.provider.clone()
@@ -195,9 +174,6 @@ impl VaultSession {
     }
 
     /// Get the master key, if session is active.
-    ///
-    /// # Errors
-    /// - Returns error if session is locked
     pub fn master_key(&self) -> Result<&MasterKey> {
         match self.state {
             SessionState::Active => self
@@ -219,35 +195,20 @@ impl VaultSession {
     }
 
     /// Lock the session, clearing all keys from memory.
-    ///
-    /// # Postconditions
-    /// - Master key is zeroized and removed
-    /// - Session state is Locked
-    /// - Session can no longer perform operations
     pub fn lock(&mut self) {
         if let Some(key) = self.master_key.take() {
-            // The key will be zeroized on drop due to ZeroizeOnDrop
             drop(key);
         }
         self.state = SessionState::Locked;
     }
 
-    /// Relock the vault with a new password.
+    /// Change the vault password.
     ///
-    /// # Preconditions
-    /// - Session must be active
-    /// - Old password must be correct
-    /// - New password must not be empty
-    ///
-    /// # Postconditions
-    /// - Master key is derived from new password
-    /// - Config is updated with new salt and verification
-    ///
-    /// # Errors
-    /// - Session is locked
-    /// - Old password incorrect
-    /// - New password empty
+    /// Re-wraps the master key with a new password-derived KEK.
+    /// Recovery key data remains unchanged.
     pub fn change_password(&mut self, old_password: &[u8], new_password: &[u8]) -> Result<()> {
+        use axiomvault_crypto::recovery::wrap_key;
+
         if self.state != SessionState::Active {
             return Err(Error::NotPermitted("Session is locked".to_string()));
         }
@@ -256,37 +217,55 @@ impl VaultSession {
             return Err(Error::NotPermitted("Invalid old password".to_string()));
         }
 
-        let new_config = VaultConfig::new(
-            self.config.id.clone(),
-            new_password,
-            self.config.provider_type.clone(),
-            self.config.provider_config.clone(),
-            self.config.kdf_params.clone(),
-        )?;
+        let master_key = self.master_key()?;
 
-        let new_master_key = derive_key(new_password, &new_config.salt, &new_config.kdf_params)?;
+        // Generate new salt and derive new password KEK.
+        let new_salt = axiomvault_crypto::Salt::generate();
+        let new_kek = derive_key(new_password, &new_salt, &self.config.kdf_params)?;
 
-        self.config = new_config;
-        self.master_key = Some(new_master_key);
+        // Re-wrap the master key with the new KEK.
+        let new_wrapped = wrap_key(master_key, new_kek.as_bytes())?;
+
+        // Re-create password verification.
+        let verification_plaintext = b"AXIOMVAULT_KEY_VERIFICATION_V1";
+        let new_verification = encrypt(new_kek.as_bytes(), verification_plaintext)?;
+
+        self.config.salt = new_salt;
+        self.config.key_verification = new_verification;
+        self.config.wrapped_master_key = Some(new_wrapped);
+        self.config.modified_at = chrono::Utc::now();
+
+        // Master key itself does not change.
+
+        Ok(())
+    }
+
+    /// Reset password using a recovery key.
+    ///
+    /// Unwraps the master key using the recovery key and re-wraps it
+    /// with a new password-derived KEK.
+    pub fn reset_password_with_recovery(
+        &mut self,
+        recovery_key: &RecoveryKey,
+        new_password: &[u8],
+    ) -> Result<()> {
+        self.config.reset_password(recovery_key, new_password)?;
+
+        let master_key = self
+            .config
+            .verify_password(new_password)?
+            .ok_or_else(|| Error::Vault("Failed to verify new password after reset".to_string()))?;
+        self.master_key = Some(master_key);
+        self.state = SessionState::Active;
 
         Ok(())
     }
 
     /// Save the current tree state to storage (encrypted).
-    ///
-    /// The tree index is encrypted with a key derived from the master key so that
-    /// cleartext filenames, sizes, and directory structure are not visible to
-    /// observers with access to the storage backend (e.g. Google Drive).
-    ///
-    /// # Errors
-    /// - Serialization failure
-    /// - Encryption failure (session must be active)
-    /// - Storage failure
     pub async fn save_tree(&self) -> Result<()> {
         let tree = self.tree.read().await;
         let tree_json = tree.to_json()?;
 
-        // Derive tree-specific key from the master key, then AEAD-encrypt the index.
         let tree_key = self.master_key()?.derive_file_key(TREE_KEY_CONTEXT);
         let encrypted = encrypt(tree_key.as_bytes(), tree_json.as_bytes())
             .map_err(|e| Error::Crypto(format!("Failed to encrypt tree index: {}", e)))?;
@@ -312,8 +291,9 @@ mod tests {
         let id = VaultId::new("test").unwrap();
         let password = b"test-password";
         let params = axiomvault_crypto::KdfParams::moderate();
-        let config =
+        let creation =
             VaultConfig::new(id, password, "memory", serde_json::Value::Null, params).unwrap();
+        let config = creation.config;
 
         let provider = Arc::new(MemoryProvider::new());
         let session =
@@ -344,11 +324,11 @@ mod tests {
         let id = VaultId::new("test").unwrap();
         let password = b"correct";
         let params = axiomvault_crypto::KdfParams::moderate();
-        let config =
+        let creation =
             VaultConfig::new(id, password, "memory", serde_json::Value::Null, params).unwrap();
 
         let provider = Arc::new(MemoryProvider::new());
-        let result = VaultSession::unlock(config, b"wrong", provider, VaultTree::new());
+        let result = VaultSession::unlock(creation.config, b"wrong", provider, VaultTree::new());
 
         assert!(result.is_err());
     }

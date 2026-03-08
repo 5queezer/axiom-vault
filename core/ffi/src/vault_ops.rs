@@ -69,7 +69,7 @@ pub async fn create_vault(path: &str, password: &str) -> FFIResult<FFIVaultHandl
 
     let manager = CoreVaultManager::new();
 
-    let session = manager
+    let creation = manager
         .create_vault(
             vault_id,
             password.as_bytes(),
@@ -80,9 +80,13 @@ pub async fn create_vault(path: &str, password: &str) -> FFIResult<FFIVaultHandl
         .await
         .map_err(|e| FFIError::VaultError(e.to_string()))?;
 
+    // Note: recovery_words from creation are available but not returned
+    // through this simple FFI. Use axiom_vault_create_with_recovery instead.
+
     Ok(VaultHandleData {
-        session: Arc::new(RwLock::new(session)),
+        session: Arc::new(RwLock::new(creation.session)),
         path: abs_path_str,
+        recovery_words: Some(creation.recovery_words),
     })
 }
 
@@ -116,6 +120,7 @@ pub async fn open_vault(path: &str, password: &str) -> FFIResult<FFIVaultHandle>
     Ok(VaultHandleData {
         session: Arc::new(RwLock::new(session)),
         path: abs_path_str,
+        recovery_words: None,
     })
 }
 
@@ -277,4 +282,63 @@ pub async fn change_password(
         .save_config(&session)
         .await
         .map_err(|e| FFIError::VaultError(e.to_string()))
+}
+
+/// Show recovery key for an open vault.
+pub async fn show_recovery_key(handle: &FFIVaultHandle) -> FFIResult<String> {
+    let session = handle.session.read().await;
+
+    let master_key = session
+        .master_key()
+        .map_err(|e| FFIError::VaultError(e.to_string()))?;
+
+    let recovery_key = session
+        .config()
+        .decrypt_recovery_key(master_key)
+        .map_err(|e| FFIError::VaultError(e.to_string()))?;
+
+    recovery_key
+        .to_mnemonic()
+        .map_err(|e| FFIError::VaultError(e.to_string()))
+}
+
+/// Reset vault password using recovery key words.
+pub async fn reset_password(
+    path: &str,
+    recovery_words: &str,
+    new_password: &str,
+) -> FFIResult<FFIVaultHandle> {
+    let path_obj = Path::new(path);
+
+    let abs_path = if path_obj.is_absolute() {
+        path_obj.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map_err(|e| FFIError::IOError(e.to_string()))?
+            .join(path_obj)
+    };
+
+    let abs_path_str = abs_path.to_string_lossy().to_string();
+
+    let provider_config = serde_json::json!({
+        "root": abs_path_str
+    });
+
+    let manager = CoreVaultManager::new();
+
+    let session = manager
+        .recover_vault(
+            "local",
+            provider_config,
+            recovery_words,
+            new_password.as_bytes(),
+        )
+        .await
+        .map_err(|e| FFIError::VaultError(e.to_string()))?;
+
+    Ok(VaultHandleData {
+        session: Arc::new(RwLock::new(session)),
+        path: abs_path_str,
+        recovery_words: None,
+    })
 }

@@ -14,6 +14,8 @@ pub struct VaultHandleData {
     pub(crate) session: Arc<RwLock<VaultSession>>,
     /// Vault path on disk
     pub(crate) path: String,
+    /// Recovery words from vault creation (only set on create, not on open)
+    pub(crate) recovery_words: Option<String>,
 }
 
 /// Opaque handle to an open vault session

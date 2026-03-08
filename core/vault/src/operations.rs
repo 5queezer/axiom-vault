@@ -321,7 +321,7 @@ mod tests {
         let id = VaultId::new("test").unwrap();
         let password = b"test-password";
         let params = KdfParams::moderate();
-        let config =
+        let creation =
             VaultConfig::new(id, password, "memory", serde_json::Value::Null, params).unwrap();
 
         let provider = Arc::new(MemoryProvider::new());
@@ -337,7 +337,7 @@ mod tests {
             .unwrap();
 
         use crate::tree::VaultTree;
-        VaultSession::unlock(config, password, provider, VaultTree::new()).unwrap()
+        VaultSession::unlock(creation.config, password, provider, VaultTree::new()).unwrap()
     }
 
     #[tokio::test]

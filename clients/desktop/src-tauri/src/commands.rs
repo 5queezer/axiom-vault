@@ -153,7 +153,7 @@ pub async fn create_vault(
     let vault_id = VaultId::new(&id).map_err(|e| e.to_string())?;
     let kdf_params = KdfParams::moderate();
 
-    let config = VaultConfig::new(
+    let creation = VaultConfig::new(
         vault_id,
         password.as_bytes(),
         &provider_type,
@@ -164,11 +164,15 @@ pub async fn create_vault(
 
     // Persist config to disk so unlock_vault can find it later
     let config_path = state.data_dir.join(format!("{}.json", id));
-    let config_json = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
+    let config_json = serde_json::to_string_pretty(&creation.config).map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&state.data_dir).map_err(|e| e.to_string())?;
     std::fs::write(&config_path, config_json).map_err(|e| e.to_string())?;
 
-    let vault_info = setup_vault_session(&state, &id, config, &password, true).await?;
+    // TODO: Return recovery_words to frontend so user can save them.
+    // For now, log a reminder (words are in creation.recovery_words).
+    info!("Recovery key generated (24 words). Frontend should display these to the user.");
+
+    let vault_info = setup_vault_session(&state, &id, creation.config, &password, true).await?;
 
     info!("Vault created successfully");
     Ok(vault_info)

@@ -13,6 +13,7 @@ use tracing_subscriber::FmtSubscriber;
 use url::Url;
 
 use axiomvault_common::{VaultId, VaultPath};
+use axiomvault_crypto::recovery::RecoveryKey;
 use axiomvault_crypto::KdfParams;
 use axiomvault_storage::gdrive::{AuthConfig, AuthManager, GDriveConfig, Tokens};
 use axiomvault_sync::{ConflictStrategy, SyncConfig, SyncEngine, SyncMode, SyncState};
@@ -127,6 +128,27 @@ enum Commands {
 
     /// Change vault password.
     ChangePassword {
+        /// Path to the vault.
+        #[arg(short, long)]
+        path: PathBuf,
+    },
+
+    /// Show recovery key for a vault (requires password).
+    ShowRecoveryKey {
+        /// Path to the vault.
+        #[arg(short, long)]
+        path: PathBuf,
+    },
+
+    /// Reset vault password using recovery key words.
+    ResetPassword {
+        /// Path to the vault.
+        #[arg(short, long)]
+        path: PathBuf,
+    },
+
+    /// Migrate a legacy vault to support recovery keys.
+    MigrateVault {
         /// Path to the vault.
         #[arg(short, long)]
         path: PathBuf,
@@ -282,6 +304,12 @@ async fn main() -> Result<()> {
 
         Commands::ChangePassword { path } => cmd_change_password(&path).await,
 
+        Commands::ShowRecoveryKey { path } => cmd_show_recovery_key(&path).await,
+
+        Commands::ResetPassword { path } => cmd_reset_password(&path).await,
+
+        Commands::MigrateVault { path } => cmd_migrate_vault(&path).await,
+
         Commands::GdriveAuth {
             client_id,
             client_secret,
@@ -364,15 +392,26 @@ async fn cmd_create(name: &str, path: &Path, strength: &str) -> Result<()> {
         "root": vault_path
     });
 
-    let session = manager
+    let creation = manager
         .create_vault(vault_id, &password, "local", provider_config, kdf_params)
         .await
         .context("Failed to create vault")?;
 
     println!("Vault created successfully!");
-    println!("  ID: {}", session.vault_id());
+    println!("  ID: {}", creation.session.vault_id());
     println!("  Location: {}", path.display());
-    println!("  Provider: {}", session.config().provider_type);
+    println!("  Provider: {}", creation.session.config().provider_type);
+    println!();
+    println!("=== RECOVERY KEY ===");
+    println!("Write down these 24 words and store them in a safe place.");
+    println!("You will need them to recover your vault if you forget your password.");
+    println!();
+    for (i, word) in creation.recovery_words.split_whitespace().enumerate() {
+        println!("  {:>2}. {}", i + 1, word);
+    }
+    println!();
+    println!("WARNING: This is the only time the recovery key will be shown.");
+    println!("If you lose it, you will not be able to recover your vault.");
 
     Ok(())
 }
@@ -655,6 +694,137 @@ async fn cmd_change_password(path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Show recovery key for a vault.
+async fn cmd_show_recovery_key(path: &Path) -> Result<()> {
+    info!("Showing recovery key");
+
+    let password = prompt_password("Enter password: ")?;
+    let path_str = path.to_string_lossy().to_string();
+
+    let manager = VaultManager::new();
+    let provider_config = serde_json::json!({
+        "root": path_str
+    });
+
+    let session = manager
+        .open_vault("local", provider_config, &password)
+        .await
+        .context("Failed to open vault")?;
+
+    let master_key = session.master_key().context("Session not active")?;
+    let recovery_key = session
+        .config()
+        .decrypt_recovery_key(master_key)
+        .context("Failed to decrypt recovery key. Vault may not have a recovery key.")?;
+
+    let words = recovery_key
+        .to_mnemonic()
+        .context("Failed to encode recovery key")?;
+
+    println!();
+    println!("=== RECOVERY KEY ===");
+    println!("Store these 24 words in a safe place.");
+    println!();
+    for (i, word) in words.split_whitespace().enumerate() {
+        println!("  {:>2}. {}", i + 1, word);
+    }
+    println!();
+
+    Ok(())
+}
+
+/// Reset vault password using recovery key.
+async fn cmd_reset_password(path: &Path) -> Result<()> {
+    info!("Resetting vault password using recovery key");
+
+    println!("Enter your 24-word recovery key (space-separated):");
+    let mut recovery_input = String::new();
+    std::io::stdin()
+        .read_line(&mut recovery_input)
+        .context("Failed to read recovery key")?;
+    let recovery_words = recovery_input.trim();
+
+    // Validate the recovery key format first.
+    RecoveryKey::from_mnemonic(recovery_words)
+        .context("Invalid recovery key. Please check your words and try again.")?;
+
+    let new_password = prompt_password("Enter new password: ")?;
+    let confirm = prompt_password("Confirm new password: ")?;
+
+    if new_password != confirm {
+        anyhow::bail!("Passwords do not match");
+    }
+
+    if new_password.is_empty() {
+        anyhow::bail!("Password cannot be empty");
+    }
+
+    let path_str = path.to_string_lossy().to_string();
+
+    let manager = VaultManager::new();
+    let provider_config = serde_json::json!({
+        "root": path_str
+    });
+
+    let _session = manager
+        .recover_vault("local", provider_config, recovery_words, &new_password)
+        .await
+        .context("Failed to reset password. Recovery key may be incorrect.")?;
+
+    println!("Password reset successfully!");
+
+    Ok(())
+}
+
+/// Migrate a legacy vault to support recovery keys.
+async fn cmd_migrate_vault(path: &Path) -> Result<()> {
+    info!("Migrating vault to v1.1 format");
+
+    let password = prompt_password("Enter password: ")?;
+    let path_str = path.to_string_lossy().to_string();
+
+    let manager = VaultManager::new();
+    let provider_config = serde_json::json!({
+        "root": path_str
+    });
+
+    let mut session = manager
+        .open_vault("local", provider_config, &password)
+        .await
+        .context("Failed to open vault")?;
+
+    if !session.config().is_legacy_format() {
+        println!("Vault is already in v1.1 format with recovery key support.");
+        return Ok(());
+    }
+
+    let recovery_words = session
+        .config_mut()
+        .migrate_to_v1_1(&password)
+        .context("Failed to migrate vault")?;
+
+    // Save updated config.
+    manager
+        .save_config(&session)
+        .await
+        .context("Failed to save migrated config")?;
+
+    println!("Vault migrated successfully to v1.1 format!");
+    println!();
+    println!("=== RECOVERY KEY ===");
+    println!("Write down these 24 words and store them in a safe place.");
+    println!("You will need them to recover your vault if you forget your password.");
+    println!();
+    for (i, word) in recovery_words.split_whitespace().enumerate() {
+        println!("  {:>2}. {}", i + 1, word);
+    }
+    println!();
+    println!("WARNING: This is the only time the recovery key will be shown.");
+    println!("If you lose it, you will not be able to recover your vault.");
+
+    Ok(())
+}
+
 /// Authenticate with Google Drive and save tokens.
 async fn cmd_gdrive_auth(
     client_id: Option<String>,
@@ -874,15 +1044,26 @@ async fn cmd_gdrive_create(
     let provider_config =
         serde_json::to_value(gdrive_config).context("Failed to serialize GDrive config")?;
 
-    let session = manager
+    let creation = manager
         .create_vault(vault_id, &password, "gdrive", provider_config, kdf_params)
         .await
         .context("Failed to create vault on Google Drive")?;
 
     println!("Vault created successfully on Google Drive!");
-    println!("  ID: {}", session.vault_id());
+    println!("  ID: {}", creation.session.vault_id());
     println!("  Folder ID: {}", folder_id);
-    println!("  Provider: {}", session.config().provider_type);
+    println!("  Provider: {}", creation.session.config().provider_type);
+    println!();
+    println!("=== RECOVERY KEY ===");
+    println!("Write down these 24 words and store them in a safe place.");
+    println!("You will need them to recover your vault if you forget your password.");
+    println!();
+    for (i, word) in creation.recovery_words.split_whitespace().enumerate() {
+        println!("  {:>2}. {}", i + 1, word);
+    }
+    println!();
+    println!("WARNING: This is the only time the recovery key will be shown.");
+    println!("If you lose it, you will not be able to recover your vault.");
 
     Ok(())
 }

@@ -522,3 +522,133 @@ pub unsafe extern "C" fn axiom_vault_change_password(
         }
     }
 }
+
+/// Get the recovery words from a newly created vault.
+///
+/// Only returns words if the handle was obtained via `axiom_vault_create`.
+/// Returns null if the vault was opened (not created) or words already consumed.
+///
+/// # Safety
+/// - `handle` must be a valid vault handle
+/// - Returned string must be freed with `axiom_string_free`
+#[no_mangle]
+pub unsafe extern "C" fn axiom_vault_get_recovery_words(
+    handle: *const FFIVaultHandle,
+) -> *mut c_char {
+    if handle.is_null() {
+        error::set_last_error(FFIError::NullPointer("handle is null".into()));
+        return ptr::null_mut();
+    }
+
+    let handle = &*handle;
+    match &handle.recovery_words {
+        Some(words) => match CString::new(words.as_str()) {
+            Ok(cstr) => cstr.into_raw(),
+            Err(_) => {
+                error::set_last_error(FFIError::StringConversionError);
+                ptr::null_mut()
+            }
+        },
+        None => ptr::null_mut(),
+    }
+}
+
+/// Show recovery key for an open vault (requires password to have been used to open).
+///
+/// # Safety
+/// - `handle` must be a valid vault handle
+/// - Returned string must be freed with `axiom_string_free`
+#[no_mangle]
+pub unsafe extern "C" fn axiom_vault_show_recovery_key(
+    handle: *const FFIVaultHandle,
+) -> *mut c_char {
+    if handle.is_null() {
+        error::set_last_error(FFIError::NullPointer("handle is null".into()));
+        return ptr::null_mut();
+    }
+
+    let handle = &*handle;
+
+    let runtime = match get_runtime() {
+        Ok(rt) => rt,
+        Err(e) => {
+            error::set_last_error(FFIError::RuntimeError(e.to_string()));
+            return ptr::null_mut();
+        }
+    };
+
+    match runtime.block_on(vault_ops::show_recovery_key(handle)) {
+        Ok(words) => match CString::new(words) {
+            Ok(cstr) => cstr.into_raw(),
+            Err(_) => {
+                error::set_last_error(FFIError::StringConversionError);
+                ptr::null_mut()
+            }
+        },
+        Err(e) => {
+            error::set_last_error(e);
+            ptr::null_mut()
+        }
+    }
+}
+
+/// Reset the vault password using recovery key words.
+///
+/// # Safety
+/// - `path` must be a valid null-terminated UTF-8 string
+/// - `recovery_words` must be a valid null-terminated UTF-8 string (24 space-separated words)
+/// - `new_password` must be a valid null-terminated UTF-8 string
+/// - Returns a vault handle on success, null on failure
+#[no_mangle]
+pub unsafe extern "C" fn axiom_vault_reset_password(
+    path: *const c_char,
+    recovery_words: *const c_char,
+    new_password: *const c_char,
+) -> *mut FFIVaultHandle {
+    if path.is_null() || recovery_words.is_null() || new_password.is_null() {
+        error::set_last_error(FFIError::NullPointer(
+            "path, recovery_words, or new_password is null".into(),
+        ));
+        return ptr::null_mut();
+    }
+
+    let path_str = match CStr::from_ptr(path).to_str() {
+        Ok(s) => s,
+        Err(_) => {
+            error::set_last_error(FFIError::InvalidUtf8("path".into()));
+            return ptr::null_mut();
+        }
+    };
+
+    let words_str = match CStr::from_ptr(recovery_words).to_str() {
+        Ok(s) => s,
+        Err(_) => {
+            error::set_last_error(FFIError::InvalidUtf8("recovery_words".into()));
+            return ptr::null_mut();
+        }
+    };
+
+    let password_str = match CStr::from_ptr(new_password).to_str() {
+        Ok(s) => s,
+        Err(_) => {
+            error::set_last_error(FFIError::InvalidUtf8("new_password".into()));
+            return ptr::null_mut();
+        }
+    };
+
+    let runtime = match get_runtime() {
+        Ok(rt) => rt,
+        Err(e) => {
+            error::set_last_error(FFIError::RuntimeError(e.to_string()));
+            return ptr::null_mut();
+        }
+    };
+
+    match runtime.block_on(vault_ops::reset_password(path_str, words_str, password_str)) {
+        Ok(handle) => Box::into_raw(Box::new(handle)),
+        Err(e) => {
+            error::set_last_error(e);
+            ptr::null_mut()
+        }
+    }
+}
