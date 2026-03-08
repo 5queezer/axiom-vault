@@ -29,7 +29,7 @@ pub enum Error {
     #[error("Invalid input: {0}")]
     InvalidInput(String),
 
-    /// Operation not permitted.
+    /// Operation not permitted / permission denied.
     #[error("Not permitted: {0}")]
     NotPermitted(String),
 
@@ -52,10 +52,6 @@ pub enum Error {
     /// Network operation failed.
     #[error("Network error: {0}")]
     Network(String),
-
-    /// Permission denied.
-    #[error("Permission denied: {0}")]
-    PermissionDenied(String),
 }
 
 /// Result type alias using the common Error.

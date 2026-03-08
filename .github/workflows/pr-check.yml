@@ -62,7 +62,7 @@ jobs:
             echo "PR title is too long. Please keep it under 100 characters."
             exit 1
           fi
-          echo "PR title looks good: $TITLE"
+          echo "PR title looks good: ${TITLE}"
 
       - name: Check PR description
         env:

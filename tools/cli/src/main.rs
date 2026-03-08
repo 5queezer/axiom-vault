@@ -716,11 +716,12 @@ async fn cmd_gdrive_auth(
     println!();
     println!("Waiting for authorization... (Press Ctrl+C to cancel)");
 
-    // Wait for the OAuth callback
-    let (mut socket, _) = listener
-        .accept()
-        .await
-        .context("Failed to accept connection")?;
+    // Wait for the OAuth callback with a 5-minute timeout
+    let (mut socket, _) =
+        tokio::time::timeout(std::time::Duration::from_secs(300), listener.accept())
+            .await
+            .context("OAuth callback timed out after 5 minutes")?
+            .context("Failed to accept connection")?;
 
     // Read the HTTP request
     let mut buffer = vec![0u8; 4096];
@@ -799,13 +800,20 @@ async fn cmd_gdrive_auth(
         .await
         .context("Failed to exchange authorization code")?;
 
-    // Save tokens to file
+    // Save tokens to file with restricted permissions
     let tokens_json =
         serde_json::to_string_pretty(&tokens).context("Failed to serialize tokens")?;
 
-    tokio::fs::write(output, tokens_json)
+    tokio::fs::write(output, &tokens_json)
         .await
         .context("Failed to write tokens file")?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let perms = std::fs::Permissions::from_mode(0o600);
+        std::fs::set_permissions(output, perms).context("Failed to set token file permissions")?;
+    }
 
     println!();
     println!("Authentication successful!");

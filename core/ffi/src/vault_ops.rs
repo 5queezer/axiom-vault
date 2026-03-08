@@ -128,13 +128,15 @@ pub fn get_vault_info(handle: &FFIVaultHandle) -> FFIResult<FFIVaultInfo> {
     runtime.block_on(async {
         let session = handle.session.read().await;
 
-        let vault_id_str = CString::new(session.vault_id().as_str())
-            .map_err(|_| FFIError::StringConversionError)?
-            .into_raw();
+        // Build both CStrings before calling .into_raw() to avoid leaking
+        // the first one if the second construction fails.
+        let vault_id_cstr = CString::new(session.vault_id().as_str())
+            .map_err(|_| FFIError::StringConversionError)?;
+        let root_path_cstr =
+            CString::new(handle.path.clone()).map_err(|_| FFIError::StringConversionError)?;
 
-        let root_path_str = CString::new(handle.path.clone())
-            .map_err(|_| FFIError::StringConversionError)?
-            .into_raw();
+        let vault_id_str = vault_id_cstr.into_raw();
+        let root_path_str = root_path_cstr.into_raw();
 
         // Count files in tree
         let tree = session.tree().read().await;

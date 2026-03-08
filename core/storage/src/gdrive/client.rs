@@ -648,7 +648,7 @@ impl DriveClient {
                 "Invalid or expired token".to_string(),
             ))
         } else if status == StatusCode::FORBIDDEN {
-            Err(Error::PermissionDenied("Access denied".to_string()))
+            Err(Error::NotPermitted("Access denied".to_string()))
         } else {
             let body = response.text().await.unwrap_or_default();
             Err(Error::Network(format!("API error: {} - {}", status, body)))

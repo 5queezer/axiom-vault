@@ -180,7 +180,6 @@ jobs:
 
       - name: Run security audit
         run: cargo audit
-        continue-on-error: true  # Don't fail CI on audit issues, just report
 
   # Check for outdated dependencies
   outdated:

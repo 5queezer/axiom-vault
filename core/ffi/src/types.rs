@@ -36,37 +36,3 @@ pub struct FFIVaultInfo {
     /// Vault version
     pub version: c_int,
 }
-
-/// File entry information
-#[repr(C)]
-pub struct FFIFileEntry {
-    /// File name (null-terminated string)
-    pub name: *const c_char,
-    /// File path in vault
-    pub path: *const c_char,
-    /// Is directory
-    pub is_directory: c_int,
-    /// File size in bytes (0 for directories)
-    pub size: c_longlong,
-    /// Last modified timestamp (Unix timestamp)
-    pub modified: c_longlong,
-}
-
-/// Sync status enumeration
-#[repr(C)]
-pub enum FFISyncStatus {
-    Synced = 0,
-    LocalModified = 1,
-    RemoteModified = 2,
-    Conflicted = 3,
-    Syncing = 4,
-    Failed = 5,
-}
-
-/// Conflict resolution strategy
-#[repr(C)]
-pub enum FFIConflictStrategy {
-    KeepBoth = 0,
-    PreferLocal = 1,
-    PreferRemote = 2,
-}

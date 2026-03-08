@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot, RwLock};
-use tokio::time::{interval, Instant};
+use tokio::time::interval;
 use tracing::{debug, error, info};
 
 use axiomvault_common::Result;
@@ -140,11 +140,11 @@ impl SyncSchedulerHandle {
     pub async fn run<F, Fut>(mut self, sync_fn: F)
     where
         F: Fn(SyncRequest) -> Fut + Send + Sync + 'static,
-        Fut: std::future::Future<Output = Result<SyncResult>> + Send,
+        Fut: std::future::Future<Output = Result<SyncResult>> + Send + 'static,
     {
         let mut request_rx = self.request_rx.take().expect("Handle can only be run once");
         let mut periodic_interval = self.create_periodic_interval().await;
-        let mut _last_sync = Instant::now();
+        let sync_fn = Arc::new(sync_fn);
 
         info!("Sync scheduler started");
 
@@ -165,9 +165,13 @@ impl SyncSchedulerHandle {
                         }
                         _ => {
                             debug!("Processing sync request: {:?}", request);
-                            let result = sync_fn(request).await;
-                            _last_sync = Instant::now();
-                            let _ = response_tx.send(result);
+                            // Spawn sync in a background task so the scheduler
+                            // loop remains responsive to new requests / shutdown.
+                            let f = sync_fn.clone();
+                            tokio::spawn(async move {
+                                let result = f(request).await;
+                                let _ = response_tx.send(result);
+                            });
                         }
                     }
                 }
@@ -178,21 +182,23 @@ impl SyncSchedulerHandle {
                     match mode {
                         SyncMode::Periodic { .. } | SyncMode::Hybrid { .. } => {
                             debug!("Triggering periodic sync");
-                            let result = sync_fn(SyncRequest::Full).await;
-                            _last_sync = Instant::now();
-                            match &result {
-                                Ok(sync_result) => {
-                                    info!(
-                                        "Periodic sync completed: {} synced, {} failed, {} conflicts",
-                                        sync_result.files_synced,
-                                        sync_result.files_failed,
-                                        sync_result.conflicts_found
-                                    );
+                            let f = sync_fn.clone();
+                            tokio::spawn(async move {
+                                let result = f(SyncRequest::Full).await;
+                                match &result {
+                                    Ok(sync_result) => {
+                                        info!(
+                                            "Periodic sync completed: {} synced, {} failed, {} conflicts",
+                                            sync_result.files_synced,
+                                            sync_result.files_failed,
+                                            sync_result.conflicts_found
+                                        );
+                                    }
+                                    Err(e) => {
+                                        error!("Periodic sync failed: {}", e);
+                                    }
                                 }
-                                Err(e) => {
-                                    error!("Periodic sync failed: {}", e);
-                                }
-                            }
+                            });
                         }
                         _ => {
                             // Update interval in case mode changed
