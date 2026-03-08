@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import LocalAuthentication
 import Security
@@ -52,9 +53,10 @@ class BiometricAuth {
 
     // MARK: - Keychain Storage for Vault Passwords
 
-    /// Account key derived from vault path for keychain storage
+    /// Account key derived from a stable SHA-256 hash of the vault path for keychain storage
     private func keychainAccount(for vaultPath: String) -> String {
-        vaultPath
+        let digest = SHA256.hash(data: Data(vaultPath.utf8))
+        return digest.map { String(format: "%02x", $0) }.joined()
     }
 
     func storePassword(_ password: String, for vaultPath: String) throws {
@@ -108,7 +110,7 @@ class BiometricAuth {
         ]
 
         return try await withCheckedThrowingContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
+            DispatchQueue.global(qos: .userInitiated).async { @Sendable in
                 var result: AnyObject?
                 let status = SecItemCopyMatching(query as CFDictionary, &result)
 

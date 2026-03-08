@@ -103,6 +103,9 @@ struct OpenVaultView: View {
                     }
                 }
             }
+            .onDisappear {
+                pendingPassword = ""
+            }
             .alert(
                 "Enable \(biometric.biometricName)?",
                 isPresented: $showBiometricSavePrompt

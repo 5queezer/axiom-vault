@@ -44,18 +44,24 @@ struct SettingsView: View {
             }
 
             if BiometricAuth.shared.isBiometricAvailable, let vaultPath = vaultManager.lastUnlockedVaultPath {
+                let isEnabled = BiometricAuth.shared.hasStoredPassword(for: vaultPath)
                 Toggle(
                     "Unlock with \(BiometricAuth.shared.biometricName)",
                     isOn: Binding(
-                        get: { BiometricAuth.shared.hasStoredPassword(for: vaultPath) },
+                        get: { isEnabled },
                         set: { enabled in
                             if !enabled {
                                 vaultManager.disableBiometric(for: vaultPath)
                             }
-                            // Enabling requires the password, so it's done at unlock time
                         }
                     )
                 )
+                .disabled(!isEnabled)
+                if !isEnabled {
+                    Text("Unlock with your password to enable \(BiometricAuth.shared.biometricName)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .formStyle(.grouped)
