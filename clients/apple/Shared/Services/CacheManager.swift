@@ -41,11 +41,7 @@ class CacheManager {
     /// Whether to clear the cache when the vault is locked.
     /// Defaults to `true` for security — cached files are decrypted plaintext.
     var clearOnLock: Bool {
-        get {
-            let hasValue = UserDefaults.standard.object(forKey: Self.clearOnLockKey) != nil
-            guard hasValue else { return true }
-            return UserDefaults.standard.bool(forKey: Self.clearOnLockKey)
-        }
+        get { UserDefaults.standard.bool(forKey: Self.clearOnLockKey) }
         set { UserDefaults.standard.set(newValue, forKey: Self.clearOnLockKey) }
     }
 
@@ -56,7 +52,10 @@ class CacheManager {
     /// Tracks whether the in-memory manifest has unsaved changes, keyed by vault ID.
     private var manifestDirty: Set<String> = []
 
-    private init() {}
+    private init() {
+        // Register default so clearOnLock is true even if the user never set it.
+        UserDefaults.standard.register(defaults: [Self.clearOnLockKey: true])
+    }
 
     // MARK: - Cache directory
 

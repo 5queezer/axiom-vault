@@ -1,9 +1,11 @@
 import Foundation
+import os.log
 import SwiftUI
 
 /// Base vault manager with shared logic for iOS and macOS
 @MainActor
 class VaultManager: ObservableObject {
+    private let logger = Logger(subsystem: "com.axiomvault", category: "vault-manager")
     @Published var isVaultOpen = false
     @Published var currentPath = "/"
     @Published var entries: [VaultEntry] = []
@@ -121,11 +123,11 @@ class VaultManager: ObservableObject {
     }
 
     func clearCache() {
-        if let info = vaultInfo {
-            CacheManager.shared.clearAll(forVault: info.vaultId)
-        } else {
-            CacheManager.shared.clearAll()
+        guard let info = vaultInfo else {
+            logger.warning("clearCache called with no open vault; nothing to clear")
+            return
         }
+        CacheManager.shared.clearAll(forVault: info.vaultId)
         cacheSize = 0
     }
 
