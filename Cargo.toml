@@ -16,7 +16,7 @@ members = [
 version = "0.1.0"
 edition = "2021"
 authors = ["Christian Pojoni <christian.pojoni@gmail.com>"]
-license = "MIT"
+license = "Apache-2.0"
 
 [workspace.dependencies]
 # Crypto

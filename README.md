@@ -234,4 +234,4 @@ All PRs must pass CI checks (formatting, clippy, tests) before merging.
 
 ## License
 
-[MIT](LICENSE)
+[Apache 2.0](LICENSE)
