@@ -194,6 +194,10 @@ targets:
         type: group
         excludes:
           - "**/.DS_Store"
+      - path: Shared/Services
+        type: group
+        excludes:
+          - "**/.DS_Store"
       - path: FileProvider/Sources
         type: group
         excludes:

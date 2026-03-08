@@ -352,8 +352,26 @@ struct VaultInfoSheet: View {
                 }
             }
 
+            Divider()
+
+            Text("Offline Cache")
+                .font(.headline)
+
+            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 8) {
+                GridRow {
+                    Text("Cache Size").foregroundStyle(.secondary)
+                    Text(ByteCountFormatter.string(fromByteCount: vaultManager.cacheSize, countStyle: .file))
+                }
+            }
+
             HStack {
+                Button("Clear Cache", role: .destructive) {
+                    vaultManager.clearCache()
+                }
+                .disabled(vaultManager.cacheSize == 0)
+
                 Spacer()
+
                 Button("Done") { dismiss() }
                     .keyboardShortcut(.defaultAction)
             }
@@ -362,6 +380,7 @@ struct VaultInfoSheet: View {
         .frame(minWidth: 400)
         .onAppear {
             Task { await vaultManager.refreshVaultInfo() }
+            vaultManager.refreshCacheSize()
         }
     }
 }

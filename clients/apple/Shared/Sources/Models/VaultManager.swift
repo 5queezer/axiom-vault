@@ -11,6 +11,7 @@ class VaultManager: ObservableObject {
     @Published var errorMessage: String?
     @Published var isLoading = false
     @Published var pathStack: [String] = ["/"]
+    @Published var cacheSize: Int64 = 0
 
     // MARK: - Vault lifecycle
 
@@ -94,6 +95,7 @@ class VaultManager: ObservableObject {
     func refreshState() async {
         await refreshVaultInfo()
         await refreshEntries()
+        refreshCacheSize()
     }
 
     func refreshVaultInfo() async {
@@ -110,6 +112,21 @@ class VaultManager: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    // MARK: - Cache
+
+    func refreshCacheSize() {
+        cacheSize = CacheManager.shared.totalCacheSize()
+    }
+
+    func clearCache() {
+        if let info = vaultInfo {
+            CacheManager.shared.clearAll(forVault: info.vaultId)
+        } else {
+            CacheManager.shared.clearAll()
+        }
+        cacheSize = 0
     }
 
     // MARK: - Helpers

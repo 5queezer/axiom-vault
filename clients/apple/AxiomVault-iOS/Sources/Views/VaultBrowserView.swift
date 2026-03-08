@@ -369,6 +369,20 @@ struct VaultInfoView: View {
                 } else {
                     Text("Loading vault information...")
                 }
+
+                Section(header: Text("Offline Cache")) {
+                    LabeledContent("Cache Size", value: ByteCountFormatter.string(fromByteCount: vaultManager.cacheSize, countStyle: .file))
+
+                    Button(role: .destructive) {
+                        vaultManager.clearCache()
+                    } label: {
+                        HStack {
+                            Image(systemName: "trash")
+                            Text("Clear Cache")
+                        }
+                    }
+                    .disabled(vaultManager.cacheSize == 0)
+                }
             }
             .navigationTitle("Vault Info")
             .navigationBarTitleDisplayMode(.inline)
@@ -380,6 +394,7 @@ struct VaultInfoView: View {
         }
         .onAppear {
             Task { await vaultManager.refreshVaultInfo() }
+            vaultManager.refreshCacheSize()
         }
     }
 }
