@@ -117,4 +117,33 @@ class VaultManager: ObservableObject {
     func vaultPath(for name: String) -> String {
         currentPath == "/" ? "/\(name)" : "\(currentPath)/\(name)"
     }
+
+    /// Recursively import a local directory into the vault, preserving structure.
+    func addDirectory(from localURL: URL, to baseVaultPath: String) throws {
+        let fm = FileManager.default
+        let dirName = localURL.lastPathComponent
+        let targetPath = baseVaultPath == "/"
+            ? "/\(dirName)"
+            : "\(baseVaultPath)/\(dirName)"
+
+        try VaultCore.shared.createDirectory(at: targetPath)
+
+        guard let enumerator = fm.enumerator(
+            at: localURL,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else { return }
+
+        for case let fileURL as URL in enumerator {
+            let resourceValues = try fileURL.resourceValues(forKeys: [.isDirectoryKey])
+            let relativePath = fileURL.path.replacingOccurrences(of: localURL.path, with: "")
+            let vaultEntryPath = targetPath + relativePath
+
+            if resourceValues.isDirectory == true {
+                try VaultCore.shared.createDirectory(at: vaultEntryPath)
+            } else {
+                try VaultCore.shared.addFile(from: fileURL.path, to: vaultEntryPath)
+            }
+        }
+    }
 }

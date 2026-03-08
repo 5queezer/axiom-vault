@@ -44,10 +44,14 @@ extension VaultManager {
         isLoading = true
         defer { isLoading = false }
 
-        let vaultFilePath = vaultPath(for: url.lastPathComponent)
-
         do {
-            try VaultCore.shared.addFile(from: url.path, to: vaultFilePath)
+            var isDir: ObjCBool = false
+            if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue {
+                try addDirectory(from: url, to: currentPath)
+            } else {
+                let vaultFilePath = vaultPath(for: url.lastPathComponent)
+                try VaultCore.shared.addFile(from: url.path, to: vaultFilePath)
+            }
             await refreshEntries()
         } catch {
             errorMessage = error.localizedDescription

@@ -88,10 +88,14 @@ extension VaultManager {
             let didAccess = url.startAccessingSecurityScopedResource()
             defer { if didAccess { url.stopAccessingSecurityScopedResource() } }
 
-            let filePath = vaultPath(for: url.lastPathComponent)
-
             do {
-                try VaultCore.shared.addFile(from: url.path, to: filePath)
+                var isDir: ObjCBool = false
+                if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue {
+                    try addDirectory(from: url, to: currentPath)
+                } else {
+                    let filePath = vaultPath(for: url.lastPathComponent)
+                    try VaultCore.shared.addFile(from: url.path, to: filePath)
+                }
             } catch {
                 errorMessage = error.localizedDescription
                 return

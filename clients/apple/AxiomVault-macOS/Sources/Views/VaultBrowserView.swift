@@ -32,6 +32,10 @@ struct VaultBrowserView: View {
                     addFiles()
                 }
 
+                Button("Add Folder", systemImage: "folder.badge.plus") {
+                    addFolder()
+                }
+
                 Button("New Folder", systemImage: "folder.badge.plus") {
                     showNewFolder = true
                 }
@@ -165,9 +169,20 @@ struct VaultBrowserView: View {
     private func addFiles() {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = true
-        panel.canChooseDirectories = false
+        panel.canChooseDirectories = true
         panel.canChooseFiles = true
-        panel.message = "Select files to add to the vault"
+        panel.message = "Select files or folders to add to the vault"
+
+        guard panel.runModal() == .OK else { return }
+        Task { await vaultManager.addFiles(from: panel.urls) }
+    }
+
+    private func addFolder() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.message = "Select folders to add to the vault"
 
         guard panel.runModal() == .OK else { return }
         Task { await vaultManager.addFiles(from: panel.urls) }

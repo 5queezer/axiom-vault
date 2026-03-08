@@ -196,7 +196,8 @@ struct VaultBrowserView: View {
 struct AddFileView: View {
     @EnvironmentObject var vaultManager: VaultManager
     @Environment(\.dismiss) var dismiss
-    @State private var showingDocumentPicker = false
+    @State private var showingFilePicker = false
+    @State private var showingFolderPicker = false
 
     var body: some View {
         NavigationView {
@@ -205,17 +206,17 @@ struct AddFileView: View {
                     .font(.system(size: 60))
                     .foregroundColor(.blue)
 
-                Text("Add File to Vault")
+                Text("Add to Vault")
                     .font(.headline)
 
-                Text("Select a file from your device to encrypt and store in the vault")
+                Text("Select files or folders to encrypt and store in the vault")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal)
 
-                Button(action: { showingDocumentPicker = true }) {
-                    Label("Choose File", systemImage: "folder")
+                Button(action: { showingFilePicker = true }) {
+                    Label("Choose Files", systemImage: "doc.badge.plus")
                         .frame(maxWidth: .infinity)
                         .padding()
                         .background(Color.blue)
@@ -224,10 +225,20 @@ struct AddFileView: View {
                 }
                 .padding(.horizontal, 40)
 
+                Button(action: { showingFolderPicker = true }) {
+                    Label("Choose Folder", systemImage: "folder.badge.plus")
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.blue.opacity(0.8))
+                        .foregroundColor(.white)
+                        .cornerRadius(10)
+                }
+                .padding(.horizontal, 40)
+
                 Spacer()
             }
             .padding(.top, 40)
-            .navigationTitle("Add File")
+            .navigationTitle("Add to Vault")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -236,23 +247,34 @@ struct AddFileView: View {
             }
         }
         .fileImporter(
-            isPresented: $showingDocumentPicker,
+            isPresented: $showingFilePicker,
             allowedContentTypes: [.item],
+            allowsMultipleSelection: true
+        ) { result in
+            handleImportResult(result)
+        }
+        .fileImporter(
+            isPresented: $showingFolderPicker,
+            allowedContentTypes: [.folder],
             allowsMultipleSelection: false
         ) { result in
-            switch result {
-            case .success(let urls):
-                if let url = urls.first {
-                    Task {
-                        guard url.startAccessingSecurityScopedResource() else { return }
-                        defer { url.stopAccessingSecurityScopedResource() }
-                        await vaultManager.addFile(from: url)
-                        dismiss()
-                    }
+            handleImportResult(result)
+        }
+    }
+
+    private func handleImportResult(_ result: Result<[URL], Error>) {
+        switch result {
+        case .success(let urls):
+            Task {
+                for url in urls {
+                    guard url.startAccessingSecurityScopedResource() else { continue }
+                    defer { url.stopAccessingSecurityScopedResource() }
+                    await vaultManager.addFile(from: url)
                 }
-            case .failure:
-                break
+                dismiss()
             }
+        case .failure:
+            break
         }
     }
 }
