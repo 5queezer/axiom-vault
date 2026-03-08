@@ -10,7 +10,7 @@ struct SyncStatusView: View {
     var body: some View {
         HStack(spacing: 6) {
             statusIcon
-            Text(syncManager.syncStatus.rawValue)
+            Text(syncManager.isSyncAvailable ? syncManager.syncStatus.rawValue : "Preview")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -40,10 +40,10 @@ struct SyncStatusDetailView: View {
                     .font(.title2)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(syncManager.syncStatus.rawValue)
+                    Text(syncManager.isSyncAvailable ? syncManager.syncStatus.rawValue : "Preview")
                         .font(.headline)
 
-                    Text("Last sync: \(syncManager.lastSyncDescription)")
+                    Text(syncManager.isSyncAvailable ? "Last sync: \(syncManager.lastSyncDescription)" : syncManager.availabilityMessage)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

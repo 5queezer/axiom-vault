@@ -96,24 +96,23 @@ struct SyncLogEntry: Identifiable {
 
 /// Manages cloud synchronization state and operations.
 ///
-/// Uses placeholder/mock implementations since FFI sync bindings are not yet
-/// fully implemented. Settings are persisted via UserDefaults.
+/// The underlying sync engine is not wired into the Apple clients yet, so this
+/// manager keeps the UI in an explicit preview/offline state instead of
+/// reporting fake successful syncs. Persisted settings are scoped per vault.
 @MainActor
 class SyncManager: ObservableObject {
-    // MARK: - Published state
-
     @Published var syncStatus: SyncStatus = .offline
     @Published var lastSyncDate: Date?
     @Published var isSyncing = false
     @Published var syncError: String?
     @Published var syncLog: [SyncLogEntry] = []
+    @Published private(set) var activeVaultKey: String?
 
-    // MARK: - Settings (persisted via UserDefaults)
-
-    @Published var autoSyncEnabled: Bool {
+    @Published var autoSyncEnabled: Bool = false {
         didSet {
-            UserDefaults.standard.set(autoSyncEnabled, forKey: Keys.autoSyncEnabled)
-            if autoSyncEnabled {
+            guard !isLoadingScopedState else { return }
+            persist(autoSyncEnabled, for: .autoSyncEnabled)
+            if autoSyncEnabled, isSyncAvailable {
                 scheduleAutoSync()
             } else {
                 cancelAutoSync()
@@ -121,117 +120,81 @@ class SyncManager: ObservableObject {
         }
     }
 
-    @Published var syncInterval: SyncInterval {
+    @Published var syncInterval: SyncInterval = .fifteenMinutes {
         didSet {
-            UserDefaults.standard.set(syncInterval.rawValue, forKey: Keys.syncInterval)
-            if autoSyncEnabled {
+            guard !isLoadingScopedState else { return }
+            persist(syncInterval.rawValue, for: .syncInterval)
+            if autoSyncEnabled, isSyncAvailable {
                 scheduleAutoSync()
             }
         }
     }
 
-    @Published var conflictStrategy: ConflictResolutionStrategy {
+    @Published var conflictStrategy: ConflictResolutionStrategy = .keepBoth {
         didSet {
-            UserDefaults.standard.set(conflictStrategy.rawValue, forKey: Keys.conflictStrategy)
+            guard !isLoadingScopedState else { return }
+            persist(conflictStrategy.rawValue, for: .conflictStrategy)
         }
     }
-
-    // MARK: - Private
 
     private var autoSyncTimer: Timer?
+    private var isLoadingScopedState = false
 
-    private enum Keys {
-        static let autoSyncEnabled = "com.axiomvault.sync.autoSyncEnabled"
-        static let syncInterval = "com.axiomvault.sync.interval"
-        static let conflictStrategy = "com.axiomvault.sync.conflictStrategy"
-        static let lastSyncDate = "com.axiomvault.sync.lastSyncDate"
+    private enum KeyKind: String {
+        case autoSyncEnabled
+        case syncInterval
+        case conflictStrategy
+        case lastSyncDate
     }
 
-    // MARK: - Init
+    init() {}
 
-    init() {
-        // Restore persisted settings
-        self.autoSyncEnabled = UserDefaults.standard.bool(forKey: Keys.autoSyncEnabled)
+    var isSyncAvailable: Bool { false }
 
-        let storedInterval = UserDefaults.standard.integer(forKey: Keys.syncInterval)
-        self.syncInterval = SyncInterval(rawValue: storedInterval) ?? .fifteenMinutes
-
-        let storedStrategy = UserDefaults.standard.string(forKey: Keys.conflictStrategy) ?? ""
-        self.conflictStrategy = ConflictResolutionStrategy(rawValue: storedStrategy) ?? .keepBoth
-
-        self.lastSyncDate = UserDefaults.standard.object(forKey: Keys.lastSyncDate) as? Date
-
-        if autoSyncEnabled {
-            scheduleAutoSync()
+    var availabilityMessage: String {
+        guard activeVaultKey != nil else {
+            return "Open a vault to configure sync settings."
         }
+        return "Cloud sync UI is in preview. The real sync engine is not wired into Apple clients yet, so sync actions stay disabled to avoid false success signals."
     }
 
-    // MARK: - Sync operations
+    func setActiveVault(_ vaultKey: String?) {
+        if activeVaultKey == vaultKey { return }
+        cancelAutoSync()
+        activeVaultKey = vaultKey
+        loadScopedState()
+    }
 
-    /// Trigger a manual sync. Currently a placeholder that simulates a sync cycle.
     func sync() async {
-        guard !isSyncing else { return }
+        guard isSyncAvailable else {
+            syncStatus = .offline
+            syncError = availabilityMessage
+            appendLog(status: .offline, message: "Sync unavailable in this preview build")
+            return
+        }
 
+        guard !isSyncing else { return }
         isSyncing = true
         syncStatus = .syncing
         syncError = nil
-
-        // Placeholder: simulate sync delay
-        // In production this would call into the Rust sync engine via FFI
-        do {
-            try await Task.sleep(nanoseconds: 1_500_000_000)  // 1.5s
-
-            let now = Date()
-            lastSyncDate = now
-            UserDefaults.standard.set(now, forKey: Keys.lastSyncDate)
-            syncStatus = .synced
-
-            let entry = SyncLogEntry(
-                date: now,
-                status: .synced,
-                message: "Sync completed successfully",
-                filesChanged: 0
-            )
-            syncLog.insert(entry, at: 0)
-
-            // Keep log to a reasonable size
-            if syncLog.count > 50 {
-                syncLog = Array(syncLog.prefix(50))
-            }
-        } catch {
-            syncStatus = .error
-            syncError = "Sync was cancelled"
-
-            let entry = SyncLogEntry(
-                date: Date(),
-                status: .error,
-                message: "Sync cancelled"
-            )
-            syncLog.insert(entry, at: 0)
-        }
-
         isSyncing = false
     }
 
-    /// Configure the auto-sync interval.
     func configureSyncInterval(_ interval: SyncInterval) {
         syncInterval = interval
     }
 
-    /// Set the conflict resolution strategy.
     func setConflictStrategy(_ strategy: ConflictResolutionStrategy) {
         conflictStrategy = strategy
     }
 
-    /// Clear the sync log.
     func clearSyncLog() {
         syncLog.removeAll()
     }
 
-    // MARK: - Auto-sync scheduling
-
     private func scheduleAutoSync() {
         cancelAutoSync()
+        guard isSyncAvailable else { return }
         let interval = TimeInterval(syncInterval.rawValue)
         autoSyncTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
@@ -245,7 +208,48 @@ class SyncManager: ObservableObject {
         autoSyncTimer = nil
     }
 
-    // MARK: - Formatting helpers
+    private func appendLog(status: SyncStatus, message: String, filesChanged: Int = 0) {
+        let entry = SyncLogEntry(date: Date(), status: status, message: message, filesChanged: filesChanged)
+        syncLog.insert(entry, at: 0)
+        if syncLog.count > 50 {
+            syncLog = Array(syncLog.prefix(50))
+        }
+    }
+
+    private func scopedKey(_ kind: KeyKind) -> String? {
+        guard let activeVaultKey else { return nil }
+        return "com.axiomvault.sync.\(activeVaultKey).\(kind.rawValue)"
+    }
+
+    private func persist(_ value: Any, for kind: KeyKind) {
+        guard let key = scopedKey(kind) else { return }
+        UserDefaults.standard.set(value, forKey: key)
+    }
+
+    private func loadScopedState() {
+        isLoadingScopedState = true
+        defer { isLoadingScopedState = false }
+
+        guard activeVaultKey != nil else {
+            autoSyncEnabled = false
+            syncInterval = .fifteenMinutes
+            conflictStrategy = .keepBoth
+            lastSyncDate = nil
+            syncStatus = .offline
+            syncError = nil
+            syncLog = []
+            return
+        }
+
+        let defaults = UserDefaults.standard
+        autoSyncEnabled = defaults.bool(forKey: scopedKey(.autoSyncEnabled)!)
+        syncInterval = SyncInterval(rawValue: defaults.integer(forKey: scopedKey(.syncInterval)!)) ?? .fifteenMinutes
+        conflictStrategy = ConflictResolutionStrategy(rawValue: defaults.string(forKey: scopedKey(.conflictStrategy)!) ?? "") ?? .keepBoth
+        lastSyncDate = defaults.object(forKey: scopedKey(.lastSyncDate)!) as? Date
+        syncStatus = .offline
+        syncError = nil
+        syncLog = []
+    }
 
     var lastSyncDescription: String {
         guard let date = lastSyncDate else {

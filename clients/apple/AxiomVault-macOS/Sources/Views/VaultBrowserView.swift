@@ -53,7 +53,7 @@ struct VaultBrowserView: View {
                     SyncStatusView()
                         .environmentObject(syncManager)
                 }
-                .disabled(syncManager.isSyncing)
+                .disabled(syncManager.isSyncing || !syncManager.isSyncAvailable)
                 .help("Last sync: \(syncManager.lastSyncDescription)")
 
                 Menu {
@@ -73,7 +73,7 @@ struct VaultBrowserView: View {
                     Button("Sync Now", systemImage: "arrow.triangle.2.circlepath") {
                         Task { await syncManager.sync() }
                     }
-                    .disabled(syncManager.isSyncing)
+                    .disabled(syncManager.isSyncing || !syncManager.isSyncAvailable)
                     Button("Sync Settings...", systemImage: "gearshape") {
                         showSyncSettings = true
                     }

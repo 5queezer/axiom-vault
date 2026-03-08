@@ -46,7 +46,7 @@ struct VaultBrowserView: View {
                             .foregroundStyle(syncManager.syncStatus.tintColor)
                     }
                 }
-                .disabled(syncManager.isSyncing)
+                .disabled(syncManager.isSyncing || !syncManager.isSyncAvailable)
             }
 
             ToolbarItem(placement: .navigationBarTrailing) {
@@ -78,7 +78,7 @@ struct VaultBrowserView: View {
                     }) {
                         Label("Sync Now", systemImage: "arrow.triangle.2.circlepath")
                     }
-                    .disabled(syncManager.isSyncing)
+                    .disabled(syncManager.isSyncing || !syncManager.isSyncAvailable)
                     Button(action: { showingSyncSettings = true }) {
                         Label("Sync Settings", systemImage: "gearshape")
                     }

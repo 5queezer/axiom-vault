@@ -81,7 +81,7 @@ struct SyncSettingsView: View {
                 Button("Sync Now") {
                     Task { await syncManager.sync() }
                 }
-                .disabled(syncManager.isSyncing)
+                .disabled(syncManager.isSyncing || !syncManager.isSyncAvailable)
             }
 
             LabeledContent("Last Sync", value: syncManager.lastSyncDescription)
@@ -93,6 +93,7 @@ struct SyncSettingsView: View {
     private var syncConfigSection: some View {
         Section {
             Toggle("Auto-Sync", isOn: $syncManager.autoSyncEnabled)
+                .disabled(!syncManager.isSyncAvailable)
 
             if syncManager.autoSyncEnabled {
                 Picker("Sync Interval", selection: $syncManager.syncInterval) {
@@ -104,7 +105,7 @@ struct SyncSettingsView: View {
         } header: {
             Text("Auto-Sync")
         } footer: {
-            Text("When enabled, your vault will automatically sync at the chosen interval.")
+            Text(syncManager.availabilityMessage)
         }
     }
 
@@ -169,7 +170,7 @@ struct SyncSettingsView: View {
                     Button("Sync Now") {
                         Task { await syncManager.sync() }
                     }
-                    .disabled(syncManager.isSyncing)
+                    .disabled(syncManager.isSyncing || !syncManager.isSyncAvailable)
                 }
             }
 
@@ -177,6 +178,14 @@ struct SyncSettingsView: View {
                 Text("Last Sync")
                     .foregroundStyle(.secondary)
                 Text(syncManager.lastSyncDescription)
+            }
+
+            GridRow {
+                Text("Availability")
+                    .foregroundStyle(.secondary)
+                Text(syncManager.availabilityMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Divider()
@@ -187,6 +196,7 @@ struct SyncSettingsView: View {
                     .foregroundStyle(.secondary)
                 Toggle("", isOn: $syncManager.autoSyncEnabled)
                     .labelsHidden()
+                    .disabled(!syncManager.isSyncAvailable)
             }
 
             if syncManager.autoSyncEnabled {

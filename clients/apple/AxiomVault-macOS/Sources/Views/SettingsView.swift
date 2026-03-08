@@ -77,6 +77,7 @@ struct SettingsView: View {
     private var syncSettings: some View {
         Form {
             Toggle("Auto-sync", isOn: $syncManager.autoSyncEnabled)
+                .disabled(!syncManager.isSyncAvailable)
 
             if syncManager.autoSyncEnabled {
                 Picker("Sync interval", selection: $syncManager.syncInterval) {
