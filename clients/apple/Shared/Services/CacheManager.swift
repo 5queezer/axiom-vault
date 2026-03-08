@@ -1,5 +1,13 @@
+import CryptoKit
 import Foundation
 import os.log
+
+// SECURITY NOTE: This cache stores decrypted vault contents on disk for performance.
+// On iOS, files are protected with FileProtection.complete so they are inaccessible
+// when the device is locked. The `clearOnLock` setting (default: true) provides an
+// additional layer by deleting cached files when the vault is locked. Users who
+// disable clearOnLock accept the tradeoff of cached plaintext persisting across
+// lock/unlock cycles in exchange for faster file access.
 
 /// Manages a file-based cache of decrypted vault contents for the File Provider extension.
 /// Uses a JSON manifest to track cached files and implements LRU eviction.
@@ -8,7 +16,7 @@ class CacheManager {
 
     private let logger = Logger(subsystem: "com.axiomvault.macos.fileprovider", category: "cache")
     private let fileManager = FileManager.default
-    private let lock = NSLock()
+    private let queue = DispatchQueue(label: "com.axiomvault.cache", attributes: .concurrent)
 
     /// Default maximum cache size: 500 MB
     private static let defaultMaxCacheSize: Int64 = 500 * 1024 * 1024
@@ -30,11 +38,23 @@ class CacheManager {
         }
     }
 
-    /// Whether to clear the cache when the vault is locked
+    /// Whether to clear the cache when the vault is locked.
+    /// Defaults to `true` for security — cached files are decrypted plaintext.
     var clearOnLock: Bool {
-        get { UserDefaults.standard.bool(forKey: Self.clearOnLockKey) }
+        get {
+            let hasValue = UserDefaults.standard.object(forKey: Self.clearOnLockKey) != nil
+            guard hasValue else { return true }
+            return UserDefaults.standard.bool(forKey: Self.clearOnLockKey)
+        }
         set { UserDefaults.standard.set(newValue, forKey: Self.clearOnLockKey) }
     }
+
+    /// In-memory manifest cache, keyed by vault ID.
+    /// Avoids re-reading JSON from disk on every operation.
+    private var manifestCache: [String: CacheManifest] = [:]
+
+    /// Tracks whether the in-memory manifest has unsaved changes, keyed by vault ID.
+    private var manifestDirty: Set<String> = []
 
     private init() {}
 
@@ -75,17 +95,39 @@ class CacheManager {
         static var empty: CacheManifest { CacheManifest(entries: [:]) }
     }
 
+    /// Loads the manifest from the in-memory cache, falling back to disk.
+    /// Must be called within the queue.
     private func loadManifest(forVault vaultId: String) -> CacheManifest {
+        if let cached = manifestCache[vaultId] {
+            return cached
+        }
+
         let url = manifestURL(forVault: vaultId)
         guard let data = try? Data(contentsOf: url),
               let manifest = try? JSONDecoder().decode(CacheManifest.self, from: data)
         else {
-            return .empty
+            let empty = CacheManifest.empty
+            manifestCache[vaultId] = empty
+            return empty
         }
+        manifestCache[vaultId] = manifest
         return manifest
     }
 
-    private func saveManifest(_ manifest: CacheManifest, forVault vaultId: String) {
+    /// Stores the manifest in-memory and marks it dirty.
+    /// Must be called within the queue (barrier).
+    private func storeManifest(_ manifest: CacheManifest, forVault vaultId: String) {
+        manifestCache[vaultId] = manifest
+        manifestDirty.insert(vaultId)
+    }
+
+    /// Flushes a dirty manifest to disk.
+    /// Must be called within the queue (barrier).
+    private func flushManifest(forVault vaultId: String) {
+        guard manifestDirty.contains(vaultId),
+              let manifest = manifestCache[vaultId]
+        else { return }
+
         let url = manifestURL(forVault: vaultId)
         let dir = url.deletingLastPathComponent()
         try? fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -97,6 +139,29 @@ class CacheManager {
         if let data = try? encoder.encode(manifest) {
             try? data.write(to: url, options: .atomic)
         }
+
+        manifestDirty.remove(vaultId)
+    }
+
+    /// Flushes all dirty manifests to disk.
+    func flushAllManifests() {
+        queue.async(flags: .barrier) { [self] in
+            for vaultId in manifestDirty {
+                flushManifest(forVault: vaultId)
+            }
+        }
+    }
+
+    // MARK: - File protection
+
+    /// Sets appropriate file protection on cached files (iOS only).
+    private func applyFileProtection(to url: URL) {
+        #if os(iOS)
+        try? fileManager.setAttributes(
+            [.protectionKey: FileProtectionType.complete],
+            ofItemAtPath: url.path
+        )
+        #endif
     }
 
     // MARK: - Public API
@@ -104,29 +169,53 @@ class CacheManager {
     /// Returns the local cached URL for a vault path, or nil if not cached.
     /// Updates the last-access date for LRU tracking.
     func cachedURL(forVault vaultId: String, path vaultPath: String) -> URL? {
-        lock.lock()
-        defer { lock.unlock() }
+        var result: URL?
 
-        var manifest = loadManifest(forVault: vaultId)
-        guard var entry = manifest.entries[vaultPath] else { return nil }
+        queue.sync {
+            var manifest = loadManifest(forVault: vaultId)
+            guard var entry = manifest.entries[vaultPath] else { return }
 
-        let localURL = cacheDirectory(forVault: vaultId)
-            .appendingPathComponent(entry.localFilename)
+            let localURL = cacheDirectory(forVault: vaultId)
+                .appendingPathComponent(entry.localFilename)
 
-        guard fileManager.fileExists(atPath: localURL.path) else {
-            // Stale manifest entry; clean up
-            manifest.entries.removeValue(forKey: vaultPath)
-            saveManifest(manifest, forVault: vaultId)
-            return nil
+            guard fileManager.fileExists(atPath: localURL.path) else {
+                // Stale manifest entry; clean up
+                manifest.entries.removeValue(forKey: vaultPath)
+                // Need barrier to mutate, schedule it
+                result = nil
+                return
+            }
+
+            // Update LRU access time
+            entry.lastAccessDate = Date()
+            manifest.entries[vaultPath] = entry
+            result = localURL
+            // Defer the write; store in memory only
+            manifestCache[vaultId] = manifest
+            manifestDirty.insert(vaultId)
         }
 
-        // Update LRU access time
-        entry.lastAccessDate = Date()
-        manifest.entries[vaultPath] = entry
-        saveManifest(manifest, forVault: vaultId)
+        // If we found a stale entry, clean it up with a barrier write
+        if result == nil {
+            queue.async(flags: .barrier) { [self] in
+                var manifest = loadManifest(forVault: vaultId)
+                if let entry = manifest.entries[vaultPath] {
+                    let localURL = cacheDirectory(forVault: vaultId)
+                        .appendingPathComponent(entry.localFilename)
+                    if !fileManager.fileExists(atPath: localURL.path) {
+                        manifest.entries.removeValue(forKey: vaultPath)
+                        storeManifest(manifest, forVault: vaultId)
+                        flushManifest(forVault: vaultId)
+                    }
+                }
+            }
+        }
 
-        logger.debug("Cache hit for \(vaultPath)")
-        return localURL
+        if result != nil {
+            logger.debug("Cache hit for \(vaultPath)")
+        }
+
+        return result
     }
 
     /// Caches decrypted file data for a vault path.
@@ -139,13 +228,7 @@ class CacheManager {
         path vaultPath: String,
         etag: String? = nil
     ) -> URL? {
-        lock.lock()
-        defer { lock.unlock() }
-
-        let dir = cacheDirectory(forVault: vaultId)
-        try? fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
-
-        // Determine file size
+        // Read file attributes outside the lock
         guard let attrs = try? fileManager.attributesOfItem(atPath: sourceURL.path),
               let fileSize = attrs[.size] as? Int64
         else {
@@ -153,11 +236,13 @@ class CacheManager {
             return nil
         }
 
-        // Generate a stable filename based on vault path to allow overwrites
+        let dir = cacheDirectory(forVault: vaultId)
         let localFilename = stableFilename(for: vaultPath)
         let destURL = dir.appendingPathComponent(localFilename)
 
-        // Copy file to cache
+        // Perform directory creation and file copy outside the barrier
+        try? fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
+
         do {
             if fileManager.fileExists(atPath: destURL.path) {
                 try fileManager.removeItem(at: destURL)
@@ -168,102 +253,131 @@ class CacheManager {
             return nil
         }
 
-        // Update manifest
-        var manifest = loadManifest(forVault: vaultId)
-        let now = Date()
-        manifest.entries[vaultPath] = CacheEntry(
-            vaultPath: vaultPath,
-            localFilename: localFilename,
-            cachedDate: now,
-            size: fileSize,
-            etag: etag,
-            lastAccessDate: now
-        )
-        saveManifest(manifest, forVault: vaultId)
+        // Apply file protection for iOS
+        applyFileProtection(to: destURL)
+
+        // Update manifest under barrier
+        queue.sync(flags: .barrier) { [self] in
+            var manifest = loadManifest(forVault: vaultId)
+            let now = Date()
+            manifest.entries[vaultPath] = CacheEntry(
+                vaultPath: vaultPath,
+                localFilename: localFilename,
+                cachedDate: now,
+                size: fileSize,
+                etag: etag,
+                lastAccessDate: now
+            )
+            storeManifest(manifest, forVault: vaultId)
+
+            evictIfNeeded(forVault: vaultId, manifest: &manifest)
+            storeManifest(manifest, forVault: vaultId)
+            flushManifest(forVault: vaultId)
+        }
 
         logger.debug("Cached \(vaultPath) (\(fileSize) bytes)")
-
-        // Evict if over budget (non-blocking for the caller)
-        evictIfNeeded(forVault: vaultId, manifest: &manifest)
-        saveManifest(manifest, forVault: vaultId)
 
         return destURL
     }
 
     /// Invalidates a single cached entry.
     func invalidate(forVault vaultId: String, path vaultPath: String) {
-        lock.lock()
-        defer { lock.unlock() }
+        queue.sync(flags: .barrier) { [self] in
+            var manifest = loadManifest(forVault: vaultId)
+            guard let entry = manifest.entries.removeValue(forKey: vaultPath) else { return }
 
-        var manifest = loadManifest(forVault: vaultId)
-        guard let entry = manifest.entries.removeValue(forKey: vaultPath) else { return }
+            let localURL = cacheDirectory(forVault: vaultId)
+                .appendingPathComponent(entry.localFilename)
+            try? fileManager.removeItem(at: localURL)
+            storeManifest(manifest, forVault: vaultId)
+            flushManifest(forVault: vaultId)
 
-        let localURL = cacheDirectory(forVault: vaultId)
-            .appendingPathComponent(entry.localFilename)
-        try? fileManager.removeItem(at: localURL)
-        saveManifest(manifest, forVault: vaultId)
-
-        logger.debug("Invalidated cache for \(vaultPath)")
+            logger.debug("Invalidated cache for \(vaultPath)")
+        }
     }
 
     /// Clears the entire cache for a vault.
     func clearAll(forVault vaultId: String) {
-        lock.lock()
-        defer { lock.unlock() }
+        queue.sync(flags: .barrier) { [self] in
+            let dir = cacheDirectory(forVault: vaultId)
+            try? fileManager.removeItem(at: dir)
+            manifestCache.removeValue(forKey: vaultId)
+            manifestDirty.remove(vaultId)
 
-        let dir = cacheDirectory(forVault: vaultId)
-        try? fileManager.removeItem(at: dir)
-
-        logger.info("Cleared cache for vault \(vaultId)")
+            logger.info("Cleared cache for vault \(vaultId)")
+        }
     }
 
     /// Clears the cache for all vaults.
     func clearAll() {
-        lock.lock()
-        defer { lock.unlock() }
+        queue.sync(flags: .barrier) { [self] in
+            try? fileManager.removeItem(at: cacheRootDirectory)
+            manifestCache.removeAll()
+            manifestDirty.removeAll()
 
-        try? fileManager.removeItem(at: cacheRootDirectory)
-
-        logger.info("Cleared all vault caches")
-    }
-
-    /// Returns the total cache size in bytes for a vault.
-    func cacheSize(forVault vaultId: String) -> Int64 {
-        lock.lock()
-        defer { lock.unlock() }
-
-        let manifest = loadManifest(forVault: vaultId)
-        return manifest.entries.values.reduce(0) { $0 + $1.size }
-    }
-
-    /// Returns the total cache size across all vaults.
-    func totalCacheSize() -> Int64 {
-        lock.lock()
-        defer { lock.unlock() }
-
-        guard let contents = try? fileManager.contentsOfDirectory(
-            at: cacheRootDirectory,
-            includingPropertiesForKeys: nil
-        ) else { return 0 }
-
-        var total: Int64 = 0
-        for dir in contents {
-            let manifestURL = dir.appendingPathComponent("manifest.json")
-            guard let data = try? Data(contentsOf: manifestURL),
-                  let manifest = try? JSONDecoder().decode(CacheManifest.self, from: data)
-            else { continue }
-            total += manifest.entries.values.reduce(0) { $0 + $1.size }
+            logger.info("Cleared all vault caches")
         }
-        return total
+    }
+
+    /// Returns the total cache size in bytes for a vault, reconciled against actual disk state.
+    func cacheSize(forVault vaultId: String) -> Int64 {
+        queue.sync {
+            reconcileManifest(forVault: vaultId)
+            let manifest = loadManifest(forVault: vaultId)
+            return manifest.entries.values.reduce(0) { $0 + $1.size }
+        }
+    }
+
+    /// Returns the total cache size across all vaults, reconciled against actual disk state.
+    func totalCacheSize() -> Int64 {
+        queue.sync {
+            guard let contents = try? fileManager.contentsOfDirectory(
+                at: cacheRootDirectory,
+                includingPropertiesForKeys: nil
+            ) else { return 0 }
+
+            var total: Int64 = 0
+            for dir in contents {
+                let vaultId = dir.lastPathComponent
+                reconcileManifest(forVault: vaultId)
+                let manifest = loadManifest(forVault: vaultId)
+                total += manifest.entries.values.reduce(0) { $0 + $1.size }
+            }
+            return total
+        }
     }
 
     /// Returns the number of cached entries for a vault.
     func entryCount(forVault vaultId: String) -> Int {
-        lock.lock()
-        defer { lock.unlock() }
+        queue.sync {
+            let manifest = loadManifest(forVault: vaultId)
+            return manifest.entries.count
+        }
+    }
 
-        let manifest = loadManifest(forVault: vaultId)
-        return manifest.entries.count
+    // MARK: - Reconciliation
+
+    /// Removes manifest entries whose backing files no longer exist on disk
+    /// (e.g., if the OS purged cached files). Updates sizes accordingly.
+    /// Must be called within the queue.
+    private func reconcileManifest(forVault vaultId: String) {
+        var manifest = loadManifest(forVault: vaultId)
+        let dir = cacheDirectory(forVault: vaultId)
+        var changed = false
+
+        for (path, entry) in manifest.entries {
+            let localURL = dir.appendingPathComponent(entry.localFilename)
+            if !fileManager.fileExists(atPath: localURL.path) {
+                manifest.entries.removeValue(forKey: path)
+                changed = true
+                logger.debug("Reconciliation: removed stale entry \(path)")
+            }
+        }
+
+        if changed {
+            manifestCache[vaultId] = manifest
+            manifestDirty.insert(vaultId)
+        }
     }
 
     // MARK: - LRU Eviction
@@ -290,17 +404,15 @@ class CacheManager {
 
     // MARK: - Helpers
 
-    /// Generates a stable filename from a vault path using a hash.
+    /// Generates a stable filename from a vault path using SHA-256.
     private func stableFilename(for vaultPath: String) -> String {
-        // Use a simple hash-based name, preserving the extension for type identification
         let pathData = Data(vaultPath.utf8)
-        let hash = pathData.reduce(0) { (result: UInt64, byte: UInt8) in
-            result &* 31 &+ UInt64(byte)
-        }
+        let digest = SHA256.hash(data: pathData)
+        let hash = digest.map { String(format: "%02x", $0) }.joined()
         let ext = (vaultPath as NSString).pathExtension
         if ext.isEmpty {
-            return String(format: "%016llx", hash)
+            return hash
         }
-        return String(format: "%016llx.%@", hash, ext)
+        return "\(hash).\(ext)"
     }
 }

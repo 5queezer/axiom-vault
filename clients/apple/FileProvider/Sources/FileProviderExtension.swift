@@ -19,7 +19,7 @@ class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
 
     func invalidate() {
         if cacheManager.clearOnLock {
-            cacheManager.clearAll()
+            cacheManager.clearAll(forVault: currentVaultId)
         }
         VaultCore.shared.closeVault()
     }
