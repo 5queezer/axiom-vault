@@ -6,6 +6,17 @@ struct UnlockVaultView: View {
     @State private var selectedURL: URL?
     @State private var password = ""
     @State private var showPassword = false
+    @State private var showBiometricSavePrompt = false
+    @State private var pendingPassword = ""
+
+    private let biometric = BiometricAuth.shared
+
+    /// Whether the selected vault has a stored biometric credential
+    var canUseBiometric: Bool {
+        guard let url = selectedURL else { return false }
+        return biometric.isBiometricAvailable
+            && biometric.hasStoredPassword(for: url.path)
+    }
 
     var body: some View {
         VStack(spacing: 20) {
@@ -62,6 +73,19 @@ struct UnlockVaultView: View {
             }
             .frame(width: 400)
 
+            // Biometric unlock button
+            if canUseBiometric {
+                Button(action: unlockWithBiometric) {
+                    HStack {
+                        Image(systemName: biometric.unlockButtonIcon)
+                        Text(biometric.unlockButtonLabel)
+                    }
+                    .frame(width: 400)
+                }
+                .controlSize(.large)
+                .disabled(vaultManager.isLoading)
+            }
+
             // Password
             Group {
                 if showPassword {
@@ -87,6 +111,28 @@ struct UnlockVaultView: View {
             }
         }
         .padding(24)
+        .onDisappear {
+            pendingPassword = ""
+        }
+        .alert(
+            "Enable \(biometric.biometricName)?",
+            isPresented: $showBiometricSavePrompt
+        ) {
+            Button("Enable") {
+                vaultManager.enableBiometric(
+                    password: pendingPassword,
+                    vaultPath: vaultManager.lastUnlockedVaultPath ?? ""
+                )
+                pendingPassword = ""
+                dismiss()
+            }
+            Button("Not Now", role: .cancel) {
+                pendingPassword = ""
+                dismiss()
+            }
+        } message: {
+            Text("Unlock this vault with \(biometric.biometricName) next time?")
+        }
     }
 
     private func browseForVault() {
@@ -106,7 +152,37 @@ struct UnlockVaultView: View {
         Task {
             await vaultManager.openVault(at: url, password: password)
             if vaultManager.isVaultOpen {
-                dismiss()
+                vaultManager.lastUnlockedVaultPath = url.path
+                // Offer biometric save if biometrics available but not yet stored
+                if biometric.isBiometricAvailable
+                    && !biometric.hasStoredPassword(for: url.path)
+                {
+                    pendingPassword = password
+                    password = ""
+                    showBiometricSavePrompt = true
+                } else {
+                    dismiss()
+                }
+            }
+        }
+    }
+
+    private func unlockWithBiometric() {
+        guard let url = selectedURL else { return }
+
+        Task {
+            do {
+                guard let storedPassword = try await biometric.retrievePassword(for: url.path) else {
+                    vaultManager.errorMessage = "No stored password found. Please enter your password."
+                    return
+                }
+                await vaultManager.openVault(at: url, password: storedPassword)
+                if vaultManager.isVaultOpen {
+                    dismiss()
+                }
+            } catch {
+                // Biometric failed — user can fall back to password entry
+                vaultManager.errorMessage = "Biometric authentication failed. Please enter your password."
             }
         }
     }
