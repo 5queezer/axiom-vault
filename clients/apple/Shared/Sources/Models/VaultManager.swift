@@ -35,6 +35,11 @@ class VaultManager: ObservableObject {
     @Published var pathStack: [String] = ["/"]
     @Published var cacheSize: Int64 = 0
 
+    /// Set after a successful password unlock to offer biometric enrollment
+    @Published var shouldOfferBiometricSave = false
+    /// The vault path that was just unlocked (used for biometric save prompt)
+    var lastUnlockedVaultPath: String?
+
     @Published var autoLockDuration: AutoLockDuration {
         didSet {
             UserDefaults.standard.set(autoLockDuration.rawValue, forKey: Self.autoLockKey)
@@ -43,7 +48,6 @@ class VaultManager: ObservableObject {
     }
 
     private var autoLockTimer: Timer?
-    private var didRegisterObservers = false
     static let autoLockKey = "autoLockDuration"
 
     init() {
@@ -54,6 +58,38 @@ class VaultManager: ObservableObject {
             self.autoLockDuration = .fifteenMinutes
             UserDefaults.standard.set(AutoLockDuration.fifteenMinutes.rawValue, forKey: Self.autoLockKey)
         }
+    }
+
+    // MARK: - Biometric helpers
+
+    /// Whether biometric unlock is available for a given vault path
+    func canUseBiometric(for vaultPath: String) -> Bool {
+        BiometricAuth.shared.isBiometricAvailable
+            && BiometricAuth.shared.hasStoredPassword(for: vaultPath)
+    }
+
+    /// Save the password for biometric unlock
+    func enableBiometric(password: String, vaultPath: String) {
+        do {
+            try BiometricAuth.shared.storePassword(password, for: vaultPath)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        shouldOfferBiometricSave = false
+    }
+
+    /// Remove stored biometric password for a vault
+    func disableBiometric(for vaultPath: String) {
+        do {
+            try BiometricAuth.shared.removePassword(for: vaultPath)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Dismiss the biometric save offer
+    func declineBiometricSave() {
+        shouldOfferBiometricSave = false
     }
 
     // MARK: - Auto-lock timer
@@ -95,6 +131,7 @@ class VaultManager: ObservableObject {
         pathStack = ["/"]
         entries = []
         vaultInfo = nil
+        shouldOfferBiometricSave = false
         #if os(macOS)
         currentVaultName = nil
         #endif
