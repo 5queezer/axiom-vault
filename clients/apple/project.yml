@@ -1,0 +1,275 @@
+name: AxiomVault
+options:
+  bundleIdPrefix: com.axiomvault
+  deploymentTarget:
+    iOS: "16.0"
+    macOS: "13.0"
+  xcodeVersion: "15.0"
+  generateEmptyDirectories: true
+  groupSortPosition: bottom
+  createIntermediateGroups: true
+
+settings:
+  base:
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGN_STYLE: Automatic
+    SWIFT_VERSION: "5.9"
+    DEAD_CODE_STRIPPING: YES
+
+targets:
+  # ============================================================
+  # iOS App
+  # ============================================================
+  AxiomVault-iOS:
+    type: application
+    platform: iOS
+    deploymentTarget: "16.0"
+
+    sources:
+      - path: Shared/Sources
+        type: group
+        excludes:
+          - "**/.DS_Store"
+      - path: Shared/Services
+        type: group
+      - path: AxiomVault-iOS/Sources
+        type: group
+        excludes:
+          - "**/.DS_Store"
+
+    resources:
+      - path: AxiomVault-iOS/Resources/Assets.xcassets
+      - path: AxiomVault-iOS/Resources/Info.plist
+        buildPhase: none
+      - path: AxiomVault-iOS/Resources/PrivacyInfo.xcprivacy
+      - path: AxiomVault-iOS/Resources/GoogleServices-Info.plist
+
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.axiomvault.ios
+        INFOPLIST_FILE: AxiomVault-iOS/Resources/Info.plist
+        SWIFT_OBJC_BRIDGING_HEADER: Shared/Sources/Core/AxiomVault-Bridging-Header.h
+        LD_RUNPATH_SEARCH_PATHS:
+          - "$(inherited)"
+          - "@executable_path/Frameworks"
+        OTHER_LDFLAGS:
+          - "$(inherited)"
+          - "-lresolv"
+          - "-lSystem"
+          - "-lc++"
+          - "-framework SystemConfiguration"
+          - "-framework Security"
+        FRAMEWORK_SEARCH_PATHS:
+          - "$(inherited)"
+          - "$(PROJECT_DIR)/Frameworks"
+        LIBRARY_SEARCH_PATHS:
+          - "$(inherited)"
+          - "$(PROJECT_DIR)/Frameworks"
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        GENERATE_INFOPLIST_FILE: NO
+        SUPPORTS_MACCATALYST: NO
+        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
+        TARGETED_DEVICE_FAMILY: "1,2"
+      configs:
+        Debug:
+          SWIFT_OPTIMIZATION_LEVEL: "-Onone"
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG
+          DEBUG_INFORMATION_FORMAT: "dwarf-with-dsym"
+        Release:
+          SWIFT_OPTIMIZATION_LEVEL: "-O"
+          SWIFT_COMPILATION_MODE: wholemodule
+          DEBUG_INFORMATION_FORMAT: "dwarf-with-dsym"
+
+    dependencies:
+      - framework: Frameworks/AxiomVaultCore.xcframework
+        embed: false
+
+    entitlements:
+      path: AxiomVault-iOS/Resources/AxiomVault-iOS.entitlements
+
+    preBuildScripts:
+      - name: "Check Rust Framework"
+        script: |
+          if [ ! -d "${PROJECT_DIR}/Frameworks/AxiomVaultCore.xcframework" ]; then
+            echo "error: AxiomVaultCore.xcframework not found. Run 'Scripts/build-apple.sh --platform ios' first."
+            exit 1
+          fi
+        basedOnDependencyAnalysis: false
+        showEnvVars: false
+
+  # ============================================================
+  # macOS App
+  # ============================================================
+  AxiomVault-macOS:
+    type: application
+    platform: macOS
+    deploymentTarget: "13.0"
+
+    sources:
+      - path: Shared/Sources
+        type: group
+        excludes:
+          - "**/.DS_Store"
+      - path: Shared/Services
+        type: group
+      - path: AxiomVault-macOS/Sources
+        type: group
+        excludes:
+          - "**/.DS_Store"
+
+    resources:
+      - path: AxiomVault-macOS/Resources/Assets.xcassets
+      - path: AxiomVault-macOS/Resources/Info.plist
+        buildPhase: none
+
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.axiomvault.macos
+        INFOPLIST_FILE: AxiomVault-macOS/Resources/Info.plist
+        SWIFT_OBJC_BRIDGING_HEADER: Shared/Sources/Core/AxiomVault-Bridging-Header.h
+        LD_RUNPATH_SEARCH_PATHS:
+          - "$(inherited)"
+          - "@executable_path/../Frameworks"
+        OTHER_LDFLAGS:
+          - "$(inherited)"
+          - "-lresolv"
+          - "-lSystem"
+          - "-lc++"
+          - "-framework SystemConfiguration"
+          - "-framework Security"
+        FRAMEWORK_SEARCH_PATHS:
+          - "$(inherited)"
+          - "$(PROJECT_DIR)/Frameworks"
+        LIBRARY_SEARCH_PATHS:
+          - "$(inherited)"
+          - "$(PROJECT_DIR)/Frameworks"
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        GENERATE_INFOPLIST_FILE: NO
+        COMBINE_HIDPI_IMAGES: YES
+      configs:
+        Debug:
+          SWIFT_OPTIMIZATION_LEVEL: "-Onone"
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG
+          DEBUG_INFORMATION_FORMAT: "dwarf-with-dsym"
+        Release:
+          SWIFT_OPTIMIZATION_LEVEL: "-O"
+          SWIFT_COMPILATION_MODE: wholemodule
+          DEBUG_INFORMATION_FORMAT: "dwarf-with-dsym"
+
+    dependencies:
+      - framework: Frameworks/AxiomVaultCore.xcframework
+        embed: false
+      - target: AxiomVaultFileProvider
+        embed: true
+
+    entitlements:
+      path: AxiomVault-macOS/Resources/AxiomVault-macOS.entitlements
+
+    preBuildScripts:
+      - name: "Check Rust Framework"
+        script: |
+          if [ ! -d "${PROJECT_DIR}/Frameworks/AxiomVaultCore.xcframework" ]; then
+            echo "error: AxiomVaultCore.xcframework not found. Run 'Scripts/build-apple.sh --platform macos' first."
+            exit 1
+          fi
+        basedOnDependencyAnalysis: false
+        showEnvVars: false
+
+  # ============================================================
+  # macOS File Provider Extension
+  # ============================================================
+  AxiomVaultFileProvider:
+    type: app-extension
+    platform: macOS
+    deploymentTarget: "13.0"
+
+    sources:
+      - path: Shared/Sources/Core
+        type: group
+        excludes:
+          - "**/.DS_Store"
+      - path: FileProvider/Sources
+        type: group
+        excludes:
+          - "**/.DS_Store"
+
+    resources:
+      - path: FileProvider/Resources/Info.plist
+        buildPhase: none
+
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.axiomvault.macos.fileprovider
+        INFOPLIST_FILE: FileProvider/Resources/Info.plist
+        SWIFT_OBJC_BRIDGING_HEADER: Shared/Sources/Core/AxiomVault-Bridging-Header.h
+        LD_RUNPATH_SEARCH_PATHS:
+          - "$(inherited)"
+          - "@executable_path/../Frameworks"
+          - "@executable_path/../../../../Frameworks"
+        OTHER_LDFLAGS:
+          - "$(inherited)"
+          - "-lresolv"
+          - "-lSystem"
+          - "-lc++"
+          - "-framework SystemConfiguration"
+          - "-framework Security"
+        FRAMEWORK_SEARCH_PATHS:
+          - "$(inherited)"
+          - "$(PROJECT_DIR)/Frameworks"
+        LIBRARY_SEARCH_PATHS:
+          - "$(inherited)"
+          - "$(PROJECT_DIR)/Frameworks"
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+        GENERATE_INFOPLIST_FILE: NO
+      configs:
+        Debug:
+          SWIFT_OPTIMIZATION_LEVEL: "-Onone"
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG
+        Release:
+          SWIFT_OPTIMIZATION_LEVEL: "-O"
+          SWIFT_COMPILATION_MODE: wholemodule
+
+    dependencies:
+      - framework: Frameworks/AxiomVaultCore.xcframework
+        embed: false
+
+    entitlements:
+      path: FileProvider/Resources/FileProvider.entitlements
+
+schemes:
+  AxiomVault-iOS:
+    build:
+      targets:
+        AxiomVault-iOS: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
+
+  AxiomVault-macOS:
+    build:
+      targets:
+        AxiomVault-macOS: all
+        AxiomVaultFileProvider: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release

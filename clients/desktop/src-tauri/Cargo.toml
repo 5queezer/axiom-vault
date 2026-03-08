@@ -33,6 +33,7 @@ regex = "1.10"
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
+fuse = ["axiomvault-fuse/fuse"]
 
 [[bin]]
 name = "axiomvault-desktop"

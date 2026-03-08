@@ -30,7 +30,14 @@ repos:
       - id: cargo-clippy
         name: cargo clippy (lint check)
         language: system
-        entry: cargo clippy --workspace --all-targets --all-features --
+        entry: cargo clippy --workspace --all-targets --all-features -- -D warnings
+        pass_filenames: false
+        types: [rust]
+
+      - id: cargo-deny-warnings
+        name: cargo build (deny warnings)
+        language: system
+        entry: bash -c 'RUSTFLAGS="-D warnings" cargo build --workspace --all-features 2>&1'
         pass_filenames: false
         types: [rust]
 

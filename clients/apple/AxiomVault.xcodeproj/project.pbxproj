@@ -1,0 +1,927 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0198233D54B0472E29FF5AD2 /* CreateVaultView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0777A423A556C69E24B2A578 /* CreateVaultView.swift */; };
+		07CFDE69A035295B11B4280D /* AppleSignIn.swift in Sources */ = {isa = PBXBuildFile; fileRef = 597F0C35D71CE49CB115C104 /* AppleSignIn.swift */; };
+		0F6A5F480DBBA964BD4D58A4 /* AxiomVaultCore.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5143822D8DD0A4AE91A7C2F0 /* AxiomVaultCore.xcframework */; };
+		13D11918889F2AF13503C134 /* VaultCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D246FD13AD1242AC136AD13 /* VaultCore.swift */; };
+		14460309462779B8F2A4C7E2 /* VaultCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D246FD13AD1242AC136AD13 /* VaultCore.swift */; };
+		15CB7AEE6F3D52C1BD712F91 /* VaultManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A8200B7468B400E3DEC0C6D /* VaultManager.swift */; };
+		17B640EC884452E35916F048 /* FileProviderEnumerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2C6A8C969C81CC2A93D90F9 /* FileProviderEnumerator.swift */; };
+		1EF46D1796C07BD4BC9673F6 /* AxiomVaultApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F98F85F8E9A5BF9683833964 /* AxiomVaultApp.swift */; };
+		2106E570E6D745D37EA98608 /* UnlockVaultView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66C4FD381E56851B4C31CC36 /* UnlockVaultView.swift */; };
+		27237D6260554879BCEF3717 /* VaultCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D246FD13AD1242AC136AD13 /* VaultCore.swift */; };
+		2B5499A7AB56512A762B0151 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48242ED2B7EE93CC6E15B740 /* SettingsView.swift */; };
+		3202868A1C90124B4864664D /* FileProviderItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0950B8B53148F78813853507 /* FileProviderItem.swift */; };
+		379DD2F88E48D73CDF50D291 /* BackgroundSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1538DB46269A0889E7E41CED /* BackgroundSync.swift */; };
+		40FE2589081A71DBFDFE4157 /* BiometricAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03310609F0D238A182432339 /* BiometricAuth.swift */; };
+		5376F9E4730A8717C9A1C5B1 /* MainView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9723219EA9F8FB5307D0A65F /* MainView.swift */; };
+		5D9BCB184C784DF75A178ACC /* GoogleDriveAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = D68025AB8E72B559E1A6F2C4 /* GoogleDriveAuth.swift */; };
+		723765F094659700C9E01CF9 /* VaultManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A8200B7468B400E3DEC0C6D /* VaultManager.swift */; };
+		743BB51B3C01F0EE8218C3B1 /* AxiomVaultCore.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5143822D8DD0A4AE91A7C2F0 /* AxiomVaultCore.xcframework */; };
+		75EC5E5608A532FAC6B3AE45 /* BiometricAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03310609F0D238A182432339 /* BiometricAuth.swift */; };
+		845C025D70502EC041A83789 /* MenuBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37C16AD062102FD683B98591 /* MenuBarView.swift */; };
+		925F7E03AAABD595B49DA93B /* FileProviderExtension.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3DC4556318D26F8E2BE9BD3 /* FileProviderExtension.swift */; };
+		A3030F473EB8996B20FF6116 /* VaultManager+macOS.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73965150A019FD73CB242483 /* VaultManager+macOS.swift */; };
+		A9AC20E3B9DED2C1026B3452 /* AxiomVaultFileProvider.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = D4FF3A7F38919CE4B6C938E2 /* AxiomVaultFileProvider.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		B2A78203D1C7BD5D04BF6625 /* VaultBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2FFE3C3AE4DA1E9CDC5F444E /* VaultBrowserView.swift */; };
+		B9A86809CBBA50256BC705EA /* AxiomVaultApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8898A78173E808028CB55C2F /* AxiomVaultApp.swift */; };
+		BB9E2270843FFA5F3DD626DA /* AxiomVaultCore.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5143822D8DD0A4AE91A7C2F0 /* AxiomVaultCore.xcframework */; };
+		BC1D865CD067D66F297CC919 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76CFEFEEC65077077C41E4F2 /* ContentView.swift */; };
+		BC8BC7C785DB55CC6557854C /* VaultManager+iOS.swift in Sources */ = {isa = PBXBuildFile; fileRef = E225A93073DB879E3F18122C /* VaultManager+iOS.swift */; };
+		BF9EE6F62D1FDE85CCA37F50 /* OpenVaultView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB6FBDC147FD51D3F0F7C002 /* OpenVaultView.swift */; };
+		DF646A7BDADA7843D7805846 /* CreateVaultView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78774E64FB7C54525CF19269 /* CreateVaultView.swift */; };
+		E438E122B8AD1CB638ABC66B /* SidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2A6E88EC540AA59A7621562 /* SidebarView.swift */; };
+		E51A5A1FFC0F31E6F3BAA8F3 /* VaultBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 662C309C2C82A232BBCFC607 /* VaultBrowserView.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		D539E26EAC4CC25C87A39BD2 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = B0B8C6E94614885FC60F1B35 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 50045249DB0F3C9ED305108F;
+			remoteInfo = AxiomVaultFileProvider;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		A4DF076DB8EAC88CB6DF752B /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				A9AC20E3B9DED2C1026B3452 /* AxiomVaultFileProvider.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		03310609F0D238A182432339 /* BiometricAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BiometricAuth.swift; sourceTree = "<group>"; };
+		0777A423A556C69E24B2A578 /* CreateVaultView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreateVaultView.swift; sourceTree = "<group>"; };
+		0950B8B53148F78813853507 /* FileProviderItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileProviderItem.swift; sourceTree = "<group>"; };
+		1538DB46269A0889E7E41CED /* BackgroundSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundSync.swift; sourceTree = "<group>"; };
+		2D246FD13AD1242AC136AD13 /* VaultCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultCore.swift; sourceTree = "<group>"; };
+		2FFE3C3AE4DA1E9CDC5F444E /* VaultBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultBrowserView.swift; sourceTree = "<group>"; };
+		37C16AD062102FD683B98591 /* MenuBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarView.swift; sourceTree = "<group>"; };
+		48242ED2B7EE93CC6E15B740 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		4A8200B7468B400E3DEC0C6D /* VaultManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultManager.swift; sourceTree = "<group>"; };
+		5143822D8DD0A4AE91A7C2F0 /* AxiomVaultCore.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = AxiomVaultCore.xcframework; path = Frameworks/AxiomVaultCore.xcframework; sourceTree = "<group>"; };
+		597F0C35D71CE49CB115C104 /* AppleSignIn.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleSignIn.swift; sourceTree = "<group>"; };
+		662C309C2C82A232BBCFC607 /* VaultBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultBrowserView.swift; sourceTree = "<group>"; };
+		66C4FD381E56851B4C31CC36 /* UnlockVaultView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnlockVaultView.swift; sourceTree = "<group>"; };
+		73965150A019FD73CB242483 /* VaultManager+macOS.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "VaultManager+macOS.swift"; sourceTree = "<group>"; };
+		76CFEFEEC65077077C41E4F2 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		78774E64FB7C54525CF19269 /* CreateVaultView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreateVaultView.swift; sourceTree = "<group>"; };
+		8898A78173E808028CB55C2F /* AxiomVaultApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AxiomVaultApp.swift; sourceTree = "<group>"; };
+		9723219EA9F8FB5307D0A65F /* MainView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainView.swift; sourceTree = "<group>"; };
+		99E850123459980FD81DE3A6 /* AxiomVault-macOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "AxiomVault-macOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		A3DC4556318D26F8E2BE9BD3 /* FileProviderExtension.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileProviderExtension.swift; sourceTree = "<group>"; };
+		B073F2954E6B5549FB483C15 /* AxiomVault-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "AxiomVault-Bridging-Header.h"; sourceTree = "<group>"; };
+		BB6FBDC147FD51D3F0F7C002 /* OpenVaultView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenVaultView.swift; sourceTree = "<group>"; };
+		C2459183250E5EC720F372A9 /* AxiomVault-iOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = "AxiomVault-iOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		D2A6E88EC540AA59A7621562 /* SidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarView.swift; sourceTree = "<group>"; };
+		D2C6A8C969C81CC2A93D90F9 /* FileProviderEnumerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileProviderEnumerator.swift; sourceTree = "<group>"; };
+		D4FF3A7F38919CE4B6C938E2 /* AxiomVaultFileProvider.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = AxiomVaultFileProvider.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		D68025AB8E72B559E1A6F2C4 /* GoogleDriveAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleDriveAuth.swift; sourceTree = "<group>"; };
+		E225A93073DB879E3F18122C /* VaultManager+iOS.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "VaultManager+iOS.swift"; sourceTree = "<group>"; };
+		F98F85F8E9A5BF9683833964 /* AxiomVaultApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AxiomVaultApp.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		3FBF2267AA1B10DB2E88D384 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				743BB51B3C01F0EE8218C3B1 /* AxiomVaultCore.xcframework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		66728A84E14CE087A9C8CE62 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				BB9E2270843FFA5F3DD626DA /* AxiomVaultCore.xcframework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DFE885F6278AF8F0332D91B7 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0F6A5F480DBBA964BD4D58A4 /* AxiomVaultCore.xcframework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		0FC6CCA09C3E993C1FCCC395 = {
+			isa = PBXGroup;
+			children = (
+				61A460A5EE2BE3A6A94D04D2 /* AxiomVault-iOS */,
+				8E95F29AB9749136CF22097C /* AxiomVault-macOS */,
+				3A0485DFFA71B4A0EE371095 /* FileProvider */,
+				A4DC88B32226FF5B5E1BED4D /* Shared */,
+				A556B1CD2DCD10D45D9B8C3B /* Frameworks */,
+				1C5EDDF2E63CA266C02CDDB4 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		169A5558287E051CFA741C99 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				03310609F0D238A182432339 /* BiometricAuth.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		1C5EDDF2E63CA266C02CDDB4 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				C2459183250E5EC720F372A9 /* AxiomVault-iOS.app */,
+				99E850123459980FD81DE3A6 /* AxiomVault-macOS.app */,
+				D4FF3A7F38919CE4B6C938E2 /* AxiomVaultFileProvider.appex */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		2863A3165201CB751D73B79F /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				4A8200B7468B400E3DEC0C6D /* VaultManager.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		3A0485DFFA71B4A0EE371095 /* FileProvider */ = {
+			isa = PBXGroup;
+			children = (
+				EA4915492FDEAB5BD5E1D562 /* Sources */,
+			);
+			path = FileProvider;
+			sourceTree = "<group>";
+		};
+		61A460A5EE2BE3A6A94D04D2 /* AxiomVault-iOS */ = {
+			isa = PBXGroup;
+			children = (
+				9C87219DFB919E2EE6F0F526 /* Sources */,
+			);
+			path = "AxiomVault-iOS";
+			sourceTree = "<group>";
+		};
+		7B67CBECD696882858640134 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				76CFEFEEC65077077C41E4F2 /* ContentView.swift */,
+				0777A423A556C69E24B2A578 /* CreateVaultView.swift */,
+				BB6FBDC147FD51D3F0F7C002 /* OpenVaultView.swift */,
+				662C309C2C82A232BBCFC607 /* VaultBrowserView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		8B3CAD5A2D961652EC1CBF75 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				78774E64FB7C54525CF19269 /* CreateVaultView.swift */,
+				9723219EA9F8FB5307D0A65F /* MainView.swift */,
+				37C16AD062102FD683B98591 /* MenuBarView.swift */,
+				48242ED2B7EE93CC6E15B740 /* SettingsView.swift */,
+				D2A6E88EC540AA59A7621562 /* SidebarView.swift */,
+				66C4FD381E56851B4C31CC36 /* UnlockVaultView.swift */,
+				2FFE3C3AE4DA1E9CDC5F444E /* VaultBrowserView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		8E95F29AB9749136CF22097C /* AxiomVault-macOS */ = {
+			isa = PBXGroup;
+			children = (
+				FAB0E68B8F06C5717FCCE40C /* Sources */,
+			);
+			path = "AxiomVault-macOS";
+			sourceTree = "<group>";
+		};
+		93BC9031016810FD477ABB5C /* Services */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		9C87219DFB919E2EE6F0F526 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				8898A78173E808028CB55C2F /* AxiomVaultApp.swift */,
+				E225A93073DB879E3F18122C /* VaultManager+iOS.swift */,
+				C9090E79DA32A60FF1C3320E /* Services */,
+				7B67CBECD696882858640134 /* Views */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		A4DC88B32226FF5B5E1BED4D /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				169A5558287E051CFA741C99 /* Services */,
+				FA6A3C123616CFC57866B0FF /* Sources */,
+			);
+			path = Shared;
+			sourceTree = "<group>";
+		};
+		A556B1CD2DCD10D45D9B8C3B /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				5143822D8DD0A4AE91A7C2F0 /* AxiomVaultCore.xcframework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		BCFF14D4FA00D9F2FB69CEA7 /* Core */ = {
+			isa = PBXGroup;
+			children = (
+				B073F2954E6B5549FB483C15 /* AxiomVault-Bridging-Header.h */,
+				2D246FD13AD1242AC136AD13 /* VaultCore.swift */,
+			);
+			path = Core;
+			sourceTree = "<group>";
+		};
+		C9090E79DA32A60FF1C3320E /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				597F0C35D71CE49CB115C104 /* AppleSignIn.swift */,
+				1538DB46269A0889E7E41CED /* BackgroundSync.swift */,
+				D68025AB8E72B559E1A6F2C4 /* GoogleDriveAuth.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		EA4915492FDEAB5BD5E1D562 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				D2C6A8C969C81CC2A93D90F9 /* FileProviderEnumerator.swift */,
+				A3DC4556318D26F8E2BE9BD3 /* FileProviderExtension.swift */,
+				0950B8B53148F78813853507 /* FileProviderItem.swift */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		FA6A3C123616CFC57866B0FF /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				BCFF14D4FA00D9F2FB69CEA7 /* Core */,
+				2863A3165201CB751D73B79F /* Models */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		FAB0E68B8F06C5717FCCE40C /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				F98F85F8E9A5BF9683833964 /* AxiomVaultApp.swift */,
+				73965150A019FD73CB242483 /* VaultManager+macOS.swift */,
+				93BC9031016810FD477ABB5C /* Services */,
+				8B3CAD5A2D961652EC1CBF75 /* Views */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		50045249DB0F3C9ED305108F /* AxiomVaultFileProvider */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 46E2FF3A641FF0344E05F324 /* Build configuration list for PBXNativeTarget "AxiomVaultFileProvider" */;
+			buildPhases = (
+				EB9B4B4FA537B4E73EE508EC /* Sources */,
+				66728A84E14CE087A9C8CE62 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = AxiomVaultFileProvider;
+			packageProductDependencies = (
+			);
+			productName = AxiomVaultFileProvider;
+			productReference = D4FF3A7F38919CE4B6C938E2 /* AxiomVaultFileProvider.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		5F68B3AEA9F1AF663F8DF69C /* AxiomVault-iOS */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 026E25BFD86B12BB9576E32F /* Build configuration list for PBXNativeTarget "AxiomVault-iOS" */;
+			buildPhases = (
+				5830156204124398AD0D3401 /* Check Rust Framework */,
+				3355C7C4B50FACB6E5C9AA2A /* Sources */,
+				3FBF2267AA1B10DB2E88D384 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = "AxiomVault-iOS";
+			packageProductDependencies = (
+			);
+			productName = "AxiomVault-iOS";
+			productReference = C2459183250E5EC720F372A9 /* AxiomVault-iOS.app */;
+			productType = "com.apple.product-type.application";
+		};
+		93FC467493522F61EDE51BCF /* AxiomVault-macOS */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = BFAD7BDE74D18BDEF468A06D /* Build configuration list for PBXNativeTarget "AxiomVault-macOS" */;
+			buildPhases = (
+				705A2E4F0ACBA2CD3515509D /* Check Rust Framework */,
+				48D22FAD8BBD7148E5C91A24 /* Sources */,
+				DFE885F6278AF8F0332D91B7 /* Frameworks */,
+				A4DF076DB8EAC88CB6DF752B /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				79D7A9B160A1B77C25740E95 /* PBXTargetDependency */,
+			);
+			name = "AxiomVault-macOS";
+			packageProductDependencies = (
+			);
+			productName = "AxiomVault-macOS";
+			productReference = 99E850123459980FD81DE3A6 /* AxiomVault-macOS.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		B0B8C6E94614885FC60F1B35 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1500;
+				TargetAttributes = {
+					50045249DB0F3C9ED305108F = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
+					5F68B3AEA9F1AF663F8DF69C = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
+					93FC467493522F61EDE51BCF = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = B7D0E30F123F9D5D292261D8 /* Build configuration list for PBXProject "AxiomVault" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 0FC6CCA09C3E993C1FCCC395;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 1C5EDDF2E63CA266C02CDDB4 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				5F68B3AEA9F1AF663F8DF69C /* AxiomVault-iOS */,
+				93FC467493522F61EDE51BCF /* AxiomVault-macOS */,
+				50045249DB0F3C9ED305108F /* AxiomVaultFileProvider */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		5830156204124398AD0D3401 /* Check Rust Framework */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Check Rust Framework";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "if [ ! -d \"${PROJECT_DIR}/Frameworks/AxiomVaultCore.xcframework\" ]; then\n  echo \"error: AxiomVaultCore.xcframework not found. Run 'Scripts/build-apple.sh --platform ios' first.\"\n  exit 1\nfi\n";
+			showEnvVarsInLog = 0;
+		};
+		705A2E4F0ACBA2CD3515509D /* Check Rust Framework */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Check Rust Framework";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "if [ ! -d \"${PROJECT_DIR}/Frameworks/AxiomVaultCore.xcframework\" ]; then\n  echo \"error: AxiomVaultCore.xcframework not found. Run 'Scripts/build-apple.sh --platform macos' first.\"\n  exit 1\nfi\n";
+			showEnvVarsInLog = 0;
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		3355C7C4B50FACB6E5C9AA2A /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				07CFDE69A035295B11B4280D /* AppleSignIn.swift in Sources */,
+				B9A86809CBBA50256BC705EA /* AxiomVaultApp.swift in Sources */,
+				379DD2F88E48D73CDF50D291 /* BackgroundSync.swift in Sources */,
+				40FE2589081A71DBFDFE4157 /* BiometricAuth.swift in Sources */,
+				BC1D865CD067D66F297CC919 /* ContentView.swift in Sources */,
+				0198233D54B0472E29FF5AD2 /* CreateVaultView.swift in Sources */,
+				5D9BCB184C784DF75A178ACC /* GoogleDriveAuth.swift in Sources */,
+				BF9EE6F62D1FDE85CCA37F50 /* OpenVaultView.swift in Sources */,
+				E51A5A1FFC0F31E6F3BAA8F3 /* VaultBrowserView.swift in Sources */,
+				14460309462779B8F2A4C7E2 /* VaultCore.swift in Sources */,
+				BC8BC7C785DB55CC6557854C /* VaultManager+iOS.swift in Sources */,
+				15CB7AEE6F3D52C1BD712F91 /* VaultManager.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		48D22FAD8BBD7148E5C91A24 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1EF46D1796C07BD4BC9673F6 /* AxiomVaultApp.swift in Sources */,
+				75EC5E5608A532FAC6B3AE45 /* BiometricAuth.swift in Sources */,
+				DF646A7BDADA7843D7805846 /* CreateVaultView.swift in Sources */,
+				5376F9E4730A8717C9A1C5B1 /* MainView.swift in Sources */,
+				845C025D70502EC041A83789 /* MenuBarView.swift in Sources */,
+				2B5499A7AB56512A762B0151 /* SettingsView.swift in Sources */,
+				E438E122B8AD1CB638ABC66B /* SidebarView.swift in Sources */,
+				2106E570E6D745D37EA98608 /* UnlockVaultView.swift in Sources */,
+				B2A78203D1C7BD5D04BF6625 /* VaultBrowserView.swift in Sources */,
+				13D11918889F2AF13503C134 /* VaultCore.swift in Sources */,
+				A3030F473EB8996B20FF6116 /* VaultManager+macOS.swift in Sources */,
+				723765F094659700C9E01CF9 /* VaultManager.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		EB9B4B4FA537B4E73EE508EC /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				17B640EC884452E35916F048 /* FileProviderEnumerator.swift in Sources */,
+				925F7E03AAABD595B49DA93B /* FileProviderExtension.swift in Sources */,
+				3202868A1C90124B4864664D /* FileProviderItem.swift in Sources */,
+				27237D6260554879BCEF3717 /* VaultCore.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		79D7A9B160A1B77C25740E95 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 50045249DB0F3C9ED305108F /* AxiomVaultFileProvider */;
+			targetProxy = D539E26EAC4CC25C87A39BD2 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		0D0CA77FC03E1E6CE8240BD9 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "AxiomVault-macOS/Resources/AxiomVault-macOS.entitlements";
+				COMBINE_HIDPI_IMAGES = YES;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/Frameworks",
+					"\"Frameworks\"",
+				);
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "AxiomVault-macOS/Resources/Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-lresolv",
+					"-lSystem",
+					"-lc++",
+					"-framework SystemConfiguration",
+					"-framework Security",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.axiomvault.macos;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OBJC_BRIDGING_HEADER = "Shared/Sources/Core/AxiomVault-Bridging-Header.h";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		5BB07012A9057D4C53D81B36 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = "";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.9;
+			};
+			name = Release;
+		};
+		640EB1D0BE88CD12D74CF880 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.9;
+			};
+			name = Debug;
+		};
+		85CF7211D51D0BE613A32C14 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = FileProvider/Resources/FileProvider.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/Frameworks",
+					"\"Frameworks\"",
+				);
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = FileProvider/Resources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-lresolv",
+					"-lSystem",
+					"-lc++",
+					"-framework SystemConfiguration",
+					"-framework Security",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.axiomvault.macos.fileprovider;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OBJC_BRIDGING_HEADER = "Shared/Sources/Core/AxiomVault-Bridging-Header.h";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		9161B24FE37CA39401E7F47D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = FileProvider/Resources/FileProvider.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/Frameworks",
+					"\"Frameworks\"",
+				);
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = FileProvider/Resources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-lresolv",
+					"-lSystem",
+					"-lc++",
+					"-framework SystemConfiguration",
+					"-framework Security",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.axiomvault.macos.fileprovider;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OBJC_BRIDGING_HEADER = "Shared/Sources/Core/AxiomVault-Bridging-Header.h";
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+			};
+			name = Release;
+		};
+		C2D758CF8B93D5783354DE3F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "AxiomVault-iOS/Resources/AxiomVault-iOS.entitlements";
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/Frameworks",
+					"\"Frameworks\"",
+				);
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "AxiomVault-iOS/Resources/Info.plist";
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/Frameworks",
+				);
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-lresolv",
+					"-lSystem",
+					"-lc++",
+					"-framework SystemConfiguration",
+					"-framework Security",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.axiomvault.ios;
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OBJC_BRIDGING_HEADER = "Shared/Sources/Core/AxiomVault-Bridging-Header.h";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		C497A72BC8642EFE53A88D5C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "AxiomVault-macOS/Resources/AxiomVault-macOS.entitlements";
+				COMBINE_HIDPI_IMAGES = YES;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/Frameworks",
+					"\"Frameworks\"",
+				);
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "AxiomVault-macOS/Resources/Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-lresolv",
+					"-lSystem",
+					"-lc++",
+					"-framework SystemConfiguration",
+					"-framework Security",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.axiomvault.macos;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OBJC_BRIDGING_HEADER = "Shared/Sources/Core/AxiomVault-Bridging-Header.h";
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+			};
+			name = Release;
+		};
+		EB8D6A39FA172E1CD0F9A579 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "AxiomVault-iOS/Resources/AxiomVault-iOS.entitlements";
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/Frameworks",
+					"\"Frameworks\"",
+				);
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "AxiomVault-iOS/Resources/Info.plist";
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/Frameworks",
+				);
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-lresolv",
+					"-lSystem",
+					"-lc++",
+					"-framework SystemConfiguration",
+					"-framework Security",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.axiomvault.ios;
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OBJC_BRIDGING_HEADER = "Shared/Sources/Core/AxiomVault-Bridging-Header.h";
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		026E25BFD86B12BB9576E32F /* Build configuration list for PBXNativeTarget "AxiomVault-iOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C2D758CF8B93D5783354DE3F /* Debug */,
+				EB8D6A39FA172E1CD0F9A579 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		46E2FF3A641FF0344E05F324 /* Build configuration list for PBXNativeTarget "AxiomVaultFileProvider" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				85CF7211D51D0BE613A32C14 /* Debug */,
+				9161B24FE37CA39401E7F47D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		B7D0E30F123F9D5D292261D8 /* Build configuration list for PBXProject "AxiomVault" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				640EB1D0BE88CD12D74CF880 /* Debug */,
+				5BB07012A9057D4C53D81B36 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		BFAD7BDE74D18BDEF468A06D /* Build configuration list for PBXNativeTarget "AxiomVault-macOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				0D0CA77FC03E1E6CE8240BD9 /* Debug */,
+				C497A72BC8642EFE53A88D5C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = B0B8C6E94614885FC60F1B35 /* Project object */;
+}

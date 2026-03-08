@@ -16,7 +16,7 @@ use tokio::runtime::Handle;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info};
 
-use axiomvault_common::{Result, VaultPath};
+use axiomvault_common::VaultPath;
 use axiomvault_vault::{VaultOperations, VaultSession};
 
 /// Helper function to create FileAttr with common defaults.
@@ -143,36 +143,6 @@ impl VaultFilesystem {
         }
     }
 
-    /// Convert vault metadata to FUSE file attributes.
-    fn create_attr(&self, ino: u64, is_dir: bool, size: u64) -> FileAttr {
-        let now = SystemTime::now();
-        FileAttr {
-            ino,
-            size,
-            blocks: (size + 511) / 512,
-            atime: now,
-            mtime: now,
-            ctime: now,
-            crtime: now,
-            kind: if is_dir {
-                FileType::Directory
-            } else {
-                FileType::RegularFile
-            },
-            perm: if is_dir { 0o755 } else { 0o644 },
-            nlink: if is_dir { 2 } else { 1 },
-            uid: unsafe { libc::getuid() },
-            gid: unsafe { libc::getgid() },
-            rdev: 0,
-            blksize: 4096,
-            flags: 0,
-        }
-    }
-
-    /// Get vault operations handler.
-    fn ops(&self) -> Result<VaultOperations<'_>> {
-        VaultOperations::new(&self.session)
-    }
 }
 
 impl Filesystem for VaultFilesystem {
@@ -623,7 +593,7 @@ impl Filesystem for VaultFilesystem {
         name: &OsStr,
         _mode: u32,
         _umask: u32,
-        flags: i32,
+        _flags: i32,
         reply: ReplyCreate,
     ) {
         let name_str = match name.to_str() {
