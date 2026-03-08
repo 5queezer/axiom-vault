@@ -43,6 +43,14 @@ struct VaultBrowserView: View {
                         Label("Change Password", systemImage: "key.fill")
                     }
                     Divider()
+                    Picker(selection: $vaultManager.autoLockDuration) {
+                        ForEach(AutoLockDuration.allCases, id: \.self) { duration in
+                            Text(duration.displayName).tag(duration)
+                        }
+                    } label: {
+                        Label("Auto-Lock", systemImage: "timer")
+                    }
+                    Divider()
                     Button(action: {
                         Task { await vaultManager.refreshEntries() }
                     }) {
