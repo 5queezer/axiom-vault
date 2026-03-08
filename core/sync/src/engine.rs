@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 use tracing::{debug, error, info, warn};
 
 use axiomvault_common::{Error, Result, VaultPath};
@@ -57,6 +57,8 @@ pub struct SyncEngine<P: StorageProvider + ?Sized> {
     scheduler: Option<SyncScheduler>,
     /// Configuration.
     config: SyncConfig,
+    /// Guard to prevent concurrent sync operations.
+    sync_lock: Arc<Mutex<()>>,
 }
 
 impl<P: StorageProvider + 'static> SyncEngine<P> {
@@ -89,6 +91,7 @@ impl<P: StorageProvider + ?Sized + 'static> SyncEngine<P> {
             retry_executor: Arc::new(RetryExecutor::new(retry_config)),
             scheduler: None,
             config,
+            sync_lock: Arc::new(Mutex::new(())),
         })
     }
 
@@ -154,7 +157,12 @@ impl<P: StorageProvider + ?Sized + 'static> SyncEngine<P> {
     }
 
     /// Perform a full sync of all staged changes and fetch remote updates.
+    ///
+    /// Uses a mutex to prevent concurrent sync operations from racing.
     pub async fn sync_full(&self) -> Result<SyncResult> {
+        // Acquire sync lock — a second concurrent call blocks here instead of racing
+        let _guard = self.sync_lock.lock().await;
+
         let start = Instant::now();
         let mut files_synced = 0;
         let mut files_failed = 0;

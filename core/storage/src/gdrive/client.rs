@@ -90,6 +90,30 @@ impl DriveClient {
         }
     }
 
+    /// Escape a value for use in a Google Drive API query string.
+    /// Backslashes must be escaped before quotes to prevent injection.
+    fn escape_query_value(value: &str) -> String {
+        value.replace('\\', "\\\\").replace('\'', "\\'")
+    }
+
+    /// Validate that a string looks like a Google Drive file/folder ID.
+    /// Drive IDs are alphanumeric with hyphens and underscores.
+    fn validate_drive_id(id: &str) -> Result<()> {
+        if id.is_empty() {
+            return Err(Error::InvalidInput("Drive ID cannot be empty".to_string()));
+        }
+        if !id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        {
+            return Err(Error::InvalidInput(format!(
+                "Invalid Drive ID format: {}",
+                id
+            )));
+        }
+        Ok(())
+    }
+
     /// Get authorization header.
     async fn auth_header(&self) -> Result<String> {
         let token = self.token_manager.get_access_token().await?;
@@ -149,6 +173,8 @@ impl DriveClient {
 
     /// List files in a folder.
     pub async fn list_folder(&self, folder_id: &str) -> Result<Vec<DriveFile>> {
+        Self::validate_drive_id(folder_id)?;
+
         let mut all_files = Vec::new();
         let mut page_token: Option<String> = None;
 
@@ -158,7 +184,7 @@ impl DriveClient {
 
             let query = format!(
                 "'{}' in parents and trashed = false",
-                folder_id.replace('\'', "\\'")
+                Self::escape_query_value(folder_id)
             );
 
             let mut request = self
@@ -194,13 +220,15 @@ impl DriveClient {
 
     /// Find a file by name in a folder.
     pub async fn find_file(&self, name: &str, parent_id: &str) -> Result<Option<DriveFile>> {
+        Self::validate_drive_id(parent_id)?;
+
         let url = format!("{}/files", DRIVE_API_BASE);
         let auth = self.auth_header().await?;
 
         let query = format!(
             "name = '{}' and '{}' in parents and trashed = false",
-            name.replace('\'', "\\'"),
-            parent_id.replace('\'', "\\'")
+            Self::escape_query_value(name),
+            Self::escape_query_value(parent_id)
         );
 
         let response = self
@@ -238,8 +266,8 @@ impl DriveClient {
         let metadata_json = serde_json::to_string(&metadata)
             .map_err(|e| Error::InvalidInput(format!("Failed to serialize metadata: {}", e)))?;
 
-        // Build multipart request
-        let boundary = "AxiomVaultBoundary";
+        // Build multipart request with a unique boundary
+        let boundary = format!("AxiomVault{}", uuid::Uuid::new_v4().as_simple());
         let mut body = Vec::new();
 
         // Metadata part

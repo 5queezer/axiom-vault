@@ -140,7 +140,8 @@ impl RetryExecutor {
                             "Operation failed after {} attempts: {}",
                             self.config.max_retries, err
                         );
-                        return Err(last_error.unwrap_or(err));
+                        // Return the most recent error, not a stale one
+                        return Err(err);
                     }
 
                     let delay = self.config.delay_for_attempt(attempt - 1);
@@ -149,7 +150,7 @@ impl RetryExecutor {
                         attempt, err, delay
                     );
 
-                    last_error = Some(err);
+                    let _ = last_error.insert(err);
                     sleep(delay).await;
                 }
             }

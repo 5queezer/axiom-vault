@@ -85,6 +85,11 @@ impl ConflictResolver {
     }
 
     /// Detect if there's a conflict between local and remote.
+    ///
+    /// A conflict exists only when *both* sides have changed since the last
+    /// known synchronised state.  If only the local side changed (remote etag
+    /// still matches the last-known value) we can safely push; if only the
+    /// remote side changed we can safely pull.
     pub fn detect_conflict(
         &self,
         local_etag: Option<&str>,
@@ -96,15 +101,16 @@ impl ConflictResolver {
             return false;
         }
 
-        // Conflict if remote has changed from what we last knew
+        // If we have a baseline, conflict only when the remote diverged from
+        // what we last knew *and* the local side also diverged.
         if let Some(last_known) = last_known_remote_etag {
-            if remote_etag != Some(last_known) && local_etag != remote_etag {
-                return true;
-            }
+            let remote_changed = remote_etag != Some(last_known);
+            let local_changed = local_etag != Some(last_known);
+            return remote_changed && local_changed;
         }
 
-        // Conflict if local and remote both differ from each other
-        // and we don't have a baseline
+        // Without a baseline we cannot tell who changed; treat as conflict
+        // only when both sides have an etag and they differ.
         local_etag.is_some() && remote_etag.is_some() && local_etag != remote_etag
     }
 

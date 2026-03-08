@@ -201,11 +201,14 @@ impl StagingArea {
         self.changes.is_empty()
     }
 
-    /// Persist the registry to disk.
+    /// Persist the registry to disk atomically (write-to-temp + rename).
     async fn persist_registry(&self) -> Result<()> {
         let json = serde_json::to_string_pretty(&self.changes)
             .map_err(|e| Error::Serialization(e.to_string()))?;
-        fs::write(&self.registry_path, json)
+
+        let tmp_path = self.registry_path.with_extension("json.tmp");
+        fs::write(&tmp_path, json).await.map_err(Error::Io)?;
+        fs::rename(&tmp_path, &self.registry_path)
             .await
             .map_err(Error::Io)
     }

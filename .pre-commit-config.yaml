@@ -17,7 +17,7 @@ repos:
       - id: cargo-fmt-check
         name: cargo fmt (format check)
         language: system
-        entry: /root/.cargo/bin/cargo fmt --check
+        entry: cargo fmt --check
         pass_filenames: false
         types: [rust]
 
@@ -30,7 +30,7 @@ repos:
       - id: cargo-clippy
         name: cargo clippy (lint check)
         language: system
-        entry: /root/.cargo/bin/cargo clippy --workspace --all-targets --all-features --
+        entry: cargo clippy --workspace --all-targets --all-features --
         pass_filenames: false
         types: [rust]
 

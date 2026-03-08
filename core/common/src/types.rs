@@ -26,6 +26,13 @@ impl VaultId {
                 "VaultId cannot be empty".to_string(),
             ));
         }
+        // Reject characters that are unsafe in filesystem paths or could
+        // enable path traversal attacks.
+        if id.contains('\0') || id.contains('/') || id.contains('\\') || id.contains("..") {
+            return Err(crate::Error::InvalidInput(
+                "VaultId contains invalid characters".to_string(),
+            ));
+        }
         Ok(Self(id))
     }
 
@@ -76,6 +83,11 @@ impl VaultPath {
             if comp.contains('/') || comp.contains('\\') {
                 return Err(crate::Error::InvalidInput(
                     "Path component cannot contain separators".to_string(),
+                ));
+            }
+            if comp == "." || comp == ".." {
+                return Err(crate::Error::InvalidInput(
+                    "Path component cannot be '.' or '..'".to_string(),
                 ));
             }
         }

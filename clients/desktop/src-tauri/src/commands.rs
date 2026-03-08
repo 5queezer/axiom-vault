@@ -11,7 +11,7 @@ use axiomvault_common::{VaultId, VaultPath};
 use axiomvault_crypto::KdfParams;
 use axiomvault_fuse::mount::mount as mount_vault_fuse;
 use axiomvault_fuse::MountOptions;
-use axiomvault_storage::{MemoryProvider, StorageProvider};
+use axiomvault_storage::{LocalProvider, StorageProvider};
 use axiomvault_vault::{VaultConfig, VaultOperations, VaultSession, VaultTree};
 
 use crate::local_index::{IndexEntry, LocalIndex};
@@ -50,31 +50,69 @@ impl From<axiomvault_common::Error> for ErrorResponse {
     }
 }
 
+/// Validate that a vault ID is safe for use in filesystem paths.
+fn validate_vault_id(id: &str) -> Result<(), String> {
+    if id.is_empty() {
+        return Err("Vault ID cannot be empty".to_string());
+    }
+    if id.contains('/') || id.contains('\\') || id.contains("..") || id.contains('\0') {
+        return Err("Vault ID contains invalid characters".to_string());
+    }
+    Ok(())
+}
+
 /// Helper to create provider, session, and register vault in state.
 async fn setup_vault_session(
     state: &Arc<AppState>,
     id: &str,
     config: VaultConfig,
     password: &str,
-    init_index_metadata: bool,
+    is_new_vault: bool,
 ) -> Result<VaultInfo, String> {
+    validate_vault_id(id)?;
+
     let provider_type = config.provider_type.clone();
 
-    // For now, use memory provider for testing
-    let provider = Arc::new(MemoryProvider::new());
-    provider
-        .create_dir(&VaultPath::parse("/d").unwrap())
-        .await
-        .map_err(|e| e.to_string())?;
+    // Use local filesystem provider for persistent storage
+    let storage_root = state.data_dir.join(id).join("storage");
+    let provider: Arc<dyn StorageProvider> =
+        Arc::new(LocalProvider::new(&storage_root).map_err(|e| e.to_string())?);
 
-    let session = VaultSession::unlock(config, password.as_bytes(), provider, VaultTree::new())
+    if is_new_vault {
+        // Create data and metadata directories for new vaults
+        provider
+            .create_dir(&VaultPath::parse("/d").unwrap())
+            .await
+            .map_err(|e| e.to_string())?;
+        provider
+            .create_dir(&VaultPath::parse("/m").unwrap())
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+
+    // Verify password and get master key (single KDF round)
+    let master_key = config
+        .verify_password(password.as_bytes())
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Invalid password".to_string())?;
+
+    // Load existing tree from storage, or start with empty tree for new vaults
+    let tree = if is_new_vault {
+        VaultTree::new()
+    } else {
+        VaultSession::load_and_decrypt_tree(&provider, &master_key)
+            .await
+            .map_err(|e| e.to_string())?
+    };
+
+    let session = VaultSession::from_master_key(config, master_key, provider, tree)
         .map_err(|e| e.to_string())?;
 
     // Open local index
     let index_path = state.data_dir.join(format!("{}.db", id));
     let index = LocalIndex::open(&index_path).map_err(|e| e.to_string())?;
 
-    if init_index_metadata {
+    if is_new_vault {
         index
             .set_metadata("vault_id", id)
             .map_err(|e| e.to_string())?;
@@ -123,6 +161,12 @@ pub async fn create_vault(
         kdf_params,
     )
     .map_err(|e| e.to_string())?;
+
+    // Persist config to disk so unlock_vault can find it later
+    let config_path = state.data_dir.join(format!("{}.json", id));
+    let config_json = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&state.data_dir).map_err(|e| e.to_string())?;
+    std::fs::write(&config_path, config_json).map_err(|e| e.to_string())?;
 
     let vault_info = setup_vault_session(&state, &id, config, &password, true).await?;
 
@@ -334,6 +378,20 @@ pub async fn update_file(
 
     ops.update_file(&vault_path, &content)
         .await
+        .map_err(|e| e.to_string())?;
+
+    // Update local index with new size and modification time
+    let entry = IndexEntry {
+        path: path.clone(),
+        encrypted_name: String::new(),
+        is_directory: false,
+        size: Some(content.len() as u64),
+        modified_at: chrono::Utc::now().timestamp(),
+        etag: None,
+    };
+    vault
+        .index
+        .upsert_entry(&entry)
         .map_err(|e| e.to_string())?;
 
     info!("File updated successfully");
