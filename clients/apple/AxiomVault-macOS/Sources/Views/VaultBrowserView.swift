@@ -28,7 +28,7 @@ struct VaultBrowserView: View {
         }
         .toolbar {
             ToolbarItemGroup {
-                Button("Add Files", systemImage: "plus") {
+                Button("Add Files", systemImage: "doc.badge.plus") {
                     addFiles()
                 }
 
@@ -36,7 +36,7 @@ struct VaultBrowserView: View {
                     addFolder()
                 }
 
-                Button("New Folder", systemImage: "folder.badge.plus") {
+                Button("New Folder", systemImage: "folder.badge.gearshape") {
                     showNewFolder = true
                 }
 
