@@ -473,6 +473,44 @@ pub unsafe extern "C" fn axiom_string_free(s: *mut c_char) {
     }
 }
 
+/// Run a health check on a vault and return a JSON-serialized report.
+///
+/// # Safety
+/// - `handle` must be a valid vault handle
+/// - Returns a JSON string that must be freed with `axiom_string_free`
+/// - Returns null on error
+#[no_mangle]
+pub unsafe extern "C" fn axiom_vault_health_check(handle: *const FFIVaultHandle) -> *mut c_char {
+    if handle.is_null() {
+        error::set_last_error(FFIError::NullPointer("handle is null".into()));
+        return ptr::null_mut();
+    }
+
+    let handle = &*handle;
+
+    let runtime = match get_runtime() {
+        Ok(rt) => rt,
+        Err(e) => {
+            error::set_last_error(FFIError::RuntimeError(e.to_string()));
+            return ptr::null_mut();
+        }
+    };
+
+    match runtime.block_on(vault_ops::health_check(handle)) {
+        Ok(json) => match CString::new(json) {
+            Ok(cstr) => cstr.into_raw(),
+            Err(_) => {
+                error::set_last_error(FFIError::StringConversionError);
+                ptr::null_mut()
+            }
+        },
+        Err(e) => {
+            error::set_last_error(e);
+            ptr::null_mut()
+        }
+    }
+}
+
 /// Change the vault password.
 ///
 /// # Safety

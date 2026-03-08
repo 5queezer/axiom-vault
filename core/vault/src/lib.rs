@@ -11,12 +11,14 @@
 //! handling all encryption/decryption operations transparently.
 
 pub mod config;
+pub mod health;
 pub mod manager;
 pub mod operations;
 pub mod session;
 pub mod tree;
 
 pub use config::{VaultConfig, VaultVersion};
+pub use health::{check_vault_health, DiagnosticResult, HealthReport, Severity};
 pub use manager::VaultManager;
 pub use operations::VaultOperations;
 pub use session::{SessionHandle, VaultSession};

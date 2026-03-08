@@ -16,7 +16,7 @@ use axiomvault_common::{VaultId, VaultPath};
 use axiomvault_crypto::KdfParams;
 use axiomvault_storage::gdrive::{AuthConfig, AuthManager, GDriveConfig, Tokens};
 use axiomvault_sync::{ConflictStrategy, SyncConfig, SyncEngine, SyncMode, SyncState};
-use axiomvault_vault::{VaultManager, VaultOperations};
+use axiomvault_vault::{check_vault_health, Severity, VaultManager, VaultOperations};
 
 #[derive(Parser)]
 #[command(name = "axiomvault")]
@@ -130,6 +130,17 @@ enum Commands {
         /// Path to the vault.
         #[arg(short, long)]
         path: PathBuf,
+    },
+
+    /// Run health check and integrity verification on a vault.
+    Check {
+        /// Path to the vault.
+        #[arg(short, long)]
+        path: PathBuf,
+
+        /// Automatically fix recoverable issues.
+        #[arg(long)]
+        fix: bool,
     },
 
     /// Authenticate with Google Drive and get tokens.
@@ -281,6 +292,8 @@ async fn main() -> Result<()> {
         Commands::Info { path } => cmd_info(&path).await,
 
         Commands::ChangePassword { path } => cmd_change_password(&path).await,
+
+        Commands::Check { path, fix } => cmd_check(&path, fix).await,
 
         Commands::GdriveAuth {
             client_id,
@@ -651,6 +664,65 @@ async fn cmd_change_password(path: &Path) -> Result<()> {
     manager.save_config(&session).await?;
 
     println!("Password changed successfully!");
+
+    Ok(())
+}
+
+/// Check vault health and integrity.
+async fn cmd_check(path: &Path, _fix: bool) -> Result<()> {
+    info!("Running vault health check: {}", path.display());
+
+    let password = prompt_password("Enter password: ")?;
+    let path_str = path.to_string_lossy().to_string();
+
+    let manager = VaultManager::new();
+    let provider_config = serde_json::json!({
+        "root": path_str
+    });
+
+    let session = manager
+        .open_vault("local", provider_config, &password)
+        .await
+        .context("Failed to open vault")?;
+
+    let master_key = session.master_key().context("Session is not active")?;
+
+    let report = check_vault_health(
+        session.provider().as_ref(),
+        session.config(),
+        master_key,
+        &path_str,
+    )
+    .await
+    .context("Failed to run health check")?;
+
+    println!("Vault Health Report");
+    println!("  Path: {}", path.display());
+    println!();
+
+    for result in &report.results {
+        let icon = match result.severity {
+            Severity::Info => "[OK]",
+            Severity::Warning => "[WARN]",
+            Severity::Error => "[ERR]",
+        };
+        let fixable = if result.auto_fixable {
+            " (auto-fixable)"
+        } else {
+            ""
+        };
+        println!(
+            "  {} {}: {}{}",
+            icon, result.check_name, result.message, fixable
+        );
+    }
+
+    println!();
+    if report.has_errors() {
+        println!("Vault has errors that need attention.");
+    } else {
+        println!("Vault is healthy.");
+    }
 
     Ok(())
 }

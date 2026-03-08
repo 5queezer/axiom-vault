@@ -259,6 +259,26 @@ pub async fn remove_entry(handle: &FFIVaultHandle, vault_path: &str) -> FFIResul
     }
 }
 
+/// Run vault health check and return JSON report.
+pub async fn health_check(handle: &FFIVaultHandle) -> FFIResult<String> {
+    let session = handle.session.read().await;
+
+    let master_key = session
+        .master_key()
+        .map_err(|e| FFIError::VaultError(e.to_string()))?;
+
+    let report = axiomvault_vault::check_vault_health(
+        session.provider().as_ref(),
+        session.config(),
+        master_key,
+        &handle.path,
+    )
+    .await
+    .map_err(|e| FFIError::VaultError(e.to_string()))?;
+
+    Ok(report.to_json())
+}
+
 /// Change the vault password.
 pub async fn change_password(
     handle: &FFIVaultHandle,
