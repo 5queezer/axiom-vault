@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct VaultBrowserView: View {
     @EnvironmentObject var vaultManager: VaultManager
@@ -8,6 +9,7 @@ struct VaultBrowserView: View {
     @State private var showingChangePassword = false
     @State private var selectedEntry: VaultEntry?
     @State private var showingExportSheet = false
+    @State private var isDragTargeted = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -55,9 +57,37 @@ struct VaultBrowserView: View {
         .sheet(isPresented: $showingCreateDirectory) { CreateDirectoryView() }
         .sheet(isPresented: $showingVaultInfo) { VaultInfoView() }
         .sheet(isPresented: $showingChangePassword) { ChangePasswordView() }
+        .onDrop(of: [.fileURL], isTargeted: $isDragTargeted) { providers in
+            handleDrop(providers)
+            return true
+        }
+        .overlay {
+            if isDragTargeted {
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(Color.accentColor, style: StrokeStyle(lineWidth: 3, dash: [8]))
+                    .background(Color.accentColor.opacity(0.1))
+                    .allowsHitTesting(false)
+            }
+        }
         .onAppear {
             if vaultManager.entries.isEmpty {
                 Task { await vaultManager.refreshEntries() }
+            }
+        }
+    }
+
+    private func handleDrop(_ providers: [NSItemProvider]) {
+        for provider in providers {
+            provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
+                guard let data = item as? Data,
+                      let url = URL(dataRepresentation: data, relativeTo: nil)
+                else { return }
+
+                Task { @MainActor in
+                    guard url.startAccessingSecurityScopedResource() else { return }
+                    defer { url.stopAccessingSecurityScopedResource() }
+                    await vaultManager.addFile(from: url)
+                }
             }
         }
     }

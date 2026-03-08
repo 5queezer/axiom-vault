@@ -9,6 +9,7 @@ struct VaultBrowserView: View {
     @State private var showChangePassword = false
     @State private var selectedEntries: Set<UUID> = []
     @State private var sortOrder = [KeyPathComparator(\VaultEntry.name)]
+    @State private var isDragTargeted = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -74,8 +75,41 @@ struct VaultBrowserView: View {
         .sheet(isPresented: $showChangePassword) {
             ChangePasswordSheet()
         }
+        .onDrop(of: [.fileURL], isTargeted: $isDragTargeted) { providers in
+            handleDrop(providers)
+            return true
+        }
+        .overlay {
+            if isDragTargeted {
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(Color.accentColor, style: StrokeStyle(lineWidth: 3, dash: [8]))
+                    .background(Color.accentColor.opacity(0.1))
+                    .allowsHitTesting(false)
+            }
+        }
         .onAppear {
             Task { await vaultManager.refreshEntries() }
+        }
+    }
+
+    private func handleDrop(_ providers: [NSItemProvider]) {
+        var urls: [URL] = []
+        let group = DispatchGroup()
+
+        for provider in providers {
+            group.enter()
+            provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
+                defer { group.leave() }
+                guard let data = item as? Data,
+                      let url = URL(dataRepresentation: data, relativeTo: nil)
+                else { return }
+                urls.append(url)
+            }
+        }
+
+        group.notify(queue: .main) {
+            guard !urls.isEmpty else { return }
+            Task { await vaultManager.addFiles(from: urls) }
         }
     }
 
