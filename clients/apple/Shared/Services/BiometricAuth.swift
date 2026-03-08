@@ -6,17 +6,19 @@ import Security
 class BiometricAuth {
     static let shared = BiometricAuth()
 
-    private let context = LAContext()
+    private static let serviceName = "com.axiomvault.vault-password"
 
     private init() {}
 
     var isBiometricAvailable: Bool {
+        let context = LAContext()
         var error: NSError?
         return context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error)
     }
 
     var biometricType: LABiometryType {
-        _ = isBiometricAvailable
+        let context = LAContext()
+        _ = context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: nil)
         return context.biometryType
     }
 
@@ -33,45 +35,43 @@ class BiometricAuth {
         }
     }
 
-    func authenticate(reason: String = "Unlock your vault") async throws -> Bool {
-        let context = LAContext()
-        context.localizedFallbackTitle = "Use Password"
+    var unlockButtonLabel: String {
+        "Unlock with \(biometricName)"
+    }
 
-        return try await withCheckedThrowingContinuation { continuation in
-            context.evaluatePolicy(
-                .deviceOwnerAuthenticationWithBiometrics,
-                localizedReason: reason
-            ) { success, error in
-                if success {
-                    continuation.resume(returning: true)
-                } else if let error = error {
-                    continuation.resume(throwing: error)
-                } else {
-                    continuation.resume(returning: false)
-                }
-            }
+    var unlockButtonIcon: String {
+        switch biometricType {
+        case .faceID:
+            return "faceid"
+        case .touchID:
+            return "touchid"
+        default:
+            return "lock.shield"
         }
     }
 
     // MARK: - Keychain Storage for Vault Passwords
 
-    private func keychainKey(for vaultPath: String) -> String {
-        "com.axiomvault.password.\(vaultPath.hashValue)"
+    /// Account key derived from vault path for keychain storage
+    private func keychainAccount(for vaultPath: String) -> String {
+        vaultPath
     }
 
     func storePassword(_ password: String, for vaultPath: String) throws {
-        let key = keychainKey(for: vaultPath)
+        let account = keychainAccount(for: vaultPath)
 
+        // Delete any existing entry first
         let deleteQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrAccount as String: key,
+            kSecAttrService as String: Self.serviceName,
+            kSecAttrAccount as String: account,
         ]
         SecItemDelete(deleteQuery as CFDictionary)
 
         guard let accessControl = SecAccessControlCreateWithFlags(
             nil,
             kSecAttrAccessibleWhenPasscodeSetThisDeviceOnly,
-            .biometryAny,
+            .biometryCurrentSet,
             nil
         ) else {
             throw BiometricError.accessControlCreationFailed
@@ -80,7 +80,8 @@ class BiometricAuth {
         let passwordData = password.data(using: .utf8)!
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrAccount as String: key,
+            kSecAttrService as String: Self.serviceName,
+            kSecAttrAccount as String: account,
             kSecValueData as String: passwordData,
             kSecAttrAccessControl as String: accessControl,
         ]
@@ -92,43 +93,47 @@ class BiometricAuth {
     }
 
     func retrievePassword(for vaultPath: String) async throws -> String? {
-        let key = keychainKey(for: vaultPath)
+        let account = keychainAccount(for: vaultPath)
 
         let context = LAContext()
-        context.localizedReason = "Retrieve your vault password"
+        context.localizedReason = "Unlock your vault"
 
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrAccount as String: key,
+            kSecAttrService as String: Self.serviceName,
+            kSecAttrAccount as String: account,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne,
             kSecUseAuthenticationContext as String: context,
         ]
 
         return try await withCheckedThrowingContinuation { continuation in
-            var result: AnyObject?
-            let status = SecItemCopyMatching(query as CFDictionary, &result)
+            DispatchQueue.global(qos: .userInitiated).async {
+                var result: AnyObject?
+                let status = SecItemCopyMatching(query as CFDictionary, &result)
 
-            if status == errSecSuccess, let data = result as? Data {
-                let password = String(data: data, encoding: .utf8)
-                continuation.resume(returning: password)
-            } else if status == errSecItemNotFound {
-                continuation.resume(returning: nil)
-            } else {
-                continuation.resume(throwing: BiometricError.keychainRetrieveFailed(status))
+                if status == errSecSuccess, let data = result as? Data {
+                    let password = String(data: data, encoding: .utf8)
+                    continuation.resume(returning: password)
+                } else if status == errSecItemNotFound {
+                    continuation.resume(returning: nil)
+                } else {
+                    continuation.resume(throwing: BiometricError.keychainRetrieveFailed(status))
+                }
             }
         }
     }
 
     func hasStoredPassword(for vaultPath: String) -> Bool {
-        let key = keychainKey(for: vaultPath)
+        let account = keychainAccount(for: vaultPath)
 
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrAccount as String: key,
+            kSecAttrService as String: Self.serviceName,
+            kSecAttrAccount as String: account,
             kSecReturnAttributes as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne,
-            kSecUseAuthenticationUIAllow as String: kSecUseAuthenticationUIFail,
+            kSecUseAuthenticationUI as String: kSecUseAuthenticationUIFail,
         ]
 
         var result: AnyObject?
@@ -137,11 +142,12 @@ class BiometricAuth {
     }
 
     func removePassword(for vaultPath: String) throws {
-        let key = keychainKey(for: vaultPath)
+        let account = keychainAccount(for: vaultPath)
 
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrAccount as String: key,
+            kSecAttrService as String: Self.serviceName,
+            kSecAttrAccount as String: account,
         ]
 
         let status = SecItemDelete(query as CFDictionary)

@@ -42,6 +42,21 @@ struct SettingsView: View {
                 Text("1 hour").tag(60)
                 Text("Never").tag(0)
             }
+
+            if BiometricAuth.shared.isBiometricAvailable, let vaultPath = vaultManager.lastUnlockedVaultPath {
+                Toggle(
+                    "Unlock with \(BiometricAuth.shared.biometricName)",
+                    isOn: Binding(
+                        get: { BiometricAuth.shared.hasStoredPassword(for: vaultPath) },
+                        set: { enabled in
+                            if !enabled {
+                                vaultManager.disableBiometric(for: vaultPath)
+                            }
+                            // Enabling requires the password, so it's done at unlock time
+                        }
+                    )
+                )
+            }
         }
         .formStyle(.grouped)
         .padding()
