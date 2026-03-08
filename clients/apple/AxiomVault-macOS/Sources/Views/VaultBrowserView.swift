@@ -3,10 +3,12 @@ import UniformTypeIdentifiers
 
 struct VaultBrowserView: View {
     @EnvironmentObject var vaultManager: VaultManager
+    @EnvironmentObject var syncManager: SyncManager
     @State private var showNewFolder = false
     @State private var newFolderName = ""
     @State private var showVaultInfo = false
     @State private var showChangePassword = false
+    @State private var showSyncSettings = false
     @State private var selectedEntries: Set<UUID> = []
     @State private var sortOrder = [KeyPathComparator(\VaultEntry.name)]
     @State private var isDragTargeted = false
@@ -45,6 +47,15 @@ struct VaultBrowserView: View {
                     Task { await vaultManager.refreshState() }
                 }
 
+                Button {
+                    Task { await syncManager.sync() }
+                } label: {
+                    SyncStatusView()
+                        .environmentObject(syncManager)
+                }
+                .disabled(syncManager.isSyncing)
+                .help("Last sync: \(syncManager.lastSyncDescription)")
+
                 Menu {
                     Button("Vault Info", systemImage: "info.circle") {
                         showVaultInfo = true
@@ -57,6 +68,14 @@ struct VaultBrowserView: View {
                         ForEach(AutoLockDuration.allCases, id: \.self) { duration in
                             Text(duration.displayName).tag(duration)
                         }
+                    }
+                    Divider()
+                    Button("Sync Now", systemImage: "arrow.triangle.2.circlepath") {
+                        Task { await syncManager.sync() }
+                    }
+                    .disabled(syncManager.isSyncing)
+                    Button("Sync Settings...", systemImage: "gearshape") {
+                        showSyncSettings = true
                     }
                     Divider()
                     Button("Lock Vault", systemImage: "lock.fill") {
@@ -80,6 +99,10 @@ struct VaultBrowserView: View {
         }
         .sheet(isPresented: $showChangePassword) {
             ChangePasswordSheet()
+        }
+        .sheet(isPresented: $showSyncSettings) {
+            SyncSettingsView()
+                .environmentObject(syncManager)
         }
         .onDrop(of: [.fileURL], isTargeted: $isDragTargeted) { providers in
             handleDrop(providers)

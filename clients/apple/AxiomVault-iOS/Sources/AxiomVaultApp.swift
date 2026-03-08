@@ -3,6 +3,7 @@ import SwiftUI
 @main
 struct AxiomVaultApp: App {
     @StateObject private var vaultManager = VaultManager()
+    @StateObject private var syncManager = SyncManager()
 
     init() {
         do {
@@ -16,6 +17,7 @@ struct AxiomVaultApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(vaultManager)
+                .environmentObject(syncManager)
         }
     }
 }
