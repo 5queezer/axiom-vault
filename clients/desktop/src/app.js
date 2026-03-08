@@ -1,66 +1,69 @@
-// Wait for Tauri API with retries and extended timeout
-async function waitForTauri(timeout = 8000, maxRetries = 3) {
-    let retries = 0;
+// Tauri API resolution — does not block Vue from mounting
+let _invoke = null;
 
-    while (retries < maxRetries) {
-        const startTime = Date.now();
-
-        while (!window.__TAURI__ || !window.__TAURI__.core) {
-            if (Date.now() - startTime > timeout) {
-                retries++;
-                if (retries < maxRetries) {
-                    console.warn(`[App Init] Attempt ${retries}: Tauri API timeout (${timeout}ms), retrying in 500ms...`);
-                    await new Promise(resolve => setTimeout(resolve, 500));
-                }
-                break;
-            }
-            await new Promise(resolve => setTimeout(resolve, 50));
-        }
-
-        if (window.__TAURI__?.core) {
-            console.log(`[App Init] Tauri API ready on attempt ${retries + 1}`);
-            return window.__TAURI__.core;
-        }
-    }
-
-    throw new Error(`Tauri API failed to initialize after ${maxRetries} retries (${timeout}ms timeout each)`);
+function getTauriInvoke() {
+    // Check withGlobalTauri API (preferred)
+    if (window.__TAURI__?.core?.invoke) return window.__TAURI__.core.invoke;
+    // Fallback to internal IPC bridge
+    if (window.__TAURI_INTERNALS__?.invoke) return window.__TAURI_INTERNALS__.invoke;
+    return null;
 }
 
-// Show error message to user
-function showInitError(error) {
-    console.error('Failed to initialize application:', error);
-    const errorHTML = `
-        <div style="color: white; padding: 40px; text-align: center; font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
-            <h2 style="color: #ff453a; margin-bottom: 20px;">Initialization Error</h2>
-            <p style="font-size: 14px; margin-bottom: 10px;">${error.message}</p>
-            <p style="font-size: 12px; color: #98989d;">Check the browser console (F12) for more details.</p>
-            <button onclick="location.reload()" style="margin-top: 20px; padding: 8px 16px; background: #0a84ff; color: white; border: none; border-radius: 6px; cursor: pointer;">
-                Reload
-            </button>
-        </div>
-    `;
-    document.body.innerHTML = errorHTML;
+let _tauriReady = null;
+function waitForTauri() {
+    if (_tauriReady) return _tauriReady;
+    _tauriReady = new Promise((resolve) => {
+        // Check immediately — with withGlobalTauri it's often already available
+        const fn = getTauriInvoke();
+        if (fn) {
+            console.log('[Tauri] API available immediately');
+            _invoke = fn;
+            resolve(fn);
+            return;
+        }
+
+        const timeout = 5000;
+        const startTime = Date.now();
+        const check = setInterval(() => {
+            const fn = getTauriInvoke();
+            if (fn) {
+                clearInterval(check);
+                console.log(`[Tauri] API ready after ${Date.now() - startTime}ms`);
+                _invoke = fn;
+                resolve(fn);
+            } else if (Date.now() - startTime > timeout) {
+                clearInterval(check);
+                console.error('[Tauri] API not available after timeout');
+                resolve(null);
+            }
+        }, 25);
+    });
+    return _tauriReady;
+}
+
+// Safe invoke wrapper — waits for Tauri, throws descriptive error if unavailable
+async function safeInvoke(cmd, args) {
+    if (!_invoke) {
+        const fn = await waitForTauri();
+        if (!fn) throw 'Tauri backend is not available. Try reloading the app.';
+    }
+    return _invoke(cmd, args);
 }
 
 // Initialize and mount the Vue application
-async function initApp() {
+function initApp() {
     const startTime = Date.now();
-    try {
-        console.log('[App Init] Starting initialization at', new Date().toISOString());
-        console.log('[App Init] Waiting for Tauri API...');
+    console.log('[App Init] Starting initialization at', new Date().toISOString());
 
-        const tauriCore = await waitForTauri();
-        const { invoke } = tauriCore;
+    // Start Tauri resolution in background (non-blocking)
+    waitForTauri();
 
-        console.log(`[App Init] ✓ Tauri API ready (${Date.now() - startTime}ms)`);
-        console.log('[App Init] Loading Vue framework...');
+    const { createApp, ref, computed, onMounted } = Vue;
+    const invoke = safeInvoke;
+    console.log(`[App Init] ✓ Vue loaded (${Date.now() - startTime}ms)`);
 
-        console.log(`[App Init] Loading Vue framework (${Date.now() - startTime}ms)...`);
-        const { createApp, ref, computed, onMounted } = Vue;
-        console.log(`[App Init] ✓ Vue loaded (${Date.now() - startTime}ms)`);
-
-        const app = createApp({
-            setup() {
+    const app = createApp({
+        setup() {
                 // State
                 const fuseStatus = ref('Checking...');
                 const vaults = ref([]);
@@ -376,20 +379,14 @@ async function initApp() {
                     createNewFile, createNewFolder, formatSize, selectVault,
                     clearValidationErrors
                 };
-            }
-        });
+        }
+    });
 
-        console.log(`[App Init] Mounting Vue app (${Date.now() - startTime}ms)...`);
-        app.mount('#app');
-        console.log(`[App Init] ✓ Vue app mounted successfully (${Date.now() - startTime}ms total)`);
-    } catch (error) {
-        console.error('[App Init] ✗ Initialization failed:', error);
-        showInitError(error);
-    }
+    console.log(`[App Init] Mounting Vue app (${Date.now() - startTime}ms)...`);
+    app.mount('#app');
+    console.log(`[App Init] ✓ Vue app mounted successfully (${Date.now() - startTime}ms total)`);
 }
 
 // Start the application
 console.log('[Bootstrap] Calling initApp()...');
-initApp().catch(err => {
-    console.error('[Bootstrap] Uncaught error in initApp():', err);
-});
+initApp();

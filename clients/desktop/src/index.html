@@ -298,37 +298,6 @@
 </div>
 
 <script src="vendor/vue.global.js"></script>
-<script>
-  console.log('[Bootstrap] Starting Tauri initialization check...');
-
-  // Detect when Tauri API becomes available
-  function waitForTauriInjection(timeout = 8000) {
-    return new Promise((resolve, reject) => {
-      const startTime = Date.now();
-
-      const checkInterval = setInterval(() => {
-        if (window.__TAURI__ && window.__TAURI__.core) {
-          clearInterval(checkInterval);
-          console.log('[Bootstrap] Tauri API detected, loading app...');
-          resolve();
-        } else if (Date.now() - startTime > timeout) {
-          clearInterval(checkInterval);
-          console.warn('[Bootstrap] Tauri API not injected within timeout, proceeding anyway...');
-          resolve(); // Proceed even if timeout (fallback for slow systems)
-        }
-      }, 50);
-    });
-  }
-
-  // Load app.js once Tauri is ready
-  waitForTauriInjection().then(() => {
-    const script = document.createElement('script');
-    script.src = 'app.js';
-    script.onerror = (err) => {
-      console.error('[Bootstrap] Failed to load app.js:', err);
-    };
-    document.body.appendChild(script);
-  });
-</script>
+<script src="app.js"></script>
 </body>
 </html>
