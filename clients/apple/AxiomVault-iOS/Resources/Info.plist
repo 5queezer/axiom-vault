@@ -19,6 +19,8 @@
     <string>$(EXECUTABLE_NAME)</string>
     <key>CFBundleDevelopmentRegion</key>
     <string>en</string>
+    <key>CFBundleIconName</key>
+    <string>AppIcon</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>LSRequiresIPhoneOS</key>

@@ -142,7 +142,6 @@ impl VaultFilesystem {
             ttl: Duration::from_secs(1),
         }
     }
-
 }
 
 impl Filesystem for VaultFilesystem {
