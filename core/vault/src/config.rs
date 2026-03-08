@@ -108,6 +108,8 @@ pub struct VaultConfig {
 pub struct VaultConfigCreation {
     /// The vault configuration to persist.
     pub config: VaultConfig,
+    /// The master key, passed through to avoid a second Argon2id round on vault creation.
+    pub master_key: MasterKey,
     /// The recovery key mnemonic (24 BIP39 words). Show to user once.
     pub recovery_words: String,
 }
@@ -176,6 +178,7 @@ impl VaultConfig {
 
         Ok(VaultConfigCreation {
             config,
+            master_key,
             recovery_words,
         })
     }
@@ -327,18 +330,21 @@ impl VaultConfig {
     /// # Returns
     /// The recovery words to show to the user.
     pub fn migrate_to_v1_1(&mut self, password: &[u8]) -> Result<String> {
-        use axiomvault_crypto::{derive_key, encrypt};
+        use axiomvault_crypto::encrypt;
 
         if !self.is_legacy_format() {
             return Err(Error::Vault("Vault is already in v1.1 format".to_string()));
         }
 
+        // In legacy mode, verify_password returns the Argon2id output which
+        // serves as BOTH the master key and the password KEK. Reuse it to
+        // avoid a second KDF round.
         let master_key = self
             .verify_password(password)?
             .ok_or_else(|| Error::NotPermitted("Invalid password".to_string()))?;
 
-        let password_kek = derive_key(password, &self.salt, &self.kdf_params)?;
-        let wrapped_master_key = wrap_key(&master_key, password_kek.as_bytes())?;
+        // In legacy format, KEK == master key, so wrap with itself.
+        let wrapped_master_key = wrap_key(&master_key, master_key.as_bytes())?;
 
         let recovery_key = RecoveryKey::generate();
         let recovery_kek = recovery_key.derive_kek();

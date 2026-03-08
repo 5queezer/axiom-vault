@@ -213,18 +213,19 @@ impl VaultSession {
             return Err(Error::NotPermitted("Session is locked".to_string()));
         }
 
-        if self.config.verify_password(old_password)?.is_none() {
-            return Err(Error::NotPermitted("Invalid old password".to_string()));
-        }
-
-        let master_key = self.master_key()?;
+        // verify_password returns the master key — use it directly to avoid
+        // a second call to self.master_key().
+        let master_key = self
+            .config
+            .verify_password(old_password)?
+            .ok_or_else(|| Error::NotPermitted("Invalid old password".to_string()))?;
 
         // Generate new salt and derive new password KEK.
         let new_salt = axiomvault_crypto::Salt::generate();
         let new_kek = derive_key(new_password, &new_salt, &self.config.kdf_params)?;
 
         // Re-wrap the master key with the new KEK.
-        let new_wrapped = wrap_key(master_key, new_kek.as_bytes())?;
+        let new_wrapped = wrap_key(&master_key, new_kek.as_bytes())?;
 
         // Re-create password verification.
         let verification_plaintext = b"AXIOMVAULT_KEY_VERIFICATION_V1";
@@ -249,12 +250,14 @@ impl VaultSession {
         recovery_key: &RecoveryKey,
         new_password: &[u8],
     ) -> Result<()> {
-        self.config.reset_password(recovery_key, new_password)?;
-
+        // Get the master key from recovery before resetting password.
+        // This avoids a second Argon2id round after reset_password.
         let master_key = self
             .config
-            .verify_password(new_password)?
-            .ok_or_else(|| Error::Vault("Failed to verify new password after reset".to_string()))?;
+            .verify_recovery_key(recovery_key)?
+            .ok_or_else(|| Error::NotPermitted("Invalid recovery key".to_string()))?;
+
+        self.config.reset_password(recovery_key, new_password)?;
         self.master_key = Some(master_key);
         self.state = SessionState::Active;
 

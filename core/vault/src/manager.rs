@@ -73,7 +73,13 @@ impl VaultManager {
         self.initialize_vault_structure(&provider, &creation.config)
             .await?;
 
-        let session = VaultSession::unlock(creation.config, password, provider, VaultTree::new())?;
+        // Use from_master_key to avoid a second Argon2id KDF round.
+        let session = VaultSession::from_master_key(
+            creation.config,
+            creation.master_key,
+            provider,
+            VaultTree::new(),
+        )?;
 
         Ok(VaultCreation {
             session,
@@ -163,19 +169,15 @@ impl VaultManager {
         // Load the tree with the master key before resetting the password.
         let tree = VaultSession::load_and_decrypt_tree(&provider, &master_key).await?;
 
-        // Reset password in config.
+        // Reset password in config. The master key itself doesn't change.
         config.reset_password(&recovery_key, new_password)?;
 
         // Save updated config.
         let config_bytes = config.to_bytes()?;
         provider.upload(&config_path, config_bytes).await?;
 
-        // Create session with new password.
-        let new_master_key = config
-            .verify_password(new_password)?
-            .ok_or_else(|| Error::Vault("Failed to verify new password after reset".to_string()))?;
-
-        VaultSession::from_master_key(config, new_master_key, provider, tree)
+        // Reuse the master key from recovery — no need for a second Argon2id round.
+        VaultSession::from_master_key(config, master_key, provider, tree)
     }
 
     /// Check if a vault exists at the given location.

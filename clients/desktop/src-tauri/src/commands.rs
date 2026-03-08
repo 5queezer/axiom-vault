@@ -26,6 +26,14 @@ pub struct VaultInfo {
     pub mount_point: Option<String>,
 }
 
+/// Result of vault creation, including recovery words.
+#[derive(Debug, Clone, Serialize)]
+pub struct VaultCreationResult {
+    pub vault: VaultInfo,
+    /// Recovery key as 24 BIP39 words. Must be shown to the user exactly once.
+    pub recovery_words: String,
+}
+
 /// File entry for the frontend.
 #[derive(Debug, Clone, Serialize)]
 pub struct FileEntry {
@@ -147,7 +155,7 @@ pub async fn create_vault(
     id: String,
     password: String,
     provider_type: String,
-) -> Result<VaultInfo, String> {
+) -> Result<VaultCreationResult, String> {
     info!("Creating vault: {}", id);
 
     let vault_id = VaultId::new(&id).map_err(|e| e.to_string())?;
@@ -168,14 +176,15 @@ pub async fn create_vault(
     std::fs::create_dir_all(&state.data_dir).map_err(|e| e.to_string())?;
     std::fs::write(&config_path, config_json).map_err(|e| e.to_string())?;
 
-    // TODO: Return recovery_words to frontend so user can save them.
-    // For now, log a reminder (words are in creation.recovery_words).
-    info!("Recovery key generated (24 words). Frontend should display these to the user.");
+    let recovery_words = creation.recovery_words.clone();
 
     let vault_info = setup_vault_session(&state, &id, creation.config, &password, true).await?;
 
     info!("Vault created successfully");
-    Ok(vault_info)
+    Ok(VaultCreationResult {
+        vault: vault_info,
+        recovery_words,
+    })
 }
 
 /// Unlock an existing vault.

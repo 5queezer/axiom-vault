@@ -360,6 +360,27 @@ fn prompt_password(prompt: &str) -> Result<Vec<u8>> {
     Ok(password.into_bytes())
 }
 
+/// Display recovery words and prompt user to confirm they've saved them.
+fn display_recovery_words(words: &str) {
+    println!();
+    println!("=== RECOVERY KEY ===");
+    println!("Write down these 24 words and store them in a safe place.");
+    println!("You will need them to recover your vault if you forget your password.");
+    println!();
+    for (i, word) in words.split_whitespace().enumerate() {
+        println!("  {:>2}. {}", i + 1, word);
+    }
+    println!();
+    println!("WARNING: This is the only time the recovery key will be shown.");
+    println!("If you lose it, you will not be able to recover your vault.");
+    println!();
+    print!("Press Enter after you have written down the recovery key...");
+    use std::io::Write;
+    std::io::stdout().flush().ok();
+    let mut buf = String::new();
+    std::io::stdin().read_line(&mut buf).ok();
+}
+
 /// Create a new vault.
 async fn cmd_create(name: &str, path: &Path, strength: &str) -> Result<()> {
     info!("Creating new vault: {}", name);
@@ -401,17 +422,7 @@ async fn cmd_create(name: &str, path: &Path, strength: &str) -> Result<()> {
     println!("  ID: {}", creation.session.vault_id());
     println!("  Location: {}", path.display());
     println!("  Provider: {}", creation.session.config().provider_type);
-    println!();
-    println!("=== RECOVERY KEY ===");
-    println!("Write down these 24 words and store them in a safe place.");
-    println!("You will need them to recover your vault if you forget your password.");
-    println!();
-    for (i, word) in creation.recovery_words.split_whitespace().enumerate() {
-        println!("  {:>2}. {}", i + 1, word);
-    }
-    println!();
-    println!("WARNING: This is the only time the recovery key will be shown.");
-    println!("If you lose it, you will not be able to recover your vault.");
+    display_recovery_words(&creation.recovery_words);
 
     Ok(())
 }
@@ -721,14 +732,7 @@ async fn cmd_show_recovery_key(path: &Path) -> Result<()> {
         .to_mnemonic()
         .context("Failed to encode recovery key")?;
 
-    println!();
-    println!("=== RECOVERY KEY ===");
-    println!("Store these 24 words in a safe place.");
-    println!();
-    for (i, word) in words.split_whitespace().enumerate() {
-        println!("  {:>2}. {}", i + 1, word);
-    }
-    println!();
+    display_recovery_words(&words);
 
     Ok(())
 }
@@ -810,17 +814,7 @@ async fn cmd_migrate_vault(path: &Path) -> Result<()> {
         .context("Failed to save migrated config")?;
 
     println!("Vault migrated successfully to v1.1 format!");
-    println!();
-    println!("=== RECOVERY KEY ===");
-    println!("Write down these 24 words and store them in a safe place.");
-    println!("You will need them to recover your vault if you forget your password.");
-    println!();
-    for (i, word) in recovery_words.split_whitespace().enumerate() {
-        println!("  {:>2}. {}", i + 1, word);
-    }
-    println!();
-    println!("WARNING: This is the only time the recovery key will be shown.");
-    println!("If you lose it, you will not be able to recover your vault.");
+    display_recovery_words(&recovery_words);
 
     Ok(())
 }
@@ -1053,17 +1047,7 @@ async fn cmd_gdrive_create(
     println!("  ID: {}", creation.session.vault_id());
     println!("  Folder ID: {}", folder_id);
     println!("  Provider: {}", creation.session.config().provider_type);
-    println!();
-    println!("=== RECOVERY KEY ===");
-    println!("Write down these 24 words and store them in a safe place.");
-    println!("You will need them to recover your vault if you forget your password.");
-    println!();
-    for (i, word) in creation.recovery_words.split_whitespace().enumerate() {
-        println!("  {:>2}. {}", i + 1, word);
-    }
-    println!();
-    println!("WARNING: This is the only time the recovery key will be shown.");
-    println!("If you lose it, you will not be able to recover your vault.");
+    display_recovery_words(&creation.recovery_words);
 
     Ok(())
 }
