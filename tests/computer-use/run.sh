@@ -3,7 +3,7 @@
 # AxiomVault Computer Use Test Runner
 #
 # Launches the desktop app (optionally under Xvfb) and runs the
-# computer-use test harness against it.
+# computer-use test harness against it using the Claude CLI.
 #
 # Usage:
 #   ./run.sh                              # headless smoke test
@@ -12,9 +12,7 @@
 #   ./run.sh --list-scenarios             # list available scenarios
 #
 # Environment variables:
-#   ANTHROPIC_API_KEY   - required
-#   AXIOM_CU_MODEL      - model override (default: claude-sonnet-4-20250514)
-#   AXIOM_CU_MAX_STEPS  - max agent loop steps (default: 50)
+#   AXIOM_CU_MAX_TURNS  - max conversation turns (default: 50)
 
 set -euo pipefail
 
@@ -43,11 +41,10 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# --- Find a Python with the anthropic SDK ---
+# --- Find a usable Python ---
 find_python() {
-    # Try common python paths, preferring the one with anthropic installed
     for py in python3 python "$HOME/anaconda3/bin/python3" "$HOME/miniconda3/bin/python3"; do
-        if command -v "$py" >/dev/null 2>&1 && "$py" -c "import anthropic" 2>/dev/null; then
+        if command -v "$py" >/dev/null 2>&1; then
             PYTHON="$py"
             return 0
         fi
@@ -59,6 +56,7 @@ find_python() {
 check_deps() {
     local missing=()
 
+    command -v claude  >/dev/null 2>&1 || missing+=("claude (npm install -g @anthropic-ai/claude-code)")
     command -v xdotool >/dev/null 2>&1 || missing+=("xdotool")
     command -v scrot   >/dev/null 2>&1 || missing+=("scrot")
 
@@ -67,7 +65,7 @@ check_deps() {
     fi
 
     if ! find_python; then
-        missing+=("anthropic (pip install anthropic)")
+        missing+=("python3")
     fi
 
     if [ ${#missing[@]} -gt 0 ]; then
@@ -78,16 +76,10 @@ check_deps() {
         echo ""
         echo "Install on Fedora:  sudo dnf install xdotool scrot xorg-x11-server-Xvfb"
         echo "Install on Ubuntu:  sudo apt install xdotool scrot xvfb"
-        echo "Install Python SDK: pip install anthropic"
         exit 1
     fi
 
     echo "Using Python: $PYTHON"
-
-    if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
-        echo "Error: ANTHROPIC_API_KEY environment variable is required."
-        exit 1
-    fi
 }
 
 # --- Build app if needed ---
@@ -116,6 +108,10 @@ start_xvfb() {
     export GDK_BACKEND=x11
     export XDG_SESSION_TYPE=x11
     unset WAYLAND_DISPLAY
+
+    # Prevent blank WebView in software-rendered Xvfb
+    export WEBKIT_DISABLE_COMPOSITING_MODE=1
+    export WEBKIT_DISABLE_DMABUF_RENDERER=1
 }
 
 # --- Launch AxiomVault ---
@@ -153,7 +149,7 @@ launch_app() {
     xdotool windowactivate "$wid" 2>/dev/null || true
     xdotool windowsize "$wid" 1024 768 2>/dev/null || true
     xdotool windowmove "$wid" 0 0 2>/dev/null || true
-    sleep 1
+    sleep 2
 }
 
 # --- Main ---
@@ -170,6 +166,7 @@ main() {
                 shift
                 ;;
             --list-scenarios|-l)
+                check_deps
                 "$PYTHON" "$SCRIPT_DIR/harness.py" --list-scenarios
                 exit 0
                 ;;
