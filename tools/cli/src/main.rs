@@ -137,10 +137,6 @@ enum Commands {
         /// Path to the vault.
         #[arg(short, long)]
         path: PathBuf,
-
-        /// Automatically fix recoverable issues.
-        #[arg(long)]
-        fix: bool,
     },
 
     /// Authenticate with Google Drive and get tokens.
@@ -293,7 +289,7 @@ async fn main() -> Result<()> {
 
         Commands::ChangePassword { path } => cmd_change_password(&path).await,
 
-        Commands::Check { path, fix } => cmd_check(&path, fix).await,
+        Commands::Check { path } => cmd_check(&path).await,
 
         Commands::GdriveAuth {
             client_id,
@@ -669,7 +665,7 @@ async fn cmd_change_password(path: &Path) -> Result<()> {
 }
 
 /// Check vault health and integrity.
-async fn cmd_check(path: &Path, _fix: bool) -> Result<()> {
+async fn cmd_check(path: &Path) -> Result<()> {
     info!("Running vault health check: {}", path.display());
 
     let password = prompt_password("Enter password: ")?;
