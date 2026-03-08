@@ -297,7 +297,7 @@
     </transition>
 </div>
 
-<!-- Wait for Tauri API before loading app to prevent race condition -->
+<script src="vendor/vue.global.js"></script>
 <script>
   console.log('[Bootstrap] Starting Tauri initialization check...');
 
@@ -323,7 +323,6 @@
   // Load app.js once Tauri is ready
   waitForTauriInjection().then(() => {
     const script = document.createElement('script');
-    script.type = 'module';
     script.src = 'app.js';
     script.onerror = (err) => {
       console.error('[Bootstrap] Failed to load app.js:', err);

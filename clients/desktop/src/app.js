@@ -56,7 +56,7 @@ async function initApp() {
         console.log('[App Init] Loading Vue framework...');
 
         console.log(`[App Init] Loading Vue framework (${Date.now() - startTime}ms)...`);
-        const { createApp, ref, computed, onMounted } = await import('https://unpkg.com/vue@3/dist/vue.esm-browser.js');
+        const { createApp, ref, computed, onMounted } = Vue;
         console.log(`[App Init] ✓ Vue loaded (${Date.now() - startTime}ms)`);
 
         const app = createApp({
