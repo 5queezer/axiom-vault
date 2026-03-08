@@ -101,7 +101,10 @@ impl MigrationRegistry {
         let mut current = *from;
 
         while current != *to {
-            let next = self.migrations.iter().find(|m| m.source_version() == current);
+            let next = self
+                .migrations
+                .iter()
+                .find(|m| m.source_version() == current);
             match next {
                 Some(migration) => {
                     let target = migration.target_version();
