@@ -15,13 +15,15 @@ thiserror.workspace = true
 chrono.workspace = true
 uuid.workspace = true
 
-# Google Drive provider
+# Cloud storage providers
 reqwest.workspace = true
 oauth2.workspace = true
 url.workspace = true
 tokio-util.workspace = true
 bytes.workspace = true
 tracing.workspace = true
+dirs.workspace = true
+percent-encoding.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
