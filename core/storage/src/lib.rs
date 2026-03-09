@@ -10,14 +10,20 @@
 //! - Streaming support: Large files are handled via streams
 //! - Unified error semantics: Consistent error types across providers
 
+pub mod dropbox;
 pub mod gdrive;
+pub mod icloud;
 pub mod local;
 pub mod memory;
+pub mod onedrive;
 pub mod provider;
 pub mod registry;
 
+pub use dropbox::{DropboxConfig, DropboxProvider};
 pub use gdrive::{GDriveConfig, GDriveProvider};
+pub use icloud::{ICloudConfig, ICloudProvider};
 pub use local::LocalProvider;
 pub use memory::MemoryProvider;
+pub use onedrive::{OneDriveConfig, OneDriveProvider};
 pub use provider::{ConflictResolution, Metadata, StorageProvider};
 pub use registry::{create_default_registry, ProviderFactory, ProviderRegistry};
