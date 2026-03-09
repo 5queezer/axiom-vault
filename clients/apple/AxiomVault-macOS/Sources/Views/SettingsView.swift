@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @EnvironmentObject var vaultManager: VaultManager
+    @EnvironmentObject var syncManager: SyncManager
     @AppStorage("autoLockMinutes") private var autoLockMinutes = 15
     @AppStorage("showInMenuBar") private var showInMenuBar = true
 
@@ -17,12 +18,17 @@ struct SettingsView: View {
                     Label("Security", systemImage: "lock.shield")
                 }
 
+            syncSettings
+                .tabItem {
+                    Label("Sync", systemImage: "arrow.triangle.2.circlepath.icloud")
+                }
+
             aboutView
                 .tabItem {
                     Label("About", systemImage: "info.circle")
                 }
         }
-        .frame(width: 450, height: 250)
+        .frame(width: 450, height: 300)
     }
 
     private var generalSettings: some View {
@@ -61,6 +67,29 @@ struct SettingsView: View {
                     Text("Unlock with your password to enable \(BiometricAuth.shared.biometricName)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .padding()
+    }
+
+    private var syncSettings: some View {
+        Form {
+            Toggle("Auto-sync", isOn: $syncManager.autoSyncEnabled)
+                .disabled(!syncManager.isSyncAvailable)
+
+            if syncManager.autoSyncEnabled {
+                Picker("Sync interval", selection: $syncManager.syncInterval) {
+                    ForEach(SyncInterval.allCases) { interval in
+                        Text(interval.displayName).tag(interval)
+                    }
+                }
+            }
+
+            Picker("Conflict resolution", selection: $syncManager.conflictStrategy) {
+                ForEach(ConflictResolutionStrategy.allCases) { strategy in
+                    Text(strategy.displayName).tag(strategy)
                 }
             }
         }

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct MainView: View {
     @EnvironmentObject var vaultManager: VaultManager
+    @EnvironmentObject var syncManager: SyncManager
     @State private var showCreateVault = false
     @State private var showUnlockVault = false
 
@@ -34,6 +35,12 @@ struct MainView: View {
             Button("OK") { vaultManager.errorMessage = nil }
         } message: {
             Text(vaultManager.errorMessage ?? "")
+        }
+        .onAppear {
+            syncManager.setActiveVault(vaultManager.vaultInfo?.vaultId)
+        }
+        .onChange(of: vaultManager.vaultInfo?.vaultId) { _, newValue in
+            syncManager.setActiveVault(newValue)
         }
         .onReceive(NotificationCenter.default.publisher(for: .createVault)) { _ in
             showCreateVault = true
