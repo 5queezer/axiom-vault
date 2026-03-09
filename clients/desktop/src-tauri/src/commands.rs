@@ -181,11 +181,13 @@ pub async fn create_vault(
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        if let Err(e) = std::fs::set_permissions(
-            &config_path,
-            std::fs::Permissions::from_mode(0o600),
-        ) {
-            tracing::warn!("Failed to set restrictive permissions on vault config: {}", e);
+        if let Err(e) =
+            std::fs::set_permissions(&config_path, std::fs::Permissions::from_mode(0o600))
+        {
+            tracing::warn!(
+                "Failed to set restrictive permissions on vault config: {}",
+                e
+            );
         }
     }
 

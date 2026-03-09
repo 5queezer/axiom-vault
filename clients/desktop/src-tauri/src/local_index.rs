@@ -54,10 +54,9 @@ impl LocalIndex {
         #[cfg(unix)]
         if is_new && db_path.to_str() != Some(":memory:") {
             use std::os::unix::fs::PermissionsExt;
-            if let Err(e) = std::fs::set_permissions(
-                db_path,
-                std::fs::Permissions::from_mode(0o600),
-            ) {
+            if let Err(e) =
+                std::fs::set_permissions(db_path, std::fs::Permissions::from_mode(0o600))
+            {
                 tracing::warn!("Failed to set restrictive permissions on index db: {}", e);
             }
         }
