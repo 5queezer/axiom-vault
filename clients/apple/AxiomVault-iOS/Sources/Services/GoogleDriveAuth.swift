@@ -1,5 +1,12 @@
 import Foundation
+#if canImport(UIKit)
+import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 import AuthenticationServices
+import Security
+import CryptoKit
 
 /// Manages Google Drive OAuth2 authentication.
 ///
@@ -43,6 +50,11 @@ class GoogleDriveAuth: NSObject, ObservableObject {
     private var config: Config?
     private var webAuthSession: ASWebAuthenticationSession?
 
+    /// PKCE code verifier for the current auth flow
+    private var codeVerifier: String?
+    /// State parameter for CSRF protection
+    private var authState: String?
+
     private override init() {
         super.init()
         loadConfig()
@@ -82,7 +94,16 @@ class GoogleDriveAuth: NSObject, ObservableObject {
         try validateConfig()
         guard let config = config else { throw GoogleDriveError.notConfigured }
 
-        let authURL = buildAuthorizationURL(config: config)
+        // Generate PKCE code verifier and challenge
+        let verifier = Self.generateCodeVerifier()
+        let challenge = Self.generateCodeChallenge(from: verifier)
+        codeVerifier = verifier
+
+        // Generate cryptographic random state for CSRF protection
+        let state = Self.generateState()
+        authState = state
+
+        let authURL = buildAuthorizationURL(config: config, codeChallenge: challenge, state: state)
 
         return try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.main.async { [weak self] in
@@ -101,6 +122,7 @@ class GoogleDriveAuth: NSObject, ObservableObject {
                     }
 
                     if let error = error {
+                        self.clearPKCEState()
                         if let authError = error as? ASWebAuthenticationSessionError,
                            authError.code == .canceledLogin {
                             continuation.resume(throwing: GoogleDriveError.userCancelled)
@@ -110,15 +132,38 @@ class GoogleDriveAuth: NSObject, ObservableObject {
                         return
                     }
 
-                    guard let callbackURL = callbackURL,
-                          let code = self.extractAuthorizationCode(from: callbackURL) else {
+                    guard let callbackURL = callbackURL else {
+                        self.clearPKCEState()
                         continuation.resume(throwing: GoogleDriveError.noAuthorizationCode)
+                        return
+                    }
+
+                    // Verify state parameter to prevent CSRF attacks
+                    let components = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false)
+                    let returnedState = components?.queryItems?.first { $0.name == "state" }?.value
+
+                    guard let expectedState = self.authState, returnedState == expectedState else {
+                        self.clearPKCEState()
+                        continuation.resume(throwing: GoogleDriveError.stateMismatch)
+                        return
+                    }
+
+                    guard let code = self.extractAuthorizationCode(from: callbackURL) else {
+                        self.clearPKCEState()
+                        continuation.resume(throwing: GoogleDriveError.noAuthorizationCode)
+                        return
+                    }
+
+                    guard let verifier = self.codeVerifier else {
+                        self.clearPKCEState()
+                        continuation.resume(throwing: GoogleDriveError.authenticationFailed("Missing PKCE code verifier"))
                         return
                     }
 
                     Task {
                         do {
-                            let tokens = try await self.exchangeCodeForTokens(code, config: config)
+                            let tokens = try await self.exchangeCodeForTokens(code, config: config, codeVerifier: verifier)
+                            self.clearPKCEState()
                             await MainActor.run {
                                 self.tokens = tokens
                                 self.isAuthenticated = true
@@ -126,6 +171,7 @@ class GoogleDriveAuth: NSObject, ObservableObject {
                             self.saveTokens(tokens)
                             continuation.resume(returning: tokens)
                         } catch {
+                            self.clearPKCEState()
                             continuation.resume(throwing: error)
                         }
                     }
@@ -136,6 +182,7 @@ class GoogleDriveAuth: NSObject, ObservableObject {
                 self.webAuthSession = session
 
                 if !session.start() {
+                    self.clearPKCEState()
                     continuation.resume(throwing: GoogleDriveError.authenticationFailed("Failed to start authentication session"))
                 }
             }
@@ -218,9 +265,50 @@ class GoogleDriveAuth: NSObject, ObservableObject {
         clearTokens()
     }
 
+    // MARK: - PKCE Helpers
+
+    /// Generate a cryptographically random code verifier for PKCE (RFC 7636).
+    private static func generateCodeVerifier() -> String {
+        var bytes = [UInt8](repeating: 0, count: 32)
+        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        return Data(bytes)
+            .base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+    }
+
+    /// Derive the S256 code challenge from a code verifier.
+    private static func generateCodeChallenge(from verifier: String) -> String {
+        let data = Data(verifier.utf8)
+        let hash = SHA256.hash(data: data)
+        return Data(hash)
+            .base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+    }
+
+    /// Generate a cryptographically random state parameter for CSRF protection.
+    private static func generateState() -> String {
+        var bytes = [UInt8](repeating: 0, count: 32)
+        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        return Data(bytes)
+            .base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+    }
+
+    /// Clear PKCE and state parameters after auth flow completes.
+    private func clearPKCEState() {
+        codeVerifier = nil
+        authState = nil
+    }
+
     // MARK: - Private Helpers
 
-    private func buildAuthorizationURL(config: Config) -> URL {
+    private func buildAuthorizationURL(config: Config, codeChallenge: String, state: String) -> URL {
         var components = URLComponents(string: "https://accounts.google.com/o/oauth2/v2/auth")!
         components.queryItems = [
             URLQueryItem(name: "client_id", value: config.clientId),
@@ -229,6 +317,9 @@ class GoogleDriveAuth: NSObject, ObservableObject {
             URLQueryItem(name: "scope", value: config.scope),
             URLQueryItem(name: "access_type", value: "offline"),
             URLQueryItem(name: "prompt", value: "consent"),
+            URLQueryItem(name: "code_challenge", value: codeChallenge),
+            URLQueryItem(name: "code_challenge_method", value: "S256"),
+            URLQueryItem(name: "state", value: state),
         ]
         return components.url!
     }
@@ -245,7 +336,7 @@ class GoogleDriveAuth: NSObject, ObservableObject {
         return components?.queryItems?.first { $0.name == "code" }?.value
     }
 
-    private func exchangeCodeForTokens(_ code: String, config: Config) async throws -> Tokens {
+    private func exchangeCodeForTokens(_ code: String, config: Config, codeVerifier: String) async throws -> Tokens {
         let tokenURL = URL(string: "https://oauth2.googleapis.com/token")!
         var request = URLRequest(url: tokenURL)
         request.httpMethod = "POST"
@@ -256,6 +347,7 @@ class GoogleDriveAuth: NSObject, ObservableObject {
             "code": code,
             "redirect_uri": config.redirectUri,
             "grant_type": "authorization_code",
+            "code_verifier": codeVerifier,
         ]
         request.httpBody = body.percentEncoded()
 
@@ -281,26 +373,76 @@ class GoogleDriveAuth: NSObject, ObservableObject {
         )
     }
 
-    // MARK: - Token Persistence
+    // MARK: - Keychain Token Persistence
 
-    private var tokensKey: String { "com.axiomvault.googledrive.tokens" }
+    private static let keychainService = "com.axiomvault.googledrive"
+    private static let keychainAccount = "oauth-tokens"
 
     private func saveTokens(_ tokens: Tokens) {
-        if let data = try? JSONEncoder().encode(tokens) {
-            UserDefaults.standard.set(data, forKey: tokensKey)
-        }
+        guard let data = try? JSONEncoder().encode(tokens) else { return }
+
+        // Delete any existing item first
+        let deleteQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: Self.keychainService,
+            kSecAttrAccount as String: Self.keychainAccount,
+        ]
+        SecItemDelete(deleteQuery as CFDictionary)
+
+        // Add the new item
+        let addQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: Self.keychainService,
+            kSecAttrAccount as String: Self.keychainAccount,
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
+        ]
+        SecItemAdd(addQuery as CFDictionary, nil)
     }
 
     private func loadTokens() {
-        if let data = UserDefaults.standard.data(forKey: tokensKey),
-           let savedTokens = try? JSONDecoder().decode(Tokens.self, from: data) {
+        // Migrate tokens from UserDefaults to Keychain if present
+        let legacyKey = "com.axiomvault.googledrive.tokens"
+        if let legacyData = UserDefaults.standard.data(forKey: legacyKey),
+           let savedTokens = try? JSONDecoder().decode(Tokens.self, from: legacyData) {
+            saveTokens(savedTokens)
+            UserDefaults.standard.removeObject(forKey: legacyKey)
             self.tokens = savedTokens
             self.isAuthenticated = true
+            return
         }
+
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: Self.keychainService,
+            kSecAttrAccount as String: Self.keychainAccount,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+
+        guard status == errSecSuccess,
+              let data = result as? Data,
+              let savedTokens = try? JSONDecoder().decode(Tokens.self, from: data) else {
+            return
+        }
+
+        self.tokens = savedTokens
+        self.isAuthenticated = true
     }
 
     private func clearTokens() {
-        UserDefaults.standard.removeObject(forKey: tokensKey)
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: Self.keychainService,
+            kSecAttrAccount as String: Self.keychainAccount,
+        ]
+        SecItemDelete(query as CFDictionary)
+
+        // Also clean up any legacy UserDefaults entry
+        UserDefaults.standard.removeObject(forKey: "com.axiomvault.googledrive.tokens")
     }
 }
 
@@ -308,10 +450,16 @@ class GoogleDriveAuth: NSObject, ObservableObject {
 
 extension GoogleDriveAuth: ASWebAuthenticationPresentationContextProviding {
     func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+        #if canImport(UIKit)
         UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }
             .flatMap { $0.windows }
             .first { $0.isKeyWindow } ?? ASPresentationAnchor()
+        #elseif canImport(AppKit)
+        NSApplication.shared.keyWindow ?? ASPresentationAnchor()
+        #else
+        ASPresentationAnchor()
+        #endif
     }
 }
 
@@ -327,6 +475,7 @@ enum GoogleDriveError: Error, LocalizedError {
     case invalidTokenResponse
     case noRefreshToken
     case notAuthenticated
+    case stateMismatch
 
     var errorDescription: String? {
         switch self {
@@ -348,6 +497,8 @@ enum GoogleDriveError: Error, LocalizedError {
             return "No refresh token available"
         case .notAuthenticated:
             return "Not authenticated with Google Drive"
+        case .stateMismatch:
+            return "OAuth state mismatch — possible CSRF attack"
         }
     }
 }
