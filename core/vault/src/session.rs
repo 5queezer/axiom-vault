@@ -204,19 +204,37 @@ impl VaultSession {
 
     /// Change the vault password.
     ///
-    /// Re-wraps the master key with a new password-derived KEK.
+    /// Re-wraps the stable master key with a new password-derived KEK.
+    /// The master key itself never changes, so all existing encrypted data
+    /// (files, tree index, filenames) remains decryptable.
     /// Recovery key data remains unchanged.
+    ///
+    /// # Errors
+    /// - Session is locked
+    /// - Old password is incorrect
+    /// - New password is empty
+    /// - Cryptographic operation fails
+    /// - Self-verification of the new wrapping fails (should never happen;
+    ///   indicates a serious bug)
     pub fn change_password(&mut self, old_password: &[u8], new_password: &[u8]) -> Result<()> {
-        use axiomvault_crypto::recovery::wrap_key;
+        use axiomvault_crypto::recovery::{unwrap_key, wrap_key};
 
         if self.state != SessionState::Active {
             return Err(Error::NotPermitted("Session is locked".to_string()));
         }
 
-        // verify_password returns the master key — use it directly to avoid
-        // a second call to self.master_key().
-        let master_key = self
-            .config
+        if new_password.is_empty() {
+            return Err(Error::InvalidInput(
+                "New password cannot be empty".to_string(),
+            ));
+        }
+
+        // Retrieve the master key from the session. This is the stable,
+        // randomly-generated key that all data is encrypted under.
+        let master_key = self.master_key()?.clone();
+
+        // Verify the old password is correct before proceeding.
+        self.config
             .verify_password(old_password)?
             .ok_or_else(|| Error::NotPermitted("Invalid old password".to_string()))?;
 
@@ -227,6 +245,17 @@ impl VaultSession {
         // Re-wrap the master key with the new KEK.
         let new_wrapped = wrap_key(&master_key, new_kek.as_bytes())?;
 
+        // Self-verify: unwrap with the new KEK and confirm the master key
+        // round-trips correctly. This prevents a corrupted config from being
+        // persisted, which would strand all existing data.
+        let verified = unwrap_key(&new_wrapped, new_kek.as_bytes())?;
+        if verified.as_bytes() != master_key.as_bytes() {
+            return Err(Error::Crypto(
+                "Master key verification failed after re-wrapping; aborting password change"
+                    .to_string(),
+            ));
+        }
+
         // Re-create password verification.
         let verification_plaintext = b"AXIOMVAULT_KEY_VERIFICATION_V1";
         let new_verification = encrypt(new_kek.as_bytes(), verification_plaintext)?;
@@ -236,7 +265,8 @@ impl VaultSession {
         self.config.wrapped_master_key = Some(new_wrapped);
         self.config.modified_at = chrono::Utc::now();
 
-        // Master key itself does not change.
+        // The master key in self.master_key is unchanged -- all existing
+        // encrypted data remains decryptable without re-encryption.
 
         Ok(())
     }
@@ -288,17 +318,24 @@ impl Drop for VaultSession {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::VaultConfigCreation;
     use axiomvault_storage::MemoryProvider;
 
-    fn create_test_session() -> (VaultSession, VaultConfig) {
+    fn create_test_config() -> (VaultConfigCreation, Arc<MemoryProvider>) {
         let id = VaultId::new("test").unwrap();
         let password = b"test-password";
         let params = axiomvault_crypto::KdfParams::moderate();
         let creation =
             VaultConfig::new(id, password, "memory", serde_json::Value::Null, params).unwrap();
-        let config = creation.config;
-
         let provider = Arc::new(MemoryProvider::new());
+        (creation, provider)
+    }
+
+    fn create_test_session() -> (VaultSession, VaultConfig) {
+        let (creation, provider) = create_test_config();
+        let config = creation.config;
+        let password = b"test-password";
+
         let session =
             VaultSession::unlock(config.clone(), password, provider, VaultTree::new()).unwrap();
 
@@ -354,5 +391,161 @@ mod tests {
             .verify_password(old_password)
             .unwrap()
             .is_none());
+    }
+
+    #[test]
+    fn test_change_password_empty_rejected() {
+        let (mut session, _) = create_test_session();
+        let result = session.change_password(b"test-password", b"");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_change_password_preserves_master_key() {
+        let (mut session, _) = create_test_session();
+        let old_password = b"test-password";
+        let new_password = b"new-password";
+
+        // Capture master key bytes before password change.
+        let mk_before = session.master_key().unwrap().as_bytes().to_owned();
+
+        session.change_password(old_password, new_password).unwrap();
+
+        // Master key in the session must be identical.
+        let mk_after = session.master_key().unwrap().as_bytes().to_owned();
+        assert_eq!(mk_before, mk_after, "master key must not change");
+
+        // Unwrapping with the new password must yield the same master key.
+        let mk_from_new = session
+            .config()
+            .verify_password(new_password)
+            .unwrap()
+            .expect("new password should verify");
+        assert_eq!(
+            mk_before,
+            mk_from_new.as_bytes().to_owned(),
+            "unwrapped master key must match original"
+        );
+    }
+
+    #[test]
+    fn test_change_password_config_round_trip() {
+        let (mut session, _) = create_test_session();
+        let old_password = b"test-password";
+        let new_password = b"new-password";
+
+        let mk_before = session.master_key().unwrap().as_bytes().to_owned();
+        session.change_password(old_password, new_password).unwrap();
+
+        // Serialize and deserialize the config (simulates save_config + reopen).
+        let json = session.config().to_json().unwrap();
+        let restored = VaultConfig::from_json(&json).unwrap();
+
+        // The restored config must accept the new password and yield
+        // the same master key.
+        let mk_restored = restored
+            .verify_password(new_password)
+            .unwrap()
+            .expect("new password should work after config round-trip");
+        assert_eq!(mk_before, mk_restored.as_bytes().to_owned());
+
+        // The old password must be rejected.
+        assert!(restored.verify_password(old_password).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_change_password_recovery_key_still_works() {
+        let (creation, provider) = create_test_config();
+        let config = creation.config;
+        let recovery_words = creation.recovery_words;
+
+        let mut session =
+            VaultSession::unlock(config, b"test-password", provider, VaultTree::new()).unwrap();
+
+        let mk_before = session.master_key().unwrap().as_bytes().to_owned();
+
+        session
+            .change_password(b"test-password", b"rotated")
+            .unwrap();
+
+        // Recovery key must still unwrap the same master key.
+        let rk = axiomvault_crypto::recovery::RecoveryKey::from_mnemonic(&recovery_words).unwrap();
+        let mk_from_recovery = session
+            .config()
+            .verify_recovery_key(&rk)
+            .unwrap()
+            .expect("recovery key should still work after password change");
+        assert_eq!(mk_before, mk_from_recovery.as_bytes().to_owned());
+    }
+
+    #[tokio::test]
+    async fn test_change_password_data_remains_decryptable() {
+        use crate::operations::VaultOperations;
+
+        let (creation, provider) = create_test_config();
+        let config = creation.config;
+
+        // Initialize storage directories.
+        provider
+            .create_dir(&VaultPath::parse("/d").unwrap())
+            .await
+            .unwrap();
+        provider
+            .create_dir(&VaultPath::parse("/m").unwrap())
+            .await
+            .unwrap();
+
+        let mut session =
+            VaultSession::unlock(config, b"test-password", provider.clone(), VaultTree::new())
+                .unwrap();
+
+        // Write files before password change.
+        let ops = VaultOperations::new(&session).unwrap();
+        let file_a = VaultPath::parse("/secret.txt").unwrap();
+        let file_b = VaultPath::parse("/photo.bin").unwrap();
+        let content_a = b"top-secret document content";
+        let content_b: Vec<u8> = (0..=255).collect();
+        ops.create_file(&file_a, content_a).await.unwrap();
+        ops.create_file(&file_b, &content_b).await.unwrap();
+        drop(ops);
+
+        // Rotate the password.
+        session
+            .change_password(b"test-password", b"rotated-pw")
+            .unwrap();
+
+        // All previously encrypted files must still be readable in the
+        // same session (master key unchanged in memory).
+        let ops = VaultOperations::new(&session).unwrap();
+        assert_eq!(ops.read_file(&file_a).await.unwrap(), content_a);
+        assert_eq!(ops.read_file(&file_b).await.unwrap(), content_b);
+        drop(ops);
+
+        // Simulate closing and reopening the vault with the new password:
+        // serialize the config, build a fresh session, and verify files.
+        let config_json = session.config().to_json().unwrap();
+        drop(session);
+
+        let config2 = VaultConfig::from_json(&config_json).unwrap();
+        let mk2 = config2
+            .verify_password(b"rotated-pw")
+            .unwrap()
+            .expect("new password must verify");
+        let tree2 = VaultSession::load_and_decrypt_tree(&(provider.clone() as Arc<_>), &mk2)
+            .await
+            .unwrap();
+        let session2 = VaultSession::from_master_key(config2, mk2, provider, tree2).unwrap();
+
+        let ops2 = VaultOperations::new(&session2).unwrap();
+        assert_eq!(
+            ops2.read_file(&file_a).await.unwrap(),
+            content_a,
+            "file A must be decryptable after reopen with new password"
+        );
+        assert_eq!(
+            ops2.read_file(&file_b).await.unwrap(),
+            content_b,
+            "file B must be decryptable after reopen with new password"
+        );
     }
 }
