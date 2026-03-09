@@ -9,9 +9,9 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use fuser::{
-    FileAttr, FileHandle, FileType, Filesystem, INodeNo, LockOwner, OpenFlags, ReplyAttr,
-    ReplyCreate, ReplyData, ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyOpen, ReplyWrite, Request,
-    TimeOrNow, WriteFlags,
+    Errno, FileAttr, FileHandle, FileType, Filesystem, FopenFlags, Generation, INodeNo, LockOwner,
+    OpenFlags, ReplyAttr, ReplyCreate, ReplyData, ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyOpen,
+    ReplyWrite, Request, TimeOrNow, WriteFlags,
 };
 use tokio::runtime::Handle;
 use tokio::sync::RwLock;
@@ -24,7 +24,7 @@ use axiomvault_vault::{VaultOperations, VaultSession};
 fn create_file_attr(ino: u64, is_dir: bool, size: u64) -> FileAttr {
     let now = SystemTime::now();
     FileAttr {
-        ino,
+        ino: INodeNo(ino),
         size,
         blocks: (size + 511) / 512,
         atime: now,
@@ -151,7 +151,7 @@ impl Filesystem for VaultFilesystem {
         let name_str = match name.to_str() {
             Some(s) => s,
             None => {
-                reply.error(libc::ENOENT);
+                reply.error(Errno::ENOENT);
                 return;
             }
         };
@@ -168,7 +168,7 @@ impl Filesystem for VaultFilesystem {
                 match map.get_path(parent) {
                     Some(p) => p.to_string(),
                     None => {
-                        reply.error(libc::ENOENT);
+                        reply.error(Errno::ENOENT);
                         return;
                     }
                 }
@@ -183,7 +183,7 @@ impl Filesystem for VaultFilesystem {
             let ops = match VaultOperations::new(&session) {
                 Ok(o) => o,
                 Err(_) => {
-                    reply.error(libc::EIO);
+                    reply.error(Errno::EIO);
                     return;
                 }
             };
@@ -191,13 +191,13 @@ impl Filesystem for VaultFilesystem {
             let path = match VaultPath::parse(&child_path) {
                 Ok(p) => p,
                 Err(_) => {
-                    reply.error(libc::ENOENT);
+                    reply.error(Errno::ENOENT);
                     return;
                 }
             };
 
             if !ops.exists(&path).await {
-                reply.error(libc::ENOENT);
+                reply.error(Errno::ENOENT);
                 return;
             }
 
@@ -206,11 +206,11 @@ impl Filesystem for VaultFilesystem {
                     let mut map = inodes.write().await;
                     let ino = map.get_or_create_inode(&child_path);
                     let attr = create_file_attr(ino, is_dir, size.unwrap_or(0));
-                    reply.entry(&ttl, &attr, 0);
+                    reply.entry(&ttl, &attr, Generation(0));
                 }
                 Err(e) => {
                     error!("Failed to get metadata: {}", e);
-                    reply.error(libc::EIO);
+                    reply.error(Errno::EIO);
                 }
             }
         });
@@ -230,7 +230,7 @@ impl Filesystem for VaultFilesystem {
                 match map.get_path(ino) {
                     Some(p) => p.to_string(),
                     None => {
-                        reply.error(libc::ENOENT);
+                        reply.error(Errno::ENOENT);
                         return;
                     }
                 }
@@ -246,7 +246,7 @@ impl Filesystem for VaultFilesystem {
             let ops = match VaultOperations::new(&session) {
                 Ok(o) => o,
                 Err(_) => {
-                    reply.error(libc::EIO);
+                    reply.error(Errno::EIO);
                     return;
                 }
             };
@@ -254,7 +254,7 @@ impl Filesystem for VaultFilesystem {
             let path = match VaultPath::parse(&path_str) {
                 Ok(p) => p,
                 Err(_) => {
-                    reply.error(libc::ENOENT);
+                    reply.error(Errno::ENOENT);
                     return;
                 }
             };
@@ -266,7 +266,7 @@ impl Filesystem for VaultFilesystem {
                 }
                 Err(e) => {
                     error!("Failed to get metadata: {}", e);
-                    reply.error(libc::EIO);
+                    reply.error(Errno::EIO);
                 }
             }
         });
@@ -292,7 +292,7 @@ impl Filesystem for VaultFilesystem {
                 match map.get_path(ino) {
                     Some(p) => p.to_string(),
                     None => {
-                        reply.error(libc::ENOENT);
+                        reply.error(Errno::ENOENT);
                         return;
                     }
                 }
@@ -301,7 +301,7 @@ impl Filesystem for VaultFilesystem {
             let ops = match VaultOperations::new(&session) {
                 Ok(o) => o,
                 Err(_) => {
-                    reply.error(libc::EIO);
+                    reply.error(Errno::EIO);
                     return;
                 }
             };
@@ -309,7 +309,7 @@ impl Filesystem for VaultFilesystem {
             let path = match VaultPath::parse(&path_str) {
                 Ok(p) => p,
                 Err(_) => {
-                    reply.error(libc::ENOENT);
+                    reply.error(Errno::ENOENT);
                     return;
                 }
             };
@@ -318,7 +318,7 @@ impl Filesystem for VaultFilesystem {
                 Ok(e) => e,
                 Err(e) => {
                     error!("Failed to list directory: {}", e);
-                    reply.error(libc::EIO);
+                    reply.error(Errno::EIO);
                     return;
                 }
             };
@@ -327,7 +327,7 @@ impl Filesystem for VaultFilesystem {
 
             // . and .. entries
             if i == 0 {
-                if reply.add(ino, 1, FileType::Directory, ".") {
+                if reply.add(INodeNo(ino), 1, FileType::Directory, ".") {
                     reply.ok();
                     return;
                 }
@@ -356,7 +356,7 @@ impl Filesystem for VaultFilesystem {
                         map.get_inode_for_path(parent_path).unwrap_or(1)
                     }
                 };
-                if reply.add(parent_ino, 2, FileType::Directory, "..") {
+                if reply.add(INodeNo(parent_ino), 2, FileType::Directory, "..") {
                     reply.ok();
                     return;
                 }
@@ -382,7 +382,7 @@ impl Filesystem for VaultFilesystem {
                     FileType::RegularFile
                 };
 
-                if reply.add(child_ino, (idx + 3) as u64, file_type, name) {
+                if reply.add(INodeNo(child_ino), (idx + 3) as u64, file_type, name) {
                     break;
                 }
             }
@@ -406,7 +406,7 @@ impl Filesystem for VaultFilesystem {
                 match map.get_path(ino) {
                     Some(p) => p.to_string(),
                     None => {
-                        reply.error(libc::ENOENT);
+                        reply.error(Errno::ENOENT);
                         return;
                     }
                 }
@@ -415,7 +415,7 @@ impl Filesystem for VaultFilesystem {
             let ops = match VaultOperations::new(&session) {
                 Ok(o) => o,
                 Err(_) => {
-                    reply.error(libc::EIO);
+                    reply.error(Errno::EIO);
                     return;
                 }
             };
@@ -423,7 +423,7 @@ impl Filesystem for VaultFilesystem {
             let path = match VaultPath::parse(&path_str) {
                 Ok(p) => p,
                 Err(_) => {
-                    reply.error(libc::ENOENT);
+                    reply.error(Errno::ENOENT);
                     return;
                 }
             };
@@ -433,7 +433,7 @@ impl Filesystem for VaultFilesystem {
                 Ok(data) => data,
                 Err(e) => {
                     error!("Failed to read file: {}", e);
-                    reply.error(libc::EIO);
+                    reply.error(Errno::EIO);
                     return;
                 }
             };
@@ -457,7 +457,7 @@ impl Filesystem for VaultFilesystem {
                 );
             }
 
-            reply.opened(fh, 0);
+            reply.opened(FileHandle(fh), FopenFlags::empty());
         });
     }
 
@@ -490,7 +490,7 @@ impl Filesystem for VaultFilesystem {
                     }
                 }
                 None => {
-                    reply.error(libc::EBADF);
+                    reply.error(Errno::EBADF);
                 }
             }
         });
@@ -531,7 +531,7 @@ impl Filesystem for VaultFilesystem {
                     reply.written(data.len() as u32);
                 }
                 None => {
-                    reply.error(libc::EBADF);
+                    reply.error(Errno::EBADF);
                 }
             }
         });
@@ -565,7 +565,7 @@ impl Filesystem for VaultFilesystem {
                         Ok(o) => o,
                         Err(e) => {
                             error!("Failed to get operations: {}", e);
-                            reply.error(libc::EIO);
+                            reply.error(Errno::EIO);
                             return;
                         }
                     };
@@ -574,14 +574,14 @@ impl Filesystem for VaultFilesystem {
                         Ok(p) => p,
                         Err(e) => {
                             error!("Invalid path: {}", e);
-                            reply.error(libc::EIO);
+                            reply.error(Errno::EIO);
                             return;
                         }
                     };
 
                     if let Err(e) = ops.update_file(&path, &file.buffer).await {
                         error!("Failed to write file: {}", e);
-                        reply.error(libc::EIO);
+                        reply.error(Errno::EIO);
                         return;
                     }
 
@@ -607,7 +607,7 @@ impl Filesystem for VaultFilesystem {
         let name_str = match name.to_str() {
             Some(s) => s,
             None => {
-                reply.error(libc::EINVAL);
+                reply.error(Errno::EINVAL);
                 return;
             }
         };
@@ -626,7 +626,7 @@ impl Filesystem for VaultFilesystem {
                 match map.get_path(parent) {
                     Some(p) => p.to_string(),
                     None => {
-                        reply.error(libc::ENOENT);
+                        reply.error(Errno::ENOENT);
                         return;
                     }
                 }
@@ -641,7 +641,7 @@ impl Filesystem for VaultFilesystem {
             let ops = match VaultOperations::new(&session) {
                 Ok(o) => o,
                 Err(_) => {
-                    reply.error(libc::EIO);
+                    reply.error(Errno::EIO);
                     return;
                 }
             };
@@ -649,7 +649,7 @@ impl Filesystem for VaultFilesystem {
             let path = match VaultPath::parse(&child_path) {
                 Ok(p) => p,
                 Err(_) => {
-                    reply.error(libc::EINVAL);
+                    reply.error(Errno::EINVAL);
                     return;
                 }
             };
@@ -657,7 +657,7 @@ impl Filesystem for VaultFilesystem {
             // Create empty file
             if let Err(e) = ops.create_file(&path, &[]).await {
                 error!("Failed to create file: {}", e);
-                reply.error(libc::EIO);
+                reply.error(Errno::EIO);
                 return;
             }
 
@@ -687,7 +687,7 @@ impl Filesystem for VaultFilesystem {
 
             let attr = create_file_attr(ino, false, 0);
 
-            reply.created(&ttl, &attr, 0, fh, 0);
+            reply.created(&ttl, &attr, Generation(0), FileHandle(fh), FopenFlags::empty());
         });
     }
 
@@ -704,7 +704,7 @@ impl Filesystem for VaultFilesystem {
         let name_str = match name.to_str() {
             Some(s) => s,
             None => {
-                reply.error(libc::EINVAL);
+                reply.error(Errno::EINVAL);
                 return;
             }
         };
@@ -721,7 +721,7 @@ impl Filesystem for VaultFilesystem {
                 match map.get_path(parent) {
                     Some(p) => p.to_string(),
                     None => {
-                        reply.error(libc::ENOENT);
+                        reply.error(Errno::ENOENT);
                         return;
                     }
                 }
@@ -736,7 +736,7 @@ impl Filesystem for VaultFilesystem {
             let ops = match VaultOperations::new(&session) {
                 Ok(o) => o,
                 Err(_) => {
-                    reply.error(libc::EIO);
+                    reply.error(Errno::EIO);
                     return;
                 }
             };
@@ -744,14 +744,14 @@ impl Filesystem for VaultFilesystem {
             let path = match VaultPath::parse(&child_path) {
                 Ok(p) => p,
                 Err(_) => {
-                    reply.error(libc::EINVAL);
+                    reply.error(Errno::EINVAL);
                     return;
                 }
             };
 
             if let Err(e) = ops.create_directory(&path).await {
                 error!("Failed to create directory: {}", e);
-                reply.error(libc::EIO);
+                reply.error(Errno::EIO);
                 return;
             }
 
@@ -762,7 +762,7 @@ impl Filesystem for VaultFilesystem {
 
             let attr = create_file_attr(ino, true, 0);
 
-            reply.entry(&ttl, &attr, 0);
+            reply.entry(&ttl, &attr, Generation(0));
         });
     }
 
@@ -771,7 +771,7 @@ impl Filesystem for VaultFilesystem {
         let name_str = match name.to_str() {
             Some(s) => s,
             None => {
-                reply.error(libc::EINVAL);
+                reply.error(Errno::EINVAL);
                 return;
             }
         };
@@ -787,7 +787,7 @@ impl Filesystem for VaultFilesystem {
                 match map.get_path(parent) {
                     Some(p) => p.to_string(),
                     None => {
-                        reply.error(libc::ENOENT);
+                        reply.error(Errno::ENOENT);
                         return;
                     }
                 }
@@ -802,7 +802,7 @@ impl Filesystem for VaultFilesystem {
             let ops = match VaultOperations::new(&session) {
                 Ok(o) => o,
                 Err(_) => {
-                    reply.error(libc::EIO);
+                    reply.error(Errno::EIO);
                     return;
                 }
             };
@@ -810,14 +810,14 @@ impl Filesystem for VaultFilesystem {
             let path = match VaultPath::parse(&child_path) {
                 Ok(p) => p,
                 Err(_) => {
-                    reply.error(libc::EINVAL);
+                    reply.error(Errno::EINVAL);
                     return;
                 }
             };
 
             if let Err(e) = ops.delete_file(&path).await {
                 error!("Failed to delete file: {}", e);
-                reply.error(libc::EIO);
+                reply.error(Errno::EIO);
                 return;
             }
 
@@ -835,7 +835,7 @@ impl Filesystem for VaultFilesystem {
         let name_str = match name.to_str() {
             Some(s) => s,
             None => {
-                reply.error(libc::EINVAL);
+                reply.error(Errno::EINVAL);
                 return;
             }
         };
@@ -851,7 +851,7 @@ impl Filesystem for VaultFilesystem {
                 match map.get_path(parent) {
                     Some(p) => p.to_string(),
                     None => {
-                        reply.error(libc::ENOENT);
+                        reply.error(Errno::ENOENT);
                         return;
                     }
                 }
@@ -866,7 +866,7 @@ impl Filesystem for VaultFilesystem {
             let ops = match VaultOperations::new(&session) {
                 Ok(o) => o,
                 Err(_) => {
-                    reply.error(libc::EIO);
+                    reply.error(Errno::EIO);
                     return;
                 }
             };
@@ -874,14 +874,14 @@ impl Filesystem for VaultFilesystem {
             let path = match VaultPath::parse(&child_path) {
                 Ok(p) => p,
                 Err(_) => {
-                    reply.error(libc::EINVAL);
+                    reply.error(Errno::EINVAL);
                     return;
                 }
             };
 
             if let Err(e) = ops.delete_directory(&path).await {
                 error!("Failed to delete directory: {}", e);
-                reply.error(libc::EIO);
+                reply.error(Errno::EIO);
                 return;
             }
 
