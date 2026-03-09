@@ -53,7 +53,8 @@ pub async fn create_vault(path: &str, password: &str) -> FFIResult<FFIVaultHandl
     Ok(FFIVaultHandle {
         service,
         path: abs_path,
-        recovery_words: Some(result.recovery_words),
+        recovery_words: std::sync::Mutex::new(Some(result.recovery_words)),
+        event_task: std::sync::Mutex::new(None),
     })
 }
 
@@ -75,7 +76,8 @@ pub async fn open_vault(path: &str, password: &str) -> FFIResult<FFIVaultHandle>
     Ok(FFIVaultHandle {
         service,
         path: abs_path,
-        recovery_words: None,
+        recovery_words: std::sync::Mutex::new(None),
+        event_task: std::sync::Mutex::new(None),
     })
 }
 
@@ -229,7 +231,8 @@ pub async fn reset_password(
     Ok(FFIVaultHandle {
         service,
         path: abs_path,
-        recovery_words: None,
+        recovery_words: std::sync::Mutex::new(None),
+        event_task: std::sync::Mutex::new(None),
     })
 }
 

@@ -3,8 +3,10 @@
 //! Types that can cross the FFI boundary safely.
 
 use std::ffi::{c_char, c_int, c_longlong};
+use std::sync::Mutex;
 
 use axiomvault_app::AppService;
+use tokio::task::JoinHandle;
 
 /// Opaque handle to the application service.
 ///
@@ -14,8 +16,12 @@ pub struct FFIVaultHandle {
     pub(crate) service: AppService,
     /// Vault storage path on disk (for health check / migration).
     pub(crate) path: String,
-    /// Recovery words from vault creation (only set on create, not on open).
-    pub(crate) recovery_words: Option<String>,
+    /// Recovery words from vault creation. One-time retrievable — cleared after
+    /// the first call to `axiom_vault_get_recovery_words`.
+    pub(crate) recovery_words: Mutex<Option<String>>,
+    /// Background task forwarding events to the C callback. At most one
+    /// subscription is active at a time — re-subscribing aborts the previous.
+    pub(crate) event_task: Mutex<Option<JoinHandle<()>>>,
 }
 
 /// Vault information structure (C-safe).

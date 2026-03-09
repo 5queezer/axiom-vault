@@ -179,6 +179,14 @@ pub unsafe extern "C" fn axiom_vault_close(handle: *mut FFIVaultHandle) -> c_int
     }
 
     let handle = Box::from_raw(handle);
+
+    // Abort any active event subscription task.
+    if let Ok(mut guard) = handle.event_task.lock() {
+        if let Some(task) = guard.take() {
+            task.abort();
+        }
+    }
+
     let runtime = match get_runtime() {
         Ok(rt) => rt,
         Err(e) => {
@@ -422,7 +430,9 @@ pub unsafe extern "C" fn axiom_vault_change_password(
 /// Get the recovery words from a newly created vault.
 ///
 /// Only returns words if the handle was obtained via `axiom_vault_create`.
-/// Returns null if the vault was opened (not created) or words already consumed.
+/// Returns null if the vault was opened (not created) or words were already
+/// consumed by a previous call. **Words are cleared after retrieval** — this
+/// function returns them exactly once.
 ///
 /// # Safety
 /// - `handle` must be a valid vault handle
@@ -436,13 +446,17 @@ pub unsafe extern "C" fn axiom_vault_get_recovery_words(
         return ptr::null_mut();
     }
 
-    match &(*handle).recovery_words {
-        Some(words) => CString::new(words.as_str())
-            .map(|s| s.into_raw())
-            .unwrap_or_else(|_| {
-                error::set_last_error(FFIError::StringConversionError);
-                ptr::null_mut()
-            }),
+    let words = (*handle)
+        .recovery_words
+        .lock()
+        .ok()
+        .and_then(|mut guard| guard.take());
+
+    match words {
+        Some(w) => CString::new(w).map(|s| s.into_raw()).unwrap_or_else(|_| {
+            error::set_last_error(FFIError::StringConversionError);
+            ptr::null_mut()
+        }),
         None => ptr::null_mut(),
     }
 }
@@ -611,8 +625,9 @@ pub unsafe extern "C" fn axiom_vault_health_check(
 /// Subscribe to vault events. The callback receives JSON-encoded `AppEvent`
 /// strings on a background thread.
 ///
-/// Only one subscriber is supported per handle. Calling again replaces the
-/// previous subscription. Pass null to unsubscribe.
+/// Only one subscription is active per handle. Calling again **aborts** the
+/// previous forwarding task before starting a new one. Pass a null callback
+/// to unsubscribe without starting a new subscription.
 ///
 /// # Safety
 /// - `handle` must be a valid vault handle
@@ -628,15 +643,23 @@ pub unsafe extern "C" fn axiom_vault_subscribe_events(
         return -1;
     }
 
+    let handle = &*handle;
+
+    // Abort any existing subscription task.
+    if let Ok(mut guard) = handle.event_task.lock() {
+        if let Some(task) = guard.take() {
+            task.abort();
+        }
+    }
+
+    // If no callback, we just unsubscribed — done.
     let callback = match callback {
         Some(cb) => cb,
-        None => return 0, // Unsubscribe (no-op: receiver is dropped when thread ends).
+        None => return 0,
     };
 
-    let handle = &*handle;
     let mut rx = handle.service.subscribe();
 
-    // Spawn a background task to forward events.
     let runtime = match get_runtime() {
         Ok(rt) => rt,
         Err(e) => {
@@ -645,7 +668,7 @@ pub unsafe extern "C" fn axiom_vault_subscribe_events(
         }
     };
 
-    runtime.spawn(async move {
+    let task = runtime.spawn(async move {
         loop {
             match rx.recv().await {
                 Ok(event) => {
@@ -660,6 +683,11 @@ pub unsafe extern "C" fn axiom_vault_subscribe_events(
             }
         }
     });
+
+    // Store the task handle so it can be aborted on re-subscribe or close.
+    if let Ok(mut guard) = handle.event_task.lock() {
+        *guard = Some(task);
+    }
 
     0
 }
