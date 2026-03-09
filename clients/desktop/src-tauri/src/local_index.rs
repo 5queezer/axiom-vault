@@ -112,7 +112,7 @@ impl LocalIndex {
                 entry.path,
                 entry.encrypted_name,
                 entry.is_directory as i32,
-                entry.size,
+                entry.size.map(|s| s as i64),
                 entry.modified_at,
                 entry.etag,
             ],
@@ -140,7 +140,7 @@ impl LocalIndex {
                 path: row.get(0)?,
                 encrypted_name: row.get(1)?,
                 is_directory: row.get::<_, i32>(2)? != 0,
-                size: row.get(3)?,
+                size: row.get::<_, Option<i64>>(3)?.map(|v| v as u64),
                 modified_at: row.get(4)?,
                 etag: row.get(5)?,
             })
@@ -191,7 +191,7 @@ impl LocalIndex {
                     path,
                     encrypted_name: row.get(1)?,
                     is_directory: row.get::<_, i32>(2)? != 0,
-                    size: row.get(3)?,
+                    size: row.get::<_, Option<i64>>(3)?.map(|v| v as u64),
                     modified_at: row.get(4)?,
                     etag: row.get(5)?,
                 }))

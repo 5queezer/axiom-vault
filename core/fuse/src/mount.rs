@@ -5,7 +5,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use fuser::{BackgroundSession, MountOption};
+use fuser::{BackgroundSession, Config, MountOption, SessionACL};
 use tokio::runtime::Handle;
 use tracing::{error, info};
 
@@ -121,33 +121,39 @@ pub fn mount(
     let fs = VaultFilesystem::new(session, runtime);
 
     // Configure mount options
-    let mut fuse_options = vec![
+    let mut mount_options = vec![
         MountOption::FSName("axiomvault".to_string()),
         MountOption::Subtype("axiomvault".to_string()),
     ];
 
-    if options.allow_other {
-        fuse_options.push(MountOption::AllowOther);
-    }
+    let acl = if options.allow_other {
+        SessionACL::All
+    } else {
+        SessionACL::Owner
+    };
 
     if options.auto_unmount {
-        fuse_options.push(MountOption::AutoUnmount);
+        mount_options.push(MountOption::AutoUnmount);
     }
 
     if options.read_only {
-        fuse_options.push(MountOption::RO);
+        mount_options.push(MountOption::RO);
     }
 
     if options.default_permissions {
-        fuse_options.push(MountOption::DefaultPermissions);
+        mount_options.push(MountOption::DefaultPermissions);
     }
+
+    let mut config = Config::default();
+    config.mount_options = mount_options;
+    config.acl = acl;
 
     // Spawn the FUSE request-servicing thread via fuser::spawn_mount2.
     // The BackgroundSession returned here:
     //   1. performs the kernel mount syscall,
     //   2. starts a dedicated OS thread to service /dev/fuse read/write,
     //   3. unmounts and joins the thread on drop.
-    let bg_session = fuser::spawn_mount2(fs, &mount_point, &fuse_options).map_err(|e| {
+    let bg_session = fuser::spawn_mount2(fs, &mount_point, &config).map_err(|e| {
         error!("Failed to mount vault at {:?}: {}", mount_point, e);
         Error::Io(e)
     })?;

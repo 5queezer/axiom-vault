@@ -39,9 +39,9 @@ pub struct RecoveryKey {
 impl RecoveryKey {
     /// Generate a new random recovery key.
     pub fn generate() -> Self {
-        use rand::RngCore;
+        use rand::RngExt;
         let mut entropy = [0u8; KEY_LENGTH];
-        rand::rng().fill_bytes(&mut entropy);
+        rand::rng().fill(&mut entropy[..]);
         Self { entropy }
     }
 
@@ -106,9 +106,9 @@ impl std::fmt::Debug for RecoveryKey {
 
 /// Generate a new random master key.
 pub fn generate_master_key() -> MasterKey {
-    use rand::RngCore;
+    use rand::RngExt;
     let mut key = [0u8; KEY_LENGTH];
-    rand::rng().fill_bytes(&mut key);
+    rand::rng().fill(&mut key[..]);
     MasterKey::from_bytes(key)
 }
 
