@@ -39,7 +39,7 @@ struct MainView: View {
         .onAppear {
             syncManager.setActiveVault(vaultManager.vaultInfo?.vaultId)
         }
-        .onChange(of: vaultManager.vaultInfo?.vaultId) { _, newValue in
+        .onChange(of: vaultManager.vaultInfo?.vaultId) { newValue in
             syncManager.setActiveVault(newValue)
         }
         .onReceive(NotificationCenter.default.publisher(for: .createVault)) { _ in
