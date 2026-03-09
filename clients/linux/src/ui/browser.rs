@@ -26,7 +26,7 @@ pub struct BrowserView {
 }
 
 impl BrowserView {
-    pub fn new(state: Rc<RefCell<AppState>>, nav: adw::NavigationView) -> Self {
+    pub fn new(state: Rc<RefCell<AppState>>, _nav: adw::NavigationView) -> Self {
         let list_box = gtk::ListBox::builder()
             .selection_mode(gtk::SelectionMode::None)
             .css_classes(["boxed-list"])
@@ -150,12 +150,6 @@ async fn load_directory(
 
 /// Create a list row for a directory entry.
 fn entry_row(entry: &DirectoryEntryDto) -> adw::ActionRow {
-    let icon = if entry.is_directory {
-        "folder-symbolic"
-    } else {
-        "document-symbolic"
-    };
-
     let subtitle = if entry.is_directory {
         "Folder".to_string()
     } else {

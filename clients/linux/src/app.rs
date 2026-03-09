@@ -62,18 +62,23 @@ pub fn run() -> i32 {
 /// ```
 pub fn spawn_async<F, Fut, T, C>(state: &AppState, task: F, on_done: C)
 where
-    F: FnOnce(Arc<AppService>) -> Fut + 'static,
+    F: FnOnce(Arc<AppService>) -> Fut + Send + 'static,
     Fut: std::future::Future<Output = T> + Send + 'static,
     T: Send + 'static,
     C: FnOnce(T) + 'static,
 {
     let service = Arc::clone(&state.service);
-    let ctx = glib::MainContext::default();
+    let (tx, rx) = tokio::sync::oneshot::channel();
 
     state.runtime.spawn(async move {
         let result = task(service).await;
-        ctx.spawn_local(async move {
+        let _ = tx.send(result);
+    });
+
+    // Receive on the GTK main thread.
+    glib::MainContext::default().spawn_local(async move {
+        if let Ok(result) = rx.await {
             on_done(result);
-        });
+        }
     });
 }
