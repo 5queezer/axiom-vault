@@ -9,7 +9,9 @@ use tokio::sync::RwLock;
 
 use axiomvault_common::{VaultId, VaultPath};
 use axiomvault_crypto::KdfParams;
-use axiomvault_vault::{VaultManager as CoreVaultManager, VaultOperations};
+use axiomvault_vault::{
+    check_vault_health, check_vault_structure, VaultManager as CoreVaultManager, VaultOperations,
+};
 
 use crate::error::{FFIError, FFIResult};
 use crate::types::{FFIVaultHandle, FFIVaultInfo, VaultHandleData};
@@ -341,4 +343,61 @@ pub async fn reset_password(
         path: abs_path_str,
         recovery_words: None,
     })
+}
+
+/// Run a health check on a vault. Returns JSON report.
+///
+/// If `password` is `None`, runs a shallow structure-only check.
+/// If `password` is `Some`, runs a full integrity check.
+pub async fn health_check(path: &str, password: Option<&str>) -> FFIResult<String> {
+    let path_obj = Path::new(path);
+
+    let abs_path = if path_obj.is_absolute() {
+        path_obj.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map_err(|e| FFIError::IOError(e.to_string()))?
+            .join(path_obj)
+    };
+
+    let abs_path_str = abs_path.to_string_lossy().to_string();
+
+    let provider_config = serde_json::json!({
+        "root": abs_path_str
+    });
+
+    let manager = CoreVaultManager::new();
+    let provider = manager
+        .registry()
+        .resolve("local", provider_config.clone())
+        .map_err(|e| FFIError::VaultError(e.to_string()))?;
+
+    match password {
+        None => {
+            let report = check_vault_structure(provider.as_ref(), &abs_path_str)
+                .await
+                .map_err(|e| FFIError::VaultError(e.to_string()))?;
+            Ok(report.to_json())
+        }
+        Some(pw) => {
+            let session = manager
+                .open_vault("local", provider_config, pw.as_bytes())
+                .await
+                .map_err(|e| FFIError::VaultError(e.to_string()))?;
+
+            let master_key = session
+                .master_key()
+                .map_err(|e| FFIError::VaultError(e.to_string()))?;
+
+            let report = check_vault_health(
+                provider.as_ref(),
+                session.config(),
+                master_key,
+                &abs_path_str,
+            )
+            .await
+            .map_err(|e| FFIError::VaultError(e.to_string()))?;
+            Ok(report.to_json())
+        }
+    }
 }

@@ -592,6 +592,65 @@ pub unsafe extern "C" fn axiom_vault_show_recovery_key(
     }
 }
 
+/// Run a vault health check and return results as JSON.
+///
+/// # Safety
+/// - `path` must be a valid null-terminated UTF-8 string
+/// - `password` may be null for a shallow (structure-only) check
+/// - Returned string must be freed with `axiom_string_free`
+#[no_mangle]
+pub unsafe extern "C" fn axiom_vault_health_check(
+    path: *const c_char,
+    password: *const c_char,
+) -> *mut c_char {
+    if path.is_null() {
+        error::set_last_error(FFIError::NullPointer("path is null".into()));
+        return ptr::null_mut();
+    }
+
+    let path_str = match CStr::from_ptr(path).to_str() {
+        Ok(s) => s,
+        Err(_) => {
+            error::set_last_error(FFIError::InvalidUtf8("path".into()));
+            return ptr::null_mut();
+        }
+    };
+
+    let password_opt = if password.is_null() {
+        None
+    } else {
+        match CStr::from_ptr(password).to_str() {
+            Ok(s) => Some(s),
+            Err(_) => {
+                error::set_last_error(FFIError::InvalidUtf8("password".into()));
+                return ptr::null_mut();
+            }
+        }
+    };
+
+    let runtime = match get_runtime() {
+        Ok(rt) => rt,
+        Err(e) => {
+            error::set_last_error(FFIError::RuntimeError(e.to_string()));
+            return ptr::null_mut();
+        }
+    };
+
+    match runtime.block_on(vault_ops::health_check(path_str, password_opt)) {
+        Ok(json) => match CString::new(json) {
+            Ok(cstr) => cstr.into_raw(),
+            Err(_) => {
+                error::set_last_error(FFIError::StringConversionError);
+                ptr::null_mut()
+            }
+        },
+        Err(e) => {
+            error::set_last_error(e);
+            ptr::null_mut()
+        }
+    }
+}
+
 /// Reset the vault password using recovery key words.
 ///
 /// # Safety
