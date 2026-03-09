@@ -102,9 +102,10 @@
     <true/>
 
     <!-- File Provider Extension Support -->
+    <!-- Disabled to prevent vault data from being exposed via file sharing (see #86) -->
     <key>UIFileSharingEnabled</key>
-    <true/>
+    <false/>
     <key>LSSupportsOpeningDocumentsInPlace</key>
-    <true/>
+    <false/>
 </dict>
 </plist>
