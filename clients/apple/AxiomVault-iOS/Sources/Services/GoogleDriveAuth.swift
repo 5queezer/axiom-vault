@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 import AuthenticationServices
 import Security
 import CryptoKit
