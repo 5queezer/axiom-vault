@@ -9,6 +9,7 @@ enum SyncStatus: String, CaseIterable {
     case syncing = "Syncing"
     case error = "Error"
     case offline = "Offline"
+    case notConfigured = "Not Connected"
 
     var iconName: String {
         switch self {
@@ -16,6 +17,7 @@ enum SyncStatus: String, CaseIterable {
         case .syncing: return "arrow.triangle.2.circlepath.icloud"
         case .error: return "exclamationmark.icloud"
         case .offline: return "icloud.slash"
+        case .notConfigured: return "icloud.slash"
         }
     }
 
@@ -25,6 +27,7 @@ enum SyncStatus: String, CaseIterable {
         case .syncing: return .blue
         case .error: return .red
         case .offline: return .secondary
+        case .notConfigured: return .secondary
         }
     }
 }
@@ -101,7 +104,7 @@ struct SyncLogEntry: Identifiable {
 /// reporting fake successful syncs. Persisted settings are scoped per vault.
 @MainActor
 class SyncManager: ObservableObject {
-    @Published var syncStatus: SyncStatus = .offline
+    @Published var syncStatus: SyncStatus = .notConfigured
     @Published var lastSyncDate: Date?
     @Published var isSyncing = false
     @Published var syncError: String?
@@ -155,7 +158,7 @@ class SyncManager: ObservableObject {
         guard activeVaultKey != nil else {
             return "Open a vault to configure sync settings."
         }
-        return "Cloud sync UI is in preview. The real sync engine is not wired into Apple clients yet, so sync actions stay disabled to avoid false success signals."
+        return "Cloud sync is not yet connected to the backend. Settings are saved per-vault and will take effect once the sync engine is integrated."
     }
 
     func setActiveVault(_ vaultKey: String?) {
@@ -167,9 +170,9 @@ class SyncManager: ObservableObject {
 
     func sync() async {
         guard isSyncAvailable else {
-            syncStatus = .offline
-            syncError = availabilityMessage
-            appendLog(status: .offline, message: "Sync unavailable in this preview build")
+            syncStatus = .notConfigured
+            syncError = "Sync is not yet connected to the backend. This feature is under development."
+            appendLog(status: .notConfigured, message: "Sync not connected — backend integration pending")
             return
         }
 
@@ -235,7 +238,7 @@ class SyncManager: ObservableObject {
             syncInterval = .fifteenMinutes
             conflictStrategy = .keepBoth
             lastSyncDate = nil
-            syncStatus = .offline
+            syncStatus = .notConfigured
             syncError = nil
             syncLog = []
             return
@@ -246,7 +249,7 @@ class SyncManager: ObservableObject {
         syncInterval = SyncInterval(rawValue: defaults.integer(forKey: scopedKey(.syncInterval)!)) ?? .fifteenMinutes
         conflictStrategy = ConflictResolutionStrategy(rawValue: defaults.string(forKey: scopedKey(.conflictStrategy)!) ?? "") ?? .keepBoth
         lastSyncDate = defaults.object(forKey: scopedKey(.lastSyncDate)!) as? Date
-        syncStatus = .offline
+        syncStatus = .notConfigured
         syncError = nil
         syncLog = []
     }

@@ -10,7 +10,7 @@ struct SyncStatusView: View {
     var body: some View {
         HStack(spacing: 6) {
             statusIcon
-            Text(syncManager.isSyncAvailable ? syncManager.syncStatus.rawValue : "Preview")
+            Text(syncManager.syncStatus.rawValue)
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -40,10 +40,10 @@ struct SyncStatusDetailView: View {
                     .font(.title2)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(syncManager.isSyncAvailable ? syncManager.syncStatus.rawValue : "Preview")
+                    Text(syncManager.syncStatus.rawValue)
                         .font(.headline)
 
-                    Text(syncManager.isSyncAvailable ? "Last sync: \(syncManager.lastSyncDescription)" : syncManager.availabilityMessage)
+                    Text(syncManager.isSyncAvailable ? "Last sync: \(syncManager.lastSyncDescription)" : "Sync is not yet connected to the backend.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -55,7 +55,7 @@ struct SyncStatusDetailView: View {
                 } label: {
                     Label("Sync Now", systemImage: "arrow.triangle.2.circlepath")
                 }
-                .disabled(syncManager.isSyncing)
+                .disabled(syncManager.isSyncing || !syncManager.isSyncAvailable)
                 #if os(macOS)
                 .buttonStyle(.bordered)
                 #else
