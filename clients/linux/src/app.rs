@@ -9,7 +9,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use adw::prelude::*;
-use gtk::gio;
+use gtk::{gio, glib};
 use tokio::runtime::Runtime;
 
 use axiomvault_app::AppService;
@@ -18,7 +18,7 @@ use crate::ui;
 
 /// Shared application state accessible from GTK callbacks.
 pub struct AppState {
-    pub service: AppService,
+    pub service: Arc<AppService>,
     pub runtime: Arc<Runtime>,
 }
 
@@ -26,7 +26,7 @@ impl AppState {
     fn new() -> Self {
         let runtime = Runtime::new().expect("failed to create tokio runtime");
         Self {
-            service: AppService::new(),
+            service: Arc::new(AppService::new()),
             runtime: Arc::new(runtime),
         }
     }
@@ -62,12 +62,12 @@ pub fn run() -> i32 {
 /// ```
 pub fn spawn_async<F, Fut, T, C>(state: &AppState, task: F, on_done: C)
 where
-    F: FnOnce(AppService) -> Fut + 'static,
+    F: FnOnce(Arc<AppService>) -> Fut + 'static,
     Fut: std::future::Future<Output = T> + Send + 'static,
     T: Send + 'static,
     C: FnOnce(T) + 'static,
 {
-    let service = state.service.clone();
+    let service = Arc::clone(&state.service);
     let ctx = glib::MainContext::default();
 
     state.runtime.spawn(async move {

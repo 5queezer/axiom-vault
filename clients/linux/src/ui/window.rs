@@ -7,6 +7,7 @@ use adw::prelude::*;
 use gtk::glib;
 
 use crate::app::AppState;
+use crate::ui::browser::BrowserView;
 use crate::ui::unlock::UnlockView;
 
 /// Build the main application window.
@@ -53,19 +54,20 @@ pub fn build_window(app: &adw::Application, state: Rc<RefCell<AppState>>) {
 }
 
 fn handle_event(
-    _nav: &adw::NavigationView,
-    _state: &Rc<RefCell<AppState>>,
+    nav: &adw::NavigationView,
+    state: &Rc<RefCell<AppState>>,
     event: axiomvault_app::AppEvent,
 ) {
     match event {
         axiomvault_app::AppEvent::VaultOpened(_)
         | axiomvault_app::AppEvent::VaultCreated(_) => {
-            tracing::info!("Vault opened — switch to browser view");
-            // TODO: push browser page onto nav_view
+            tracing::info!("Vault opened — switching to browser view");
+            let browser = BrowserView::new(Rc::clone(state), nav.clone());
+            nav.push(&browser.page());
         }
         axiomvault_app::AppEvent::VaultClosed | axiomvault_app::AppEvent::VaultLocked => {
-            tracing::info!("Vault closed — return to unlock view");
-            // TODO: pop to root
+            tracing::info!("Vault closed — returning to unlock view");
+            nav.pop_to_tag("unlock");
         }
         axiomvault_app::AppEvent::Error { message } => {
             tracing::error!("Core error: {}", message);

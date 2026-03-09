@@ -6,9 +6,11 @@ use std::rc::Rc;
 use adw::prelude::*;
 use gtk::glib;
 
-use axiomvault_app::DirectoryEntryDto;
+use std::sync::Arc;
 
-use crate::app::{self, AppState};
+use axiomvault_app::{AppService, DirectoryEntryDto};
+
+use crate::app::AppState;
 
 /// Column indices for the file list model.
 mod col {
@@ -112,8 +114,8 @@ async fn load_directory(
 
     let path_owned = path.to_string();
     let st = state.borrow();
-    let service = st.service.clone();
-    let rt = st.runtime.clone();
+    let service = Arc::clone(&st.service);
+    let rt = Arc::clone(&st.runtime);
 
     let result = rt
         .spawn(async move { service.list_directory(&path_owned).await })

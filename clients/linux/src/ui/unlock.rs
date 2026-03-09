@@ -71,6 +71,7 @@ impl UnlockView {
 
         let page = adw::NavigationPage::builder()
             .title("AxiomVault")
+            .tag("unlock")
             .child(&toolbar_view)
             .build();
 
