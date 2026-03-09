@@ -43,7 +43,9 @@ jobs:
             libappindicator3-dev \
             librsvg2-dev \
             patchelf \
-            libfuse3-dev
+            libfuse3-dev \
+            libgtk-4-dev \
+            libadwaita-1-dev
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -88,7 +90,9 @@ jobs:
             libappindicator3-dev \
             librsvg2-dev \
             patchelf \
-            libfuse3-dev
+            libfuse3-dev \
+            libgtk-4-dev \
+            libadwaita-1-dev
 
       - name: Install Rust ${{ matrix.rust }}
         uses: dtolnay/rust-toolchain@master
@@ -108,14 +112,29 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-${{ matrix.rust }}-cargo-test-
 
-      - name: Build
+      - name: Build (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
         run: cargo build --workspace --verbose
 
-      - name: Run tests
+      - name: Build (macOS, exclude Linux GTK client)
+        if: matrix.os == 'macos-latest'
+        run: cargo build --workspace --exclude axiomvault-linux --verbose
+
+      - name: Run tests (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
         run: cargo test --workspace --verbose
 
-      - name: Run doc tests
+      - name: Run tests (macOS, exclude Linux GTK client)
+        if: matrix.os == 'macos-latest'
+        run: cargo test --workspace --exclude axiomvault-linux --verbose
+
+      - name: Run doc tests (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
         run: cargo test --doc --workspace
+
+      - name: Run doc tests (macOS, exclude Linux GTK client)
+        if: matrix.os == 'macos-latest'
+        run: cargo test --doc --workspace --exclude axiomvault-linux
 
   # Build all crates individually
   build-crates:
@@ -144,7 +163,9 @@ jobs:
             libappindicator3-dev \
             librsvg2-dev \
             patchelf \
-            libfuse3-dev
+            libfuse3-dev \
+            libgtk-4-dev \
+            libadwaita-1-dev
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -214,7 +235,9 @@ jobs:
             libappindicator3-dev \
             librsvg2-dev \
             patchelf \
-            libfuse3-dev
+            libfuse3-dev \
+            libgtk-4-dev \
+            libadwaita-1-dev
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -251,7 +274,9 @@ jobs:
             libappindicator3-dev \
             librsvg2-dev \
             patchelf \
-            libfuse3-dev
+            libfuse3-dev \
+            libgtk-4-dev \
+            libadwaita-1-dev
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable

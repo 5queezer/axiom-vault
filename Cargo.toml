@@ -11,6 +11,7 @@ members = [
     "core/fuse",
     "tools/cli",
     "clients/desktop/src-tauri",
+    "clients/linux",
 ]
 
 [workspace.package]

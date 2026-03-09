@@ -1,0 +1,30 @@
+[package]
+name = "axiomvault-linux"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "AxiomVault GTK4/libadwaita desktop client for Linux"
+
+[[bin]]
+name = "axiomvault-gtk"
+path = "src/main.rs"
+
+[dependencies]
+# Shared application facade — the only core dependency the UI shell needs.
+axiomvault-app = { path = "../../core/app" }
+
+# GTK4 / libadwaita
+gtk = { package = "gtk4", version = "0.9", features = ["v4_12"] }
+adw = { package = "libadwaita", version = "0.7", features = ["v1_4"] }
+
+# Async runtime — the GTK client owns the tokio runtime.
+tokio = { workspace = true }
+
+# Serialization (for event payloads, settings)
+serde.workspace = true
+serde_json.workspace = true
+
+# Logging
+tracing.workspace = true
+tracing-subscriber.workspace = true
