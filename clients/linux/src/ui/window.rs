@@ -59,8 +59,7 @@ fn handle_event(
     event: axiomvault_app::AppEvent,
 ) {
     match event {
-        axiomvault_app::AppEvent::VaultOpened(_)
-        | axiomvault_app::AppEvent::VaultCreated(_) => {
+        axiomvault_app::AppEvent::VaultOpened(_) | axiomvault_app::AppEvent::VaultCreated(_) => {
             tracing::info!("Vault opened — switching to browser view");
             let browser = BrowserView::new(Rc::clone(state), nav.clone());
             nav.push(&browser.page());

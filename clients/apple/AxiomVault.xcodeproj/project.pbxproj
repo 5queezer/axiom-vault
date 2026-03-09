@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		0198233D54B0472E29FF5AD2 /* CreateVaultView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0777A423A556C69E24B2A578 /* CreateVaultView.swift */; };
+		049461A3A3695D13F70865D2 /* CacheManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2DE019FE7E9055A18E9022E5 /* CacheManager.swift */; };
 		07CFDE69A035295B11B4280D /* AppleSignIn.swift in Sources */ = {isa = PBXBuildFile; fileRef = 597F0C35D71CE49CB115C104 /* AppleSignIn.swift */; };
 		0F6A5F480DBBA964BD4D58A4 /* AxiomVaultCore.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5143822D8DD0A4AE91A7C2F0 /* AxiomVaultCore.xcframework */; };
 		13D11918889F2AF13503C134 /* VaultCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D246FD13AD1242AC136AD13 /* VaultCore.swift */; };
@@ -20,22 +21,31 @@
 		2B5499A7AB56512A762B0151 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48242ED2B7EE93CC6E15B740 /* SettingsView.swift */; };
 		3202868A1C90124B4864664D /* FileProviderItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0950B8B53148F78813853507 /* FileProviderItem.swift */; };
 		379DD2F88E48D73CDF50D291 /* BackgroundSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1538DB46269A0889E7E41CED /* BackgroundSync.swift */; };
+		3CDF8D2DC42E0595154A4ACC /* SyncManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C5054BAFB15CD269EA91811 /* SyncManager.swift */; };
 		40FE2589081A71DBFDFE4157 /* BiometricAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03310609F0D238A182432339 /* BiometricAuth.swift */; };
 		5376F9E4730A8717C9A1C5B1 /* MainView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9723219EA9F8FB5307D0A65F /* MainView.swift */; };
 		5D9BCB184C784DF75A178ACC /* GoogleDriveAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = D68025AB8E72B559E1A6F2C4 /* GoogleDriveAuth.swift */; };
+		6C7EF02130DFB36A5BCBEC39 /* CacheManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2DE019FE7E9055A18E9022E5 /* CacheManager.swift */; };
 		723765F094659700C9E01CF9 /* VaultManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A8200B7468B400E3DEC0C6D /* VaultManager.swift */; };
 		743BB51B3C01F0EE8218C3B1 /* AxiomVaultCore.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5143822D8DD0A4AE91A7C2F0 /* AxiomVaultCore.xcframework */; };
 		75EC5E5608A532FAC6B3AE45 /* BiometricAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03310609F0D238A182432339 /* BiometricAuth.swift */; };
+		7933761A635F461084F999FB /* SyncManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C5054BAFB15CD269EA91811 /* SyncManager.swift */; };
 		845C025D70502EC041A83789 /* MenuBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37C16AD062102FD683B98591 /* MenuBarView.swift */; };
+		890F260EC1CA471CE03CA0F9 /* BiometricAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03310609F0D238A182432339 /* BiometricAuth.swift */; };
 		925F7E03AAABD595B49DA93B /* FileProviderExtension.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3DC4556318D26F8E2BE9BD3 /* FileProviderExtension.swift */; };
+		933DDA8FB27AB6820FAFBB45 /* CacheManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2DE019FE7E9055A18E9022E5 /* CacheManager.swift */; };
 		A3030F473EB8996B20FF6116 /* VaultManager+macOS.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73965150A019FD73CB242483 /* VaultManager+macOS.swift */; };
 		A9AC20E3B9DED2C1026B3452 /* AxiomVaultFileProvider.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = D4FF3A7F38919CE4B6C938E2 /* AxiomVaultFileProvider.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		AED82AD6CCCC90F42C0E58BE /* SyncStatusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D24A9024E54231009C4863B /* SyncStatusView.swift */; };
 		B2A78203D1C7BD5D04BF6625 /* VaultBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2FFE3C3AE4DA1E9CDC5F444E /* VaultBrowserView.swift */; };
 		B9A86809CBBA50256BC705EA /* AxiomVaultApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8898A78173E808028CB55C2F /* AxiomVaultApp.swift */; };
+		BAB86E834F7980D039E87735 /* SyncSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C2903B0198C10F310D89414 /* SyncSettingsView.swift */; };
 		BB9E2270843FFA5F3DD626DA /* AxiomVaultCore.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5143822D8DD0A4AE91A7C2F0 /* AxiomVaultCore.xcframework */; };
+		BBA267C51D977C73026897C7 /* SyncSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C2903B0198C10F310D89414 /* SyncSettingsView.swift */; };
 		BC1D865CD067D66F297CC919 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76CFEFEEC65077077C41E4F2 /* ContentView.swift */; };
 		BC8BC7C785DB55CC6557854C /* VaultManager+iOS.swift in Sources */ = {isa = PBXBuildFile; fileRef = E225A93073DB879E3F18122C /* VaultManager+iOS.swift */; };
 		BF9EE6F62D1FDE85CCA37F50 /* OpenVaultView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB6FBDC147FD51D3F0F7C002 /* OpenVaultView.swift */; };
+		CDA8293A61CB81FBAAC99107 /* SyncStatusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D24A9024E54231009C4863B /* SyncStatusView.swift */; };
 		DF646A7BDADA7843D7805846 /* CreateVaultView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78774E64FB7C54525CF19269 /* CreateVaultView.swift */; };
 		E438E122B8AD1CB638ABC66B /* SidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2A6E88EC540AA59A7621562 /* SidebarView.swift */; };
 		E51A5A1FFC0F31E6F3BAA8F3 /* VaultBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 662C309C2C82A232BBCFC607 /* VaultBrowserView.swift */; };
@@ -70,7 +80,9 @@
 		0777A423A556C69E24B2A578 /* CreateVaultView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreateVaultView.swift; sourceTree = "<group>"; };
 		0950B8B53148F78813853507 /* FileProviderItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileProviderItem.swift; sourceTree = "<group>"; };
 		1538DB46269A0889E7E41CED /* BackgroundSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundSync.swift; sourceTree = "<group>"; };
+		1D24A9024E54231009C4863B /* SyncStatusView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncStatusView.swift; sourceTree = "<group>"; };
 		2D246FD13AD1242AC136AD13 /* VaultCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultCore.swift; sourceTree = "<group>"; };
+		2DE019FE7E9055A18E9022E5 /* CacheManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CacheManager.swift; sourceTree = "<group>"; };
 		2FFE3C3AE4DA1E9CDC5F444E /* VaultBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultBrowserView.swift; sourceTree = "<group>"; };
 		37C16AD062102FD683B98591 /* MenuBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarView.swift; sourceTree = "<group>"; };
 		48242ED2B7EE93CC6E15B740 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
@@ -83,8 +95,10 @@
 		76CFEFEEC65077077C41E4F2 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		78774E64FB7C54525CF19269 /* CreateVaultView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreateVaultView.swift; sourceTree = "<group>"; };
 		8898A78173E808028CB55C2F /* AxiomVaultApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AxiomVaultApp.swift; sourceTree = "<group>"; };
+		8C2903B0198C10F310D89414 /* SyncSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncSettingsView.swift; sourceTree = "<group>"; };
 		9723219EA9F8FB5307D0A65F /* MainView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainView.swift; sourceTree = "<group>"; };
 		99E850123459980FD81DE3A6 /* AxiomVault-macOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "AxiomVault-macOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		9C5054BAFB15CD269EA91811 /* SyncManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncManager.swift; sourceTree = "<group>"; };
 		A3DC4556318D26F8E2BE9BD3 /* FileProviderExtension.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileProviderExtension.swift; sourceTree = "<group>"; };
 		B073F2954E6B5549FB483C15 /* AxiomVault-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "AxiomVault-Bridging-Header.h"; sourceTree = "<group>"; };
 		BB6FBDC147FD51D3F0F7C002 /* OpenVaultView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenVaultView.swift; sourceTree = "<group>"; };
@@ -141,6 +155,7 @@
 			isa = PBXGroup;
 			children = (
 				03310609F0D238A182432339 /* BiometricAuth.swift */,
+				2DE019FE7E9055A18E9022E5 /* CacheManager.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -158,6 +173,7 @@
 		2863A3165201CB751D73B79F /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				9C5054BAFB15CD269EA91811 /* SyncManager.swift */,
 				4A8200B7468B400E3DEC0C6D /* VaultManager.swift */,
 			);
 			path = Models;
@@ -210,13 +226,6 @@
 				FAB0E68B8F06C5717FCCE40C /* Sources */,
 			);
 			path = "AxiomVault-macOS";
-			sourceTree = "<group>";
-		};
-		93BC9031016810FD477ABB5C /* Services */ = {
-			isa = PBXGroup;
-			children = (
-			);
-			path = Services;
 			sourceTree = "<group>";
 		};
 		9C87219DFB919E2EE6F0F526 /* Sources */ = {
@@ -281,6 +290,7 @@
 			children = (
 				BCFF14D4FA00D9F2FB69CEA7 /* Core */,
 				2863A3165201CB751D73B79F /* Models */,
+				FD2B5DD2DB996D2691ABE764 /* Views */,
 			);
 			path = Sources;
 			sourceTree = "<group>";
@@ -290,10 +300,18 @@
 			children = (
 				F98F85F8E9A5BF9683833964 /* AxiomVaultApp.swift */,
 				73965150A019FD73CB242483 /* VaultManager+macOS.swift */,
-				93BC9031016810FD477ABB5C /* Services */,
 				8B3CAD5A2D961652EC1CBF75 /* Views */,
 			);
 			path = Sources;
+			sourceTree = "<group>";
+		};
+		FD2B5DD2DB996D2691ABE764 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				8C2903B0198C10F310D89414 /* SyncSettingsView.swift */,
+				1D24A9024E54231009C4863B /* SyncStatusView.swift */,
+			);
+			path = Views;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -453,10 +471,14 @@
 				B9A86809CBBA50256BC705EA /* AxiomVaultApp.swift in Sources */,
 				379DD2F88E48D73CDF50D291 /* BackgroundSync.swift in Sources */,
 				40FE2589081A71DBFDFE4157 /* BiometricAuth.swift in Sources */,
+				049461A3A3695D13F70865D2 /* CacheManager.swift in Sources */,
 				BC1D865CD067D66F297CC919 /* ContentView.swift in Sources */,
 				0198233D54B0472E29FF5AD2 /* CreateVaultView.swift in Sources */,
 				5D9BCB184C784DF75A178ACC /* GoogleDriveAuth.swift in Sources */,
 				BF9EE6F62D1FDE85CCA37F50 /* OpenVaultView.swift in Sources */,
+				7933761A635F461084F999FB /* SyncManager.swift in Sources */,
+				BAB86E834F7980D039E87735 /* SyncSettingsView.swift in Sources */,
+				AED82AD6CCCC90F42C0E58BE /* SyncStatusView.swift in Sources */,
 				E51A5A1FFC0F31E6F3BAA8F3 /* VaultBrowserView.swift in Sources */,
 				14460309462779B8F2A4C7E2 /* VaultCore.swift in Sources */,
 				BC8BC7C785DB55CC6557854C /* VaultManager+iOS.swift in Sources */,
@@ -470,11 +492,15 @@
 			files = (
 				1EF46D1796C07BD4BC9673F6 /* AxiomVaultApp.swift in Sources */,
 				75EC5E5608A532FAC6B3AE45 /* BiometricAuth.swift in Sources */,
+				933DDA8FB27AB6820FAFBB45 /* CacheManager.swift in Sources */,
 				DF646A7BDADA7843D7805846 /* CreateVaultView.swift in Sources */,
 				5376F9E4730A8717C9A1C5B1 /* MainView.swift in Sources */,
 				845C025D70502EC041A83789 /* MenuBarView.swift in Sources */,
 				2B5499A7AB56512A762B0151 /* SettingsView.swift in Sources */,
 				E438E122B8AD1CB638ABC66B /* SidebarView.swift in Sources */,
+				3CDF8D2DC42E0595154A4ACC /* SyncManager.swift in Sources */,
+				BBA267C51D977C73026897C7 /* SyncSettingsView.swift in Sources */,
+				CDA8293A61CB81FBAAC99107 /* SyncStatusView.swift in Sources */,
 				2106E570E6D745D37EA98608 /* UnlockVaultView.swift in Sources */,
 				B2A78203D1C7BD5D04BF6625 /* VaultBrowserView.swift in Sources */,
 				13D11918889F2AF13503C134 /* VaultCore.swift in Sources */,
@@ -487,6 +513,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				890F260EC1CA471CE03CA0F9 /* BiometricAuth.swift in Sources */,
+				6C7EF02130DFB36A5BCBEC39 /* CacheManager.swift in Sources */,
 				17B640EC884452E35916F048 /* FileProviderEnumerator.swift in Sources */,
 				925F7E03AAABD595B49DA93B /* FileProviderExtension.swift in Sources */,
 				3202868A1C90124B4864664D /* FileProviderItem.swift in Sources */,

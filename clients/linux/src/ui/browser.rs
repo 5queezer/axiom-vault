@@ -159,10 +159,7 @@ fn entry_row(entry: &DirectoryEntryDto) -> adw::ActionRow {
     let subtitle = if entry.is_directory {
         "Folder".to_string()
     } else {
-        entry
-            .size
-            .map(|s| format_size(s))
-            .unwrap_or_default()
+        entry.size.map(|s| format_size(s)).unwrap_or_default()
     };
 
     adw::ActionRow::builder()

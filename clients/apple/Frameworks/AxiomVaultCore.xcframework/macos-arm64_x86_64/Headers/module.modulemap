@@ -1,0 +1,4 @@
+module AxiomVaultCore {
+    header "axiom_vault.h"
+    export *
+}

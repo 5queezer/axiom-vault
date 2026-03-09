@@ -17,13 +17,9 @@ pub struct UnlockView {
 
 impl UnlockView {
     pub fn new(state: Rc<RefCell<AppState>>, nav: adw::NavigationView) -> Self {
-        let path_row = adw::EntryRow::builder()
-            .title("Vault path")
-            .build();
+        let path_row = adw::EntryRow::builder().title("Vault path").build();
 
-        let password_row = adw::PasswordEntryRow::builder()
-            .title("Password")
-            .build();
+        let password_row = adw::PasswordEntryRow::builder().title("Password").build();
 
         let open_button = gtk::Button::builder()
             .label("Open Vault")
@@ -96,18 +92,22 @@ impl UnlockView {
                 let status = status_label.clone();
                 let st = state.borrow();
 
-                app::spawn_async(&st, move |service| async move {
-                    service.open_vault(OpenVaultParams {
-                        password,
-                        provider_type: "local".to_string(),
-                        provider_config: serde_json::json!({ "root": path }),
-                    }).await
-                }, move |result| {
-                    match result {
+                app::spawn_async(
+                    &st,
+                    move |service| async move {
+                        service
+                            .open_vault(OpenVaultParams {
+                                password,
+                                provider_type: "local".to_string(),
+                                provider_config: serde_json::json!({ "root": path }),
+                            })
+                            .await
+                    },
+                    move |result| match result {
                         Ok(_) => status.set_text("Vault opened."),
                         Err(e) => status.set_text(&format!("Error: {}", e)),
-                    }
-                });
+                    },
+                );
             });
         }
 
@@ -137,15 +137,19 @@ impl UnlockView {
                 let status = status_label.clone();
                 let st = state.borrow();
 
-                app::spawn_async(&st, move |service| async move {
-                    service.create_vault(axiomvault_app::CreateVaultParams {
-                        vault_id: vault_name,
-                        password,
-                        provider_type: "local".to_string(),
-                        provider_config: serde_json::json!({ "root": path }),
-                    }).await
-                }, move |result| {
-                    match result {
+                app::spawn_async(
+                    &st,
+                    move |service| async move {
+                        service
+                            .create_vault(axiomvault_app::CreateVaultParams {
+                                vault_id: vault_name,
+                                password,
+                                provider_type: "local".to_string(),
+                                provider_config: serde_json::json!({ "root": path }),
+                            })
+                            .await
+                    },
+                    move |result| match result {
                         Ok(created) => {
                             status.set_text(&format!(
                                 "Vault created. Recovery words:\n{}",
@@ -153,8 +157,8 @@ impl UnlockView {
                             ));
                         }
                         Err(e) => status.set_text(&format!("Error: {}", e)),
-                    }
-                });
+                    },
+                );
             });
         }
 
