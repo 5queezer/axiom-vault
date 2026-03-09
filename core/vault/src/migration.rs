@@ -320,8 +320,9 @@ mod tests {
         let id = VaultId::new("test-vault").unwrap();
         let password = b"test";
         let params = KdfParams::moderate();
-        let mut config =
+        let creation =
             VaultConfig::new(id, password, "local", serde_json::Value::Null, params).unwrap();
+        let mut config = creation.config;
         config.version = version;
         config
     }
