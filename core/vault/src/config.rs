@@ -12,7 +12,7 @@ use axiomvault_crypto::recovery::{
 use axiomvault_crypto::{KdfParams, MasterKey, Salt};
 
 /// Vault format version for migration support.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct VaultVersion {
     pub major: u32,
     pub minor: u32,
@@ -26,6 +26,12 @@ impl VaultVersion {
     /// Check if this version is compatible with the current version.
     pub fn is_compatible(&self) -> bool {
         self.major == Self::CURRENT.major
+    }
+}
+
+impl std::fmt::Display for VaultVersion {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}.{}", self.major, self.minor)
     }
 }
 
