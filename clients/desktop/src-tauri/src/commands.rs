@@ -10,7 +10,9 @@ use serde::Serialize;
 use tauri::State;
 use tracing::info;
 
-use axiomvault_app::{CreateVaultParams, DirectoryEntryDto, OpenVaultParams, VaultInfoDto};
+use axiomvault_app::{
+    CreateVaultParams, DirectoryEntryDto, LocalIndex, OpenVaultParams, VaultInfoDto,
+};
 
 use crate::state::AppState;
 
@@ -79,11 +81,20 @@ pub async fn create_vault(
     let result = state
         .service
         .create_vault(CreateVaultParams {
-            vault_id: id,
+            vault_id: id.clone(),
             password,
             provider_type,
             provider_config,
         })
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // Attach local index for metadata caching.
+    let index_path = state.data_dir.join(format!("{}.db", id));
+    let index = LocalIndex::open(&index_path).map_err(|e| e.to_string())?;
+    state
+        .service
+        .set_local_index(index)
         .await
         .map_err(|e| e.to_string())?;
 
@@ -118,6 +129,15 @@ pub async fn unlock_vault(
         .await
         .map_err(|e| e.to_string())?;
 
+    // Attach local index for metadata caching.
+    let index_path = state.data_dir.join(format!("{}.db", id));
+    let index = LocalIndex::open(&index_path).map_err(|e| e.to_string())?;
+    state
+        .service
+        .set_local_index(index)
+        .await
+        .map_err(|e| e.to_string())?;
+
     Ok(VaultInfo::from_dto(&info, None))
 }
 
@@ -148,8 +168,26 @@ pub async fn mount_vault(
         std::fs::create_dir_all(&mount_path).map_err(|e| e.to_string())?;
     }
 
-    // FUSE mounting requires direct VaultSession access — not yet in AppService.
-    // See architecture doc: "FUSE Integration (existing crate, proposed facade integration)"
+    let session = state
+        .service
+        .vault_session()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let runtime_handle = tokio::runtime::Handle::current();
+    let mount_handle = axiomvault_fuse::mount::mount(
+        session,
+        &mount_path,
+        axiomvault_fuse::MountOptions::default(),
+        runtime_handle,
+    )
+    .map_err(|e| e.to_string())?;
+
+    {
+        let mut mounts = state.mounts.write().await;
+        mounts.insert(id.clone(), crate::state::MountState { mount_handle });
+    }
+
     let vault_info = state
         .service
         .vault_info()
