@@ -28,3 +28,12 @@ serde_json.workspace = true
 # Logging
 tracing.workspace = true
 tracing-subscriber.workspace = true
+
+[package.metadata.deb]
+maintainer = "AxiomVault Contributors"
+section = "utils"
+priority = "optional"
+depends = "libgtk-4-1 (>= 4.12), libadwaita-1-0 (>= 1.4)"
+assets = [
+    ["target/release/axiomvault-gtk", "usr/bin/", "755"],
+]

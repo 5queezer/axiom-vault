@@ -15,6 +15,7 @@ APP_DESKTOP = clients/desktop/axiomvault.desktop
 APP_ICON = clients/desktop/axiomvault.svg
 
 .PHONY: all desktop desktop-release check-desktop-deps cli core install install-desktop uninstall uninstall-desktop clean-install help
+.PHONY: linux linux-release check-linux-deps install-linux uninstall-linux
 .PHONY: ios ios-framework ios-project check-ios-deps
 .PHONY: macos macos-framework macos-project check-macos-deps
 .PHONY: apple apple-framework apple-project check-apple-deps
@@ -27,15 +28,16 @@ help:
 	@echo "===================================="
 	@echo ""
 	@echo "Build Targets:"
-	@echo "  make desktop         - Build desktop client (checks dependencies first)"
-	@echo "  make desktop-release - Build desktop client in release mode"
-	@echo "  make check-desktop-deps - Check desktop system dependencies"
+	@echo "  make linux           - Build native Linux GTK4 client"
+	@echo "  make linux-release   - Build Linux GTK4 client in release mode"
+	@echo "  make desktop         - Build Tauri desktop client (legacy)"
+	@echo "  make desktop-release - Build Tauri desktop client in release mode"
 	@echo "  make cli             - Build CLI tool"
 	@echo "  make core            - Build core libraries"
 	@echo ""
 	@echo "Install Targets:"
-	@echo "  make install         - Build and install desktop app system-wide"
-	@echo "  make install-desktop - Install pre-built release binary"
+	@echo "  make install-linux   - Build and install Linux GTK4 client"
+	@echo "  make install         - Build and install Tauri desktop app (legacy)"
 	@echo "  make uninstall       - Remove installed desktop app"
 	@echo ""
 	@echo "Advanced Install:"
@@ -75,7 +77,14 @@ else ifeq ($(shell uname),Linux)
   endif
 endif
 
-# Desktop client with dependency check
+# Native Linux GTK4 client
+linux: check-linux-deps
+	cargo build --package axiomvault-linux
+
+linux-release: check-linux-deps
+	cargo build --package axiomvault-linux --release
+
+# Tauri desktop client (legacy)
 desktop: check-desktop-deps
 	cargo build --package axiomvault-desktop $(FUSE_FEATURE)
 
@@ -159,7 +168,43 @@ uninstall-desktop:
 clean-install: uninstall
 	@echo "Cleaned up all installation files"
 
-# Check desktop dependencies (Linux only)
+# Linux GTK4 install targets
+install-linux: linux-release
+	@echo "Installing Linux GTK4 client..."
+	@mkdir -p $(BINDIR)
+	@install -m 755 target/release/axiomvault-gtk $(BINDIR)/axiomvault-gtk
+	@echo "✓ Binary installed to $(BINDIR)/axiomvault-gtk"
+
+uninstall-linux:
+	@echo "Removing Linux GTK4 client..."
+	@rm -f $(BINDIR)/axiomvault-gtk
+	@echo "✓ Removed"
+
+# Check native Linux GTK4 dependencies
+check-linux-deps:
+	@if [ "$$(uname)" != "Linux" ]; then \
+		echo "ERROR: Linux GTK4 client requires Linux"; \
+		exit 1; \
+	fi
+	@echo "Checking GTK4/libadwaita dependencies..."
+	@command -v pkg-config >/dev/null 2>&1 || { \
+		echo "ERROR: pkg-config not found"; \
+		echo "Install with: sudo apt-get install pkg-config"; \
+		exit 1; \
+	}
+	@pkg-config --exists gtk4 2>/dev/null || { \
+		echo "ERROR: GTK 4 not found"; \
+		echo "Install with: sudo apt-get install libgtk-4-dev"; \
+		exit 1; \
+	}
+	@pkg-config --exists libadwaita-1 2>/dev/null || { \
+		echo "ERROR: libadwaita not found"; \
+		echo "Install with: sudo apt-get install libadwaita-1-dev"; \
+		exit 1; \
+	}
+	@echo "✓ All GTK4 dependencies found"
+
+# Check Tauri desktop dependencies (Linux only)
 check-desktop-deps:
 	@if [ "$$(uname)" = "Linux" ]; then \
 		echo "Checking system dependencies for desktop build..."; \
