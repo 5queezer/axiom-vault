@@ -80,8 +80,16 @@ class VaultManager: ObservableObject {
             if isVaultOpen {
                 closeVault()
             }
+        case .vaultCreated, .vaultOpened:
+            Task { await refreshState() }
         case .fileCreated, .fileUpdated, .fileDeleted,
              .directoryCreated, .directoryDeleted:
+            Task { await refreshEntries() }
+        case .directoryListed(let path, let newEntries):
+            if path == currentPath {
+                entries = newEntries
+            }
+        case .syncCompleted:
             Task { await refreshEntries() }
         case .error(let message):
             errorMessage = message

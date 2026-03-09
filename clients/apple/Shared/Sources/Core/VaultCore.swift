@@ -139,6 +139,15 @@ enum VaultEvent {
                 let path = payload["path"] as? String { self = .directoryCreated(path: path) }
         else if let payload = dict["DirectoryDeleted"] as? [String: Any],
                 let path = payload["path"] as? String { self = .directoryDeleted(path: path) }
+        else if let payload = dict["DirectoryListed"] as? [String: Any],
+                let path = payload["path"] as? String {
+            var entries: [VaultEntry] = []
+            if let rawEntries = payload["entries"],
+               let entriesData = try? JSONSerialization.data(withJSONObject: rawEntries) {
+                entries = (try? JSONDecoder().decode([VaultEntry].self, from: entriesData)) ?? []
+            }
+            self = .directoryListed(path: path, entries: entries)
+        }
         else if dict.keys.contains("SyncStarted") { self = .syncStarted }
         else if dict.keys.contains("SyncCompleted") { self = .syncCompleted }
         else if let payload = dict["SyncFailed"] as? [String: Any],
