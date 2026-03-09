@@ -1,4 +1,7 @@
 //! Tauri command handlers for vault operations.
+//!
+//! These are thin wrappers that delegate to the shared `AppService` facade.
+//! Business logic lives in `axiomvault-app`, not here.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -7,17 +10,13 @@ use serde::Serialize;
 use tauri::State;
 use tracing::info;
 
-use axiomvault_common::{VaultId, VaultPath};
-use axiomvault_crypto::KdfParams;
-use axiomvault_fuse::mount::mount as mount_vault_fuse;
-use axiomvault_fuse::MountOptions;
-use axiomvault_storage::{LocalProvider, StorageProvider};
-use axiomvault_vault::{VaultConfig, VaultOperations, VaultSession, VaultTree};
+use axiomvault_app::{
+    CreateVaultParams, DirectoryEntryDto, LocalIndex, OpenVaultParams, VaultInfoDto,
+};
 
-use crate::local_index::{IndexEntry, LocalIndex};
-use crate::state::{AppState, OpenVault};
+use crate::state::AppState;
 
-/// Vault information for the frontend.
+/// Vault information for the frontend (extends core DTO with mount info).
 #[derive(Debug, Clone, Serialize)]
 pub struct VaultInfo {
     pub id: String,
@@ -26,11 +25,21 @@ pub struct VaultInfo {
     pub mount_point: Option<String>,
 }
 
+impl VaultInfo {
+    fn from_dto(dto: &VaultInfoDto, mount_point: Option<String>) -> Self {
+        Self {
+            id: dto.id.clone(),
+            provider_type: dto.provider_type.clone(),
+            is_mounted: mount_point.is_some(),
+            mount_point,
+        }
+    }
+}
+
 /// Result of vault creation, including recovery words.
 #[derive(Debug, Clone, Serialize)]
 pub struct VaultCreationResult {
     pub vault: VaultInfo,
-    /// Recovery key as 24 BIP39 words. Must be shown to the user exactly once.
     pub recovery_words: String,
 }
 
@@ -43,109 +52,15 @@ pub struct FileEntry {
     pub size: Option<u64>,
 }
 
-/// Error response.
-#[derive(Debug, Clone, Serialize)]
-#[allow(dead_code)]
-pub struct ErrorResponse {
-    pub message: String,
-}
-
-impl From<axiomvault_common::Error> for ErrorResponse {
-    fn from(err: axiomvault_common::Error) -> Self {
+impl From<DirectoryEntryDto> for FileEntry {
+    fn from(dto: DirectoryEntryDto) -> Self {
         Self {
-            message: err.to_string(),
+            name: dto.name,
+            path: dto.path,
+            is_directory: dto.is_directory,
+            size: dto.size,
         }
     }
-}
-
-/// Validate that a vault ID is safe for use in filesystem paths.
-fn validate_vault_id(id: &str) -> Result<(), String> {
-    if id.is_empty() {
-        return Err("Vault ID cannot be empty".to_string());
-    }
-    if id.contains('/') || id.contains('\\') || id.contains("..") || id.contains('\0') {
-        return Err("Vault ID contains invalid characters".to_string());
-    }
-    Ok(())
-}
-
-/// Helper to create provider, session, and register vault in state.
-async fn setup_vault_session(
-    state: &Arc<AppState>,
-    id: &str,
-    config: VaultConfig,
-    password: &str,
-    is_new_vault: bool,
-) -> Result<VaultInfo, String> {
-    validate_vault_id(id)?;
-
-    let provider_type = config.provider_type.clone();
-
-    // Use local filesystem provider for persistent storage
-    let storage_root = state.data_dir.join(id).join("storage");
-    let provider: Arc<dyn StorageProvider> =
-        Arc::new(LocalProvider::new(&storage_root).map_err(|e| e.to_string())?);
-
-    if is_new_vault {
-        // Create data and metadata directories for new vaults
-        provider
-            .create_dir(&VaultPath::parse("/d").unwrap())
-            .await
-            .map_err(|e| e.to_string())?;
-        provider
-            .create_dir(&VaultPath::parse("/m").unwrap())
-            .await
-            .map_err(|e| e.to_string())?;
-    }
-
-    // Verify password and get master key (single KDF round)
-    let master_key = config
-        .verify_password(password.as_bytes())
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| "Invalid password".to_string())?;
-
-    // Load existing tree from storage, or start with empty tree for new vaults
-    let tree = if is_new_vault {
-        VaultTree::new()
-    } else {
-        VaultSession::load_and_decrypt_tree(&provider, &master_key)
-            .await
-            .map_err(|e| e.to_string())?
-    };
-
-    let session = VaultSession::from_master_key(config, master_key, provider, tree)
-        .map_err(|e| e.to_string())?;
-
-    // Open local index
-    let index_path = state.data_dir.join(format!("{}.db", id));
-    let index = LocalIndex::open(&index_path).map_err(|e| e.to_string())?;
-
-    if is_new_vault {
-        index
-            .set_metadata("vault_id", id)
-            .map_err(|e| e.to_string())?;
-    }
-
-    let open_vault = OpenVault {
-        session: Arc::new(session),
-        index: Arc::new(index),
-        config_path: state.data_dir.join(format!("{}.json", id)),
-        mount_handle: None,
-    };
-
-    let vault_info = VaultInfo {
-        id: id.to_string(),
-        provider_type,
-        is_mounted: false,
-        mount_point: None,
-    };
-
-    {
-        let mut vaults = state.vaults.write().await;
-        vaults.insert(id.to_string(), open_vault);
-    }
-
-    Ok(vault_info)
 }
 
 /// Create a new vault.
@@ -158,47 +73,35 @@ pub async fn create_vault(
 ) -> Result<VaultCreationResult, String> {
     info!("Creating vault: {}", id);
 
-    let vault_id = VaultId::new(&id).map_err(|e| e.to_string())?;
-    let kdf_params = KdfParams::moderate();
+    let storage_root = state.data_dir.join(&id).join("storage");
+    let provider_config = serde_json::json!({
+        "root": storage_root.to_string_lossy()
+    });
 
-    let creation = VaultConfig::new(
-        vault_id,
-        password.as_bytes(),
-        &provider_type,
-        serde_json::Value::Null,
-        kdf_params,
-    )
-    .map_err(|e| e.to_string())?;
+    let result = state
+        .service
+        .create_vault(CreateVaultParams {
+            vault_id: id.clone(),
+            password,
+            provider_type,
+            provider_config,
+        })
+        .await
+        .map_err(|e| e.to_string())?;
 
-    // Persist config to disk so unlock_vault can find it later.
-    // Config contains KDF parameters and encrypted key material — restrict
-    // file permissions to owner-only (0600) to limit exposure.
-    let config_path = state.data_dir.join(format!("{}.json", id));
-    let config_json = serde_json::to_string_pretty(&creation.config).map_err(|e| e.to_string())?;
-    std::fs::create_dir_all(&state.data_dir).map_err(|e| e.to_string())?;
-    std::fs::write(&config_path, &config_json).map_err(|e| e.to_string())?;
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        if let Err(e) =
-            std::fs::set_permissions(&config_path, std::fs::Permissions::from_mode(0o600))
-        {
-            tracing::warn!(
-                "Failed to set restrictive permissions on vault config: {}",
-                e
-            );
-        }
-    }
-
-    let recovery_words = creation.recovery_words.clone();
-
-    let vault_info = setup_vault_session(&state, &id, creation.config, &password, true).await?;
+    // Attach local index for metadata caching.
+    let index_path = state.data_dir.join(format!("{}.db", id));
+    let index = LocalIndex::open(&index_path).map_err(|e| e.to_string())?;
+    state
+        .service
+        .set_local_index(index)
+        .await
+        .map_err(|e| e.to_string())?;
 
     info!("Vault created successfully");
     Ok(VaultCreationResult {
-        vault: vault_info,
-        recovery_words,
+        vault: VaultInfo::from_dto(&result.info, None),
+        recovery_words: result.recovery_words,
     })
 }
 
@@ -211,41 +114,44 @@ pub async fn unlock_vault(
 ) -> Result<VaultInfo, String> {
     info!("Unlocking vault: {}", id);
 
-    // Load config from disk
-    let config_path = state.data_dir.join(format!("{}.json", id));
-    if !config_path.exists() {
-        return Err("Vault not found".to_string());
-    }
+    let storage_root = state.data_dir.join(&id).join("storage");
+    let provider_config = serde_json::json!({
+        "root": storage_root.to_string_lossy()
+    });
 
-    let config_data = std::fs::read_to_string(&config_path).map_err(|e| e.to_string())?;
-    let config: VaultConfig = serde_json::from_str(&config_data).map_err(|e| e.to_string())?;
+    let info = state
+        .service
+        .open_vault(OpenVaultParams {
+            password,
+            provider_type: "local".to_string(),
+            provider_config,
+        })
+        .await
+        .map_err(|e| e.to_string())?;
 
-    let vault_info = setup_vault_session(&state, &id, config, &password, false).await?;
+    // Attach local index for metadata caching.
+    let index_path = state.data_dir.join(format!("{}.db", id));
+    let index = LocalIndex::open(&index_path).map_err(|e| e.to_string())?;
+    state
+        .service
+        .set_local_index(index)
+        .await
+        .map_err(|e| e.to_string())?;
 
-    info!("Vault unlocked successfully");
-    Ok(vault_info)
+    Ok(VaultInfo::from_dto(&info, None))
 }
 
 /// Lock a vault.
-///
-/// Clears all cached plaintext metadata from the local index to prevent
-/// leaking vault structure (filenames, sizes, timestamps) while locked.
 #[tauri::command]
 pub async fn lock_vault(state: State<'_, Arc<AppState>>, id: String) -> Result<(), String> {
     info!("Locking vault: {}", id);
 
-    let mut vaults = state.vaults.write().await;
-    if let Some(vault) = vaults.remove(&id) {
-        // Wipe cached plaintext metadata before dropping the index.
-        // This ensures no vault structure leaks to disk after locking.
-        if let Err(e) = vault.index.wipe() {
-            tracing::warn!("Failed to wipe local index on lock: {}", e);
-        }
-        info!("Vault locked successfully");
-        Ok(())
-    } else {
-        Err("Vault not open".to_string())
+    {
+        let mut mounts = state.mounts.write().await;
+        mounts.remove(&id);
     }
+
+    state.service.lock_vault().await.map_err(|e| e.to_string())
 }
 
 /// Mount a vault as FUSE filesystem.
@@ -262,29 +168,34 @@ pub async fn mount_vault(
         std::fs::create_dir_all(&mount_path).map_err(|e| e.to_string())?;
     }
 
-    let mut vaults = state.vaults.write().await;
-    let vault = vaults.get_mut(&id).ok_or("Vault not open")?;
+    let session = state
+        .service
+        .vault_session()
+        .await
+        .map_err(|e| e.to_string())?;
 
     let runtime_handle = tokio::runtime::Handle::current();
-    let mount_handle = mount_vault_fuse(
-        vault.session.clone(),
+    let mount_handle = axiomvault_fuse::mount::mount(
+        session,
         &mount_path,
-        MountOptions::default(),
+        axiomvault_fuse::MountOptions::default(),
         runtime_handle,
     )
     .map_err(|e| e.to_string())?;
 
-    vault.mount_handle = Some(mount_handle);
+    {
+        let mut mounts = state.mounts.write().await;
+        mounts.insert(id.clone(), crate::state::MountState { mount_handle });
+    }
 
-    let vault_info = VaultInfo {
-        id,
-        provider_type: vault.session.config().provider_type.clone(),
-        is_mounted: true,
-        mount_point: Some(mount_point),
-    };
+    let vault_info = state
+        .service
+        .vault_info()
+        .await
+        .map_err(|e| e.to_string())?;
 
     info!("Vault mounted successfully");
-    Ok(vault_info)
+    Ok(VaultInfo::from_dto(&vault_info, Some(mount_point)))
 }
 
 /// Unmount a vault.
@@ -292,11 +203,8 @@ pub async fn mount_vault(
 pub async fn unmount_vault(state: State<'_, Arc<AppState>>, id: String) -> Result<(), String> {
     info!("Unmounting vault: {}", id);
 
-    let mut vaults = state.vaults.write().await;
-    let vault = vaults.get_mut(&id).ok_or("Vault not open")?;
-
-    if let Some(handle) = vault.mount_handle.take() {
-        drop(handle);
+    let mut mounts = state.mounts.write().await;
+    if mounts.remove(&id).is_some() {
         info!("Vault unmounted successfully");
         Ok(())
     } else {
@@ -308,216 +216,107 @@ pub async fn unmount_vault(state: State<'_, Arc<AppState>>, id: String) -> Resul
 #[tauri::command]
 pub async fn list_files(
     state: State<'_, Arc<AppState>>,
-    id: String,
+    #[allow(unused_variables)] id: String,
     path: String,
 ) -> Result<Vec<FileEntry>, String> {
-    let vaults = state.vaults.read().await;
-    let vault = vaults.get(&id).ok_or("Vault not open")?;
-
-    let ops = VaultOperations::new(&vault.session).map_err(|e| e.to_string())?;
-    let vault_path = VaultPath::parse(&path).map_err(|e| e.to_string())?;
-
-    let entries = ops
-        .list_directory(&vault_path)
+    let entries = state
+        .service
+        .list_directory(&path)
         .await
         .map_err(|e| e.to_string())?;
 
-    let file_entries: Vec<FileEntry> = entries
-        .into_iter()
-        .map(|(name, is_dir, size)| {
-            let full_path = if path == "/" {
-                format!("/{}", name)
-            } else {
-                format!("{}/{}", path, name)
-            };
-            FileEntry {
-                name,
-                path: full_path,
-                is_directory: is_dir,
-                size,
-            }
-        })
-        .collect();
-
-    Ok(file_entries)
+    Ok(entries.into_iter().map(FileEntry::from).collect())
 }
 
 /// Create a new file.
 #[tauri::command]
 pub async fn create_file(
     state: State<'_, Arc<AppState>>,
-    vault_id: String,
+    #[allow(unused_variables)] vault_id: String,
     path: String,
     content: Vec<u8>,
 ) -> Result<(), String> {
     info!("Creating file: {}", path);
-
-    let vaults = state.vaults.read().await;
-    let vault = vaults.get(&vault_id).ok_or("Vault not open")?;
-
-    let ops = VaultOperations::new(&vault.session).map_err(|e| e.to_string())?;
-    let vault_path = VaultPath::parse(&path).map_err(|e| e.to_string())?;
-
-    ops.create_file(&vault_path, &content)
+    state
+        .service
+        .create_file(&path, &content)
         .await
-        .map_err(|e| e.to_string())?;
-
-    // Update local index
-    let entry = IndexEntry {
-        path: path.clone(),
-        encrypted_name: String::new(), // Will be updated from tree
-        is_directory: false,
-        size: Some(content.len() as u64),
-        modified_at: chrono::Utc::now().timestamp(),
-        etag: None,
-    };
-    vault
-        .index
-        .upsert_entry(&entry)
-        .map_err(|e| e.to_string())?;
-
-    info!("File created successfully");
-    Ok(())
+        .map_err(|e| e.to_string())
 }
 
 /// Read a file's content.
 #[tauri::command]
 pub async fn read_file(
     state: State<'_, Arc<AppState>>,
-    vault_id: String,
+    #[allow(unused_variables)] vault_id: String,
     path: String,
 ) -> Result<Vec<u8>, String> {
-    let vaults = state.vaults.read().await;
-    let vault = vaults.get(&vault_id).ok_or("Vault not open")?;
-
-    let ops = VaultOperations::new(&vault.session).map_err(|e| e.to_string())?;
-    let vault_path = VaultPath::parse(&path).map_err(|e| e.to_string())?;
-
-    ops.read_file(&vault_path).await.map_err(|e| e.to_string())
+    state
+        .service
+        .read_file(&path)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// Update a file's content.
 #[tauri::command]
 pub async fn update_file(
     state: State<'_, Arc<AppState>>,
-    vault_id: String,
+    #[allow(unused_variables)] vault_id: String,
     path: String,
     content: Vec<u8>,
 ) -> Result<(), String> {
     info!("Updating file: {}", path);
-
-    let vaults = state.vaults.read().await;
-    let vault = vaults.get(&vault_id).ok_or("Vault not open")?;
-
-    let ops = VaultOperations::new(&vault.session).map_err(|e| e.to_string())?;
-    let vault_path = VaultPath::parse(&path).map_err(|e| e.to_string())?;
-
-    ops.update_file(&vault_path, &content)
+    state
+        .service
+        .update_file(&path, &content)
         .await
-        .map_err(|e| e.to_string())?;
-
-    // Update local index with new size and modification time
-    let entry = IndexEntry {
-        path: path.clone(),
-        encrypted_name: String::new(),
-        is_directory: false,
-        size: Some(content.len() as u64),
-        modified_at: chrono::Utc::now().timestamp(),
-        etag: None,
-    };
-    vault
-        .index
-        .upsert_entry(&entry)
-        .map_err(|e| e.to_string())?;
-
-    info!("File updated successfully");
-    Ok(())
+        .map_err(|e| e.to_string())
 }
 
 /// Delete a file.
 #[tauri::command]
 pub async fn delete_file(
     state: State<'_, Arc<AppState>>,
-    vault_id: String,
+    #[allow(unused_variables)] vault_id: String,
     path: String,
 ) -> Result<(), String> {
     info!("Deleting file: {}", path);
-
-    let vaults = state.vaults.read().await;
-    let vault = vaults.get(&vault_id).ok_or("Vault not open")?;
-
-    let ops = VaultOperations::new(&vault.session).map_err(|e| e.to_string())?;
-    let vault_path = VaultPath::parse(&path).map_err(|e| e.to_string())?;
-
-    ops.delete_file(&vault_path)
+    state
+        .service
+        .delete_file(&path)
         .await
-        .map_err(|e| e.to_string())?;
-
-    vault.index.delete_entry(&path).map_err(|e| e.to_string())?;
-
-    info!("File deleted successfully");
-    Ok(())
+        .map_err(|e| e.to_string())
 }
 
 /// Create a directory.
 #[tauri::command]
 pub async fn create_directory(
     state: State<'_, Arc<AppState>>,
-    vault_id: String,
+    #[allow(unused_variables)] vault_id: String,
     path: String,
 ) -> Result<(), String> {
     info!("Creating directory: {}", path);
-
-    let vaults = state.vaults.read().await;
-    let vault = vaults.get(&vault_id).ok_or("Vault not open")?;
-
-    let ops = VaultOperations::new(&vault.session).map_err(|e| e.to_string())?;
-    let vault_path = VaultPath::parse(&path).map_err(|e| e.to_string())?;
-
-    ops.create_directory(&vault_path)
+    state
+        .service
+        .create_directory(&path)
         .await
-        .map_err(|e| e.to_string())?;
-
-    let entry = IndexEntry {
-        path: path.clone(),
-        encrypted_name: String::new(),
-        is_directory: true,
-        size: None,
-        modified_at: chrono::Utc::now().timestamp(),
-        etag: None,
-    };
-    vault
-        .index
-        .upsert_entry(&entry)
-        .map_err(|e| e.to_string())?;
-
-    info!("Directory created successfully");
-    Ok(())
+        .map_err(|e| e.to_string())
 }
 
 /// Delete an empty directory.
 #[tauri::command]
 pub async fn delete_directory(
     state: State<'_, Arc<AppState>>,
-    vault_id: String,
+    #[allow(unused_variables)] vault_id: String,
     path: String,
 ) -> Result<(), String> {
     info!("Deleting directory: {}", path);
-
-    let vaults = state.vaults.read().await;
-    let vault = vaults.get(&vault_id).ok_or("Vault not open")?;
-
-    let ops = VaultOperations::new(&vault.session).map_err(|e| e.to_string())?;
-    let vault_path = VaultPath::parse(&path).map_err(|e| e.to_string())?;
-
-    ops.delete_directory(&vault_path)
+    state
+        .service
+        .delete_directory(&path)
         .await
-        .map_err(|e| e.to_string())?;
-
-    vault.index.delete_entry(&path).map_err(|e| e.to_string())?;
-
-    info!("Directory deleted successfully");
-    Ok(())
+        .map_err(|e| e.to_string())
 }
 
 /// Get FUSE availability information.
@@ -529,20 +328,14 @@ pub fn get_fuse_info() -> String {
 /// List all open vaults.
 #[tauri::command]
 pub async fn list_vaults(state: State<'_, Arc<AppState>>) -> Result<Vec<VaultInfo>, String> {
-    let vaults = state.vaults.read().await;
-
-    let vault_list: Vec<VaultInfo> = vaults
-        .iter()
-        .map(|(id, vault)| VaultInfo {
-            id: id.clone(),
-            provider_type: vault.session.config().provider_type.clone(),
-            is_mounted: vault.mount_handle.is_some(),
-            mount_point: vault
-                .mount_handle
-                .as_ref()
-                .map(|h| h.mount_point().to_string_lossy().to_string()),
-        })
-        .collect();
-
-    Ok(vault_list)
+    match state.service.vault_info().await {
+        Ok(info) => {
+            let mounts = state.mounts.read().await;
+            let mount_point = mounts
+                .get(&info.id)
+                .map(|m| m.mount_handle.mount_point().to_string_lossy().to_string());
+            Ok(vec![VaultInfo::from_dto(&info, mount_point)])
+        }
+        Err(_) => Ok(vec![]),
+    }
 }

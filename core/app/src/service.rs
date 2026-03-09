@@ -1,5 +1,7 @@
 //! Application facade — the single entry point for all vault operations.
 
+use std::sync::Arc;
+
 use tokio::sync::RwLock;
 use tracing::info;
 
@@ -10,6 +12,14 @@ use axiomvault_vault::{VaultManager, VaultOperations, VaultSession};
 use crate::dto::*;
 use crate::error::{AppError, AppResult};
 use crate::events::{event_channel, AppEvent, EventReceiver, EventSender};
+use crate::local_index::{IndexEntry, LocalIndex};
+
+fn now_timestamp() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
+}
 
 /// Application service wrapping all vault subsystems.
 ///
@@ -23,8 +33,10 @@ pub struct AppService {
 
 /// Internal state for an open vault.
 struct ActiveVault {
-    session: VaultSession,
+    session: Arc<VaultSession>,
     provider_type: String,
+    /// Optional local metadata cache, updated on file operations.
+    index: Option<LocalIndex>,
 }
 
 impl AppService {
@@ -95,8 +107,9 @@ impl AppService {
         };
 
         *self.session.write().await = Some(ActiveVault {
-            session: creation.session,
+            session: Arc::new(creation.session),
             provider_type: params.provider_type,
+            index: None,
         });
 
         self.emit(AppEvent::VaultCreated(info));
@@ -124,8 +137,9 @@ impl AppService {
         };
 
         *self.session.write().await = Some(ActiveVault {
-            session,
+            session: Arc::new(session),
             provider_type: params.provider_type,
+            index: None,
         });
 
         self.emit(AppEvent::VaultOpened(info.clone()));
@@ -154,8 +168,9 @@ impl AppService {
         };
 
         *self.session.write().await = Some(ActiveVault {
-            session,
+            session: Arc::new(session),
             provider_type: params.provider_type,
+            index: None,
         });
 
         self.emit(AppEvent::VaultOpened(info.clone()));
@@ -164,11 +179,26 @@ impl AppService {
         Ok(info)
     }
 
-    /// Lock the active vault (clears keys from memory).
+    /// Lock the active vault (clears keys from memory, wipes index).
+    ///
+    /// Requires exclusive access to the session — FUSE must be unmounted first.
     pub async fn lock_vault(&self) -> AppResult<()> {
         let mut guard = self.session.write().await;
         let active = guard.as_mut().ok_or(AppError::NoOpenVault)?;
-        active.session.lock();
+
+        // Wipe cached plaintext metadata before locking.
+        if let Some(ref index) = active.index {
+            if let Err(e) = index.wipe() {
+                tracing::warn!("Failed to wipe local index on lock: {}", e);
+            }
+        }
+
+        let session = Arc::get_mut(&mut active.session).ok_or_else(|| {
+            AppError::InvalidInput(
+                "Cannot lock vault while FUSE is mounted. Unmount first.".to_string(),
+            )
+        })?;
+        session.lock();
         drop(guard);
 
         self.emit(AppEvent::VaultLocked);
@@ -179,9 +209,15 @@ impl AppService {
     /// Close the active vault entirely.
     pub async fn close_vault(&self) -> AppResult<()> {
         let mut guard = self.session.write().await;
-        if guard.is_none() {
-            return Err(AppError::NoOpenVault);
+        let active = guard.as_ref().ok_or(AppError::NoOpenVault)?;
+
+        // Wipe cached plaintext metadata before closing.
+        if let Some(ref index) = active.index {
+            if let Err(e) = index.wipe() {
+                tracing::warn!("Failed to wipe local index on close: {}", e);
+            }
         }
+
         *guard = None;
         drop(guard);
 
@@ -191,12 +227,18 @@ impl AppService {
     }
 
     /// Change the vault password.
+    ///
+    /// Requires exclusive access to the session — FUSE must be unmounted first.
     pub async fn change_password(&self, old_password: &str, new_password: &str) -> AppResult<()> {
         let mut guard = self.session.write().await;
         let active = guard.as_mut().ok_or(AppError::NoOpenVault)?;
 
-        active
-            .session
+        let session = Arc::get_mut(&mut active.session).ok_or_else(|| {
+            AppError::InvalidInput(
+                "Cannot change password while FUSE is mounted. Unmount first.".to_string(),
+            )
+        })?;
+        session
             .change_password(old_password.as_bytes(), new_password.as_bytes())
             .map_err(AppError::from)?;
 
@@ -227,6 +269,28 @@ impl AppService {
         })
     }
 
+    /// Attach a local index to the active vault for metadata caching.
+    ///
+    /// Must be called after `create_vault` or `open_vault`. File operations
+    /// will automatically maintain the index when one is attached.
+    pub async fn set_local_index(&self, index: LocalIndex) -> AppResult<()> {
+        let mut guard = self.session.write().await;
+        let active = guard.as_mut().ok_or(AppError::NoOpenVault)?;
+        active.index = Some(index);
+        Ok(())
+    }
+
+    /// Get a shared reference to the vault session for FUSE mounting.
+    ///
+    /// The caller must drop the returned Arc before calling `lock_vault`,
+    /// `close_vault`, or `change_password` — those methods require exclusive
+    /// access and will fail if a FUSE mount still holds a reference.
+    pub async fn vault_session(&self) -> AppResult<Arc<VaultSession>> {
+        let guard = self.session.read().await;
+        let active = guard.as_ref().ok_or(AppError::NoOpenVault)?;
+        Ok(Arc::clone(&active.session))
+    }
+
     // -- File operations --
 
     /// Create a file in the vault.
@@ -240,6 +304,17 @@ impl AppService {
         ops.create_file(&vault_path, content)
             .await
             .map_err(AppError::from)?;
+
+        if let Some(ref index) = active.index {
+            let _ = index.upsert_entry(&IndexEntry {
+                path: path.to_string(),
+                encrypted_name: String::new(),
+                is_directory: false,
+                size: Some(content.len() as u64),
+                modified_at: now_timestamp(),
+                etag: None,
+            });
+        }
 
         drop(guard);
         self.emit(AppEvent::FileCreated {
@@ -271,6 +346,17 @@ impl AppService {
             .await
             .map_err(AppError::from)?;
 
+        if let Some(ref index) = active.index {
+            let _ = index.upsert_entry(&IndexEntry {
+                path: path.to_string(),
+                encrypted_name: String::new(),
+                is_directory: false,
+                size: Some(content.len() as u64),
+                modified_at: now_timestamp(),
+                etag: None,
+            });
+        }
+
         drop(guard);
         self.emit(AppEvent::FileUpdated {
             path: path.to_string(),
@@ -287,6 +373,10 @@ impl AppService {
             VaultPath::parse(path).map_err(|e| AppError::InvalidInput(e.to_string()))?;
 
         ops.delete_file(&vault_path).await.map_err(AppError::from)?;
+
+        if let Some(ref index) = active.index {
+            let _ = index.delete_entry(path);
+        }
 
         drop(guard);
         self.emit(AppEvent::FileDeleted {
@@ -308,6 +398,17 @@ impl AppService {
         ops.create_directory(&vault_path)
             .await
             .map_err(AppError::from)?;
+
+        if let Some(ref index) = active.index {
+            let _ = index.upsert_entry(&IndexEntry {
+                path: path.to_string(),
+                encrypted_name: String::new(),
+                is_directory: true,
+                size: None,
+                modified_at: now_timestamp(),
+                etag: None,
+            });
+        }
 
         drop(guard);
         self.emit(AppEvent::DirectoryCreated {
@@ -367,6 +468,10 @@ impl AppService {
             .await
             .map_err(AppError::from)?;
 
+        if let Some(ref index) = active.index {
+            let _ = index.delete_entry(path);
+        }
+
         drop(guard);
         self.emit(AppEvent::DirectoryDeleted {
             path: path.to_string(),
@@ -401,6 +506,28 @@ impl AppService {
             is_directory,
             size,
         })
+    }
+
+    // -- File import/export --
+
+    /// Import a local file into the vault.
+    pub async fn import_file(&self, local_path: &str, vault_path: &str) -> AppResult<()> {
+        let content = tokio::fs::read(local_path)
+            .await
+            .map_err(|e| AppError::Storage(format!("Failed to read local file: {}", e)))?;
+
+        self.create_file(vault_path, &content).await
+    }
+
+    /// Export a vault file to the local filesystem.
+    pub async fn export_file(&self, vault_path: &str, local_path: &str) -> AppResult<()> {
+        let content = self.read_file(vault_path).await?;
+
+        tokio::fs::write(local_path, content)
+            .await
+            .map_err(|e| AppError::Storage(format!("Failed to write local file: {}", e)))?;
+
+        Ok(())
     }
 
     /// Check if a vault exists at the given location.

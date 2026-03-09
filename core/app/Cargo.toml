@@ -11,13 +11,14 @@ axiomvault-sync = { path = "../sync" }
 axiomvault-crypto = { path = "../crypto" }
 
 async-trait.workspace = true
-tokio = { workspace = true, features = ["sync"] }
+tokio = { workspace = true, features = ["sync", "fs"] }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 chrono.workspace = true
 uuid.workspace = true
 tracing.workspace = true
+rusqlite.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

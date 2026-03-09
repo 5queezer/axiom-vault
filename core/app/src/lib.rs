@@ -16,9 +16,11 @@
 pub mod dto;
 pub mod error;
 pub mod events;
+pub mod local_index;
 pub mod service;
 
 pub use dto::*;
-pub use error::AppError;
+pub use error::{AppError, AppResult};
 pub use events::{AppEvent, EventReceiver, EventSender};
+pub use local_index::{IndexEntry, LocalIndex};
 pub use service::AppService;
