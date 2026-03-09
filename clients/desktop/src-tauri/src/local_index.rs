@@ -1,6 +1,13 @@
 //! SQLite-based local index for vault metadata caching.
 //!
 //! Persists vault tree state locally for faster startup and offline access.
+//!
+//! **Security note:** This index caches plaintext vault metadata (filenames,
+//! directory structure, sizes, timestamps) outside the encrypted vault. The
+//! database is only populated while the vault is unlocked, and MUST be cleared
+//! when the vault is locked to avoid leaking sensitive metadata at rest.
+//! Database files are created with restrictive permissions (0600) to limit
+//! access to the owning user.
 
 use rusqlite::{params, Connection, Result as SqliteResult};
 use serde::{Deserialize, Serialize};
@@ -28,13 +35,32 @@ pub struct LocalIndex {
 impl LocalIndex {
     /// Create or open a local index database.
     ///
+    /// The database file is created with mode 0600 (owner read/write only)
+    /// to prevent other users from reading cached vault metadata.
+    ///
     /// # Arguments
     /// - `db_path`: Path to the SQLite database file
     ///
     /// # Errors
     /// - Database creation or migration failure
     pub fn open(db_path: impl AsRef<Path>) -> SqliteResult<Self> {
+        let db_path = db_path.as_ref();
+        let is_new = !db_path.exists() || db_path.to_str() == Some(":memory:");
         let conn = Connection::open(db_path)?;
+
+        // Set restrictive file permissions on newly created database files.
+        // This prevents other users on the system from reading cached
+        // plaintext vault metadata (filenames, sizes, timestamps).
+        #[cfg(unix)]
+        if is_new && db_path.to_str() != Some(":memory:") {
+            use std::os::unix::fs::PermissionsExt;
+            if let Err(e) = std::fs::set_permissions(
+                db_path,
+                std::fs::Permissions::from_mode(0o600),
+            ) {
+                tracing::warn!("Failed to set restrictive permissions on index db: {}", e);
+            }
+        }
 
         // Initialize schema
         conn.execute_batch(
@@ -223,6 +249,27 @@ impl LocalIndex {
             )
         })?;
         conn.execute("DELETE FROM vault_entries", [])?;
+        Ok(())
+    }
+
+    /// Securely wipe all cached data (entries and metadata).
+    ///
+    /// Called when the vault is locked to ensure no plaintext metadata
+    /// (filenames, directory structure, sizes, timestamps) persists on disk
+    /// after the vault is no longer accessible.
+    pub fn wipe(&self) -> SqliteResult<()> {
+        info!("Wiping all cached vault metadata from local index");
+        let conn = self.conn.lock().map_err(|_| {
+            rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
+                Some("Failed to acquire lock".to_string()),
+            )
+        })?;
+        conn.execute("DELETE FROM vault_entries", [])?;
+        conn.execute("DELETE FROM vault_metadata", [])?;
+        // Force SQLite to reclaim space so deleted data doesn't linger in
+        // the database file on disk.
+        conn.execute_batch("VACUUM")?;
         Ok(())
     }
 
