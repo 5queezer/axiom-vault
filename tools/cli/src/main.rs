@@ -17,7 +17,7 @@ use axiomvault_crypto::recovery::RecoveryKey;
 use axiomvault_crypto::KdfParams;
 use axiomvault_storage::gdrive::{AuthConfig, AuthManager, GDriveConfig, Tokens};
 use axiomvault_sync::{ConflictStrategy, SyncConfig, SyncEngine, SyncMode, SyncState};
-use axiomvault_vault::{VaultManager, VaultOperations};
+use axiomvault_vault::{check_vault_health, check_vault_structure, VaultManager, VaultOperations};
 
 #[derive(Parser)]
 #[command(name = "axiomvault")]
@@ -152,6 +152,17 @@ enum Commands {
         /// Path to the vault.
         #[arg(short, long)]
         path: PathBuf,
+    },
+
+    /// Check vault health and integrity.
+    Check {
+        /// Path to the vault.
+        #[arg(short, long)]
+        path: PathBuf,
+
+        /// Run shallow check only (no password required).
+        #[arg(long)]
+        shallow: bool,
     },
 
     /// Authenticate with Google Drive and get tokens.
@@ -309,6 +320,8 @@ async fn main() -> Result<()> {
         Commands::ResetPassword { path } => cmd_reset_password(&path).await,
 
         Commands::MigrateVault { path } => cmd_migrate_vault(&path).await,
+
+        Commands::Check { path, shallow } => cmd_check(&path, shallow).await,
 
         Commands::GdriveAuth {
             client_id,
@@ -817,6 +830,74 @@ async fn cmd_migrate_vault(path: &Path) -> Result<()> {
     display_recovery_words(&recovery_words);
 
     Ok(())
+}
+
+/// Check vault health and integrity.
+async fn cmd_check(path: &Path, shallow: bool) -> Result<()> {
+    let path_str = path.to_string_lossy().to_string();
+
+    let provider_config = serde_json::json!({
+        "root": path_str
+    });
+
+    let manager = VaultManager::new();
+    let provider = manager
+        .registry()
+        .resolve("local", provider_config.clone())
+        .context("Failed to create storage provider")?;
+
+    if shallow {
+        info!("Running shallow vault check (no password required)");
+        let report = check_vault_structure(provider.as_ref(), &path_str)
+            .await
+            .context("Failed to run shallow health check")?;
+
+        print_health_report(&report);
+        return Ok(());
+    }
+
+    info!("Running full vault health check");
+    let password = prompt_password("Enter password: ")?;
+
+    let session = manager
+        .open_vault("local", provider_config, &password)
+        .await
+        .context("Failed to open vault")?;
+
+    let master_key = session.master_key().context("Session not active")?;
+
+    let report = check_vault_health(provider.as_ref(), session.config(), master_key, &path_str)
+        .await
+        .context("Failed to run health check")?;
+
+    print_health_report(&report);
+
+    Ok(())
+}
+
+/// Print a health report to stdout.
+fn print_health_report(report: &axiomvault_vault::HealthReport) {
+    println!("Vault Health Report: {}", report.vault_path);
+    println!("{}", "=".repeat(50));
+
+    for result in &report.results {
+        let icon = match result.severity {
+            axiomvault_vault::Severity::Info => "[OK]  ",
+            axiomvault_vault::Severity::Warning => "[WARN]",
+            axiomvault_vault::Severity::Error => "[ERR] ",
+        };
+        println!("  {} {}: {}", icon, result.check_name, result.message);
+        if result.auto_fixable {
+            println!("         (auto-fixable)");
+        }
+    }
+
+    println!();
+    if report.has_errors() {
+        println!("Result: ERRORS FOUND");
+    } else {
+        println!("Result: HEALTHY");
+    }
 }
 
 /// Authenticate with Google Drive and save tokens.
