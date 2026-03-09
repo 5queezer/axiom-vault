@@ -35,7 +35,7 @@ fn create_file_attr(ino: u64, is_dir: bool, size: u64) -> FileAttr {
         } else {
             FileType::RegularFile
         },
-        perm: if is_dir { 0o755 } else { 0o644 },
+        perm: if is_dir { 0o700 } else { 0o600 },
         nlink: if is_dir { 2 } else { 1 },
         uid: unsafe { libc::getuid() },
         gid: unsafe { libc::getgid() },
