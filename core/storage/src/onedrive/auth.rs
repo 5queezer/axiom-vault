@@ -2,8 +2,8 @@
 
 use chrono::{DateTime, Duration, Utc};
 use oauth2::{
-    basic::BasicClient, AuthUrl, ClientId, ClientSecret, RedirectUrl, Scope, TokenResponse,
-    TokenUrl,
+    basic::BasicClient, AuthUrl, ClientId, ClientSecret, EndpointNotSet, EndpointSet, RedirectUrl,
+    Scope, TokenResponse, TokenUrl,
 };
 use serde::{Deserialize, Serialize};
 
@@ -83,27 +83,27 @@ impl OneDriveAuthConfig {
 
 /// OAuth2 authentication manager for OneDrive.
 pub struct OneDriveAuthManager {
-    client: BasicClient,
+    client: BasicClient<EndpointSet, EndpointNotSet, EndpointNotSet, EndpointNotSet, EndpointSet>,
     config: OneDriveAuthConfig,
 }
 
 impl OneDriveAuthManager {
     /// Create a new authentication manager.
     pub fn new(config: OneDriveAuthConfig) -> Result<Self> {
-        let client = BasicClient::new(
-            ClientId::new(config.client_id.clone()),
-            Some(ClientSecret::new(config.client_secret.clone())),
-            AuthUrl::new(MS_AUTH_URL.to_string())
-                .map_err(|e| Error::InvalidInput(format!("Invalid auth URL: {}", e)))?,
-            Some(
+        let client = BasicClient::new(ClientId::new(config.client_id.clone()))
+            .set_client_secret(ClientSecret::new(config.client_secret.clone()))
+            .set_auth_uri(
+                AuthUrl::new(MS_AUTH_URL.to_string())
+                    .map_err(|e| Error::InvalidInput(format!("Invalid auth URL: {}", e)))?,
+            )
+            .set_token_uri(
                 TokenUrl::new(MS_TOKEN_URL.to_string())
                     .map_err(|e| Error::InvalidInput(format!("Invalid token URL: {}", e)))?,
-            ),
-        )
-        .set_redirect_uri(
-            RedirectUrl::new(config.redirect_url.clone())
-                .map_err(|e| Error::InvalidInput(format!("Invalid redirect URL: {}", e)))?,
-        );
+            )
+            .set_redirect_uri(
+                RedirectUrl::new(config.redirect_url.clone())
+                    .map_err(|e| Error::InvalidInput(format!("Invalid redirect URL: {}", e)))?,
+            );
 
         Ok(Self { client, config })
     }
@@ -122,13 +122,17 @@ impl OneDriveAuthManager {
 
     /// Exchange an authorization code for tokens.
     pub async fn exchange_code(&self, code: &str) -> Result<OneDriveTokens> {
-        use oauth2::reqwest::async_http_client;
         use oauth2::AuthorizationCode;
+
+        let http_client = oauth2::reqwest::ClientBuilder::new()
+            .redirect(oauth2::reqwest::redirect::Policy::none())
+            .build()
+            .map_err(|e| Error::Authentication(format!("Failed to build HTTP client: {}", e)))?;
 
         let token_result = self
             .client
             .exchange_code(AuthorizationCode::new(code.to_string()))
-            .request_async(async_http_client)
+            .request_async(&http_client)
             .await
             .map_err(|e| Error::Authentication(format!("Token exchange failed: {}", e)))?;
 
@@ -160,13 +164,17 @@ impl OneDriveAuthManager {
 
     /// Refresh an access token using the refresh token.
     pub async fn refresh_token(&self, refresh_token: &str) -> Result<OneDriveTokens> {
-        use oauth2::reqwest::async_http_client;
         use oauth2::RefreshToken;
+
+        let http_client = oauth2::reqwest::ClientBuilder::new()
+            .redirect(oauth2::reqwest::redirect::Policy::none())
+            .build()
+            .map_err(|e| Error::Authentication(format!("Failed to build HTTP client: {}", e)))?;
 
         let token_result = self
             .client
             .exchange_refresh_token(&RefreshToken::new(refresh_token.to_string()))
-            .request_async(async_http_client)
+            .request_async(&http_client)
             .await
             .map_err(|e| Error::Authentication(format!("Token refresh failed: {}", e)))?;
 

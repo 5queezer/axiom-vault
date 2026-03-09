@@ -2,7 +2,8 @@
 
 use chrono::{DateTime, Duration, Utc};
 use oauth2::{
-    basic::BasicClient, AuthUrl, ClientId, ClientSecret, RedirectUrl, TokenResponse, TokenUrl,
+    basic::BasicClient, AuthUrl, ClientId, ClientSecret, EndpointNotSet, EndpointSet, RedirectUrl,
+    TokenResponse, TokenUrl,
 };
 use serde::{Deserialize, Serialize};
 
@@ -79,27 +80,27 @@ impl DropboxAuthConfig {
 
 /// OAuth2 authentication manager for Dropbox.
 pub struct DropboxAuthManager {
-    client: BasicClient,
+    client: BasicClient<EndpointSet, EndpointNotSet, EndpointNotSet, EndpointNotSet, EndpointSet>,
     config: DropboxAuthConfig,
 }
 
 impl DropboxAuthManager {
     /// Create a new authentication manager.
     pub fn new(config: DropboxAuthConfig) -> Result<Self> {
-        let client = BasicClient::new(
-            ClientId::new(config.app_key.clone()),
-            Some(ClientSecret::new(config.app_secret.clone())),
-            AuthUrl::new(DROPBOX_AUTH_URL.to_string())
-                .map_err(|e| Error::InvalidInput(format!("Invalid auth URL: {}", e)))?,
-            Some(
+        let client = BasicClient::new(ClientId::new(config.app_key.clone()))
+            .set_client_secret(ClientSecret::new(config.app_secret.clone()))
+            .set_auth_uri(
+                AuthUrl::new(DROPBOX_AUTH_URL.to_string())
+                    .map_err(|e| Error::InvalidInput(format!("Invalid auth URL: {}", e)))?,
+            )
+            .set_token_uri(
                 TokenUrl::new(DROPBOX_TOKEN_URL.to_string())
                     .map_err(|e| Error::InvalidInput(format!("Invalid token URL: {}", e)))?,
-            ),
-        )
-        .set_redirect_uri(
-            RedirectUrl::new(config.redirect_url.clone())
-                .map_err(|e| Error::InvalidInput(format!("Invalid redirect URL: {}", e)))?,
-        );
+            )
+            .set_redirect_uri(
+                RedirectUrl::new(config.redirect_url.clone())
+                    .map_err(|e| Error::InvalidInput(format!("Invalid redirect URL: {}", e)))?,
+            );
 
         Ok(Self { client, config })
     }
@@ -117,13 +118,17 @@ impl DropboxAuthManager {
 
     /// Exchange an authorization code for tokens.
     pub async fn exchange_code(&self, code: &str) -> Result<DropboxTokens> {
-        use oauth2::reqwest::async_http_client;
         use oauth2::AuthorizationCode;
+
+        let http_client = oauth2::reqwest::ClientBuilder::new()
+            .redirect(oauth2::reqwest::redirect::Policy::none())
+            .build()
+            .map_err(|e| Error::Authentication(format!("Failed to build HTTP client: {}", e)))?;
 
         let token_result = self
             .client
             .exchange_code(AuthorizationCode::new(code.to_string()))
-            .request_async(async_http_client)
+            .request_async(&http_client)
             .await
             .map_err(|e| Error::Authentication(format!("Token exchange failed: {}", e)))?;
 
@@ -155,13 +160,17 @@ impl DropboxAuthManager {
 
     /// Refresh an access token using the refresh token.
     pub async fn refresh_token(&self, refresh_token: &str) -> Result<DropboxTokens> {
-        use oauth2::reqwest::async_http_client;
         use oauth2::RefreshToken;
+
+        let http_client = oauth2::reqwest::ClientBuilder::new()
+            .redirect(oauth2::reqwest::redirect::Policy::none())
+            .build()
+            .map_err(|e| Error::Authentication(format!("Failed to build HTTP client: {}", e)))?;
 
         let token_result = self
             .client
             .exchange_refresh_token(&RefreshToken::new(refresh_token.to_string()))
-            .request_async(async_http_client)
+            .request_async(&http_client)
             .await
             .map_err(|e| Error::Authentication(format!("Token refresh failed: {}", e)))?;
 
