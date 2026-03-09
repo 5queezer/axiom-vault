@@ -4,6 +4,8 @@
 //! Events are fire-and-forget from the core's perspective — a slow or
 //! disconnected receiver does not block the sender.
 
+use serde::{Deserialize, Serialize};
+
 use crate::dto::{DirectoryEntryDto, VaultInfoDto};
 
 /// Broadcast channel sender.
@@ -20,8 +22,9 @@ pub fn event_channel(capacity: usize) -> (EventSender, EventReceiver) {
 /// Application events broadcast to UI shells.
 ///
 /// Each variant carries enough data for the UI to update without
-/// needing to call back into `AppService`.
-#[derive(Debug, Clone)]
+/// needing to call back into `AppService`. Serializable so that
+/// FFI/bridge layers can marshal events as JSON without ad-hoc conversion.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AppEvent {
     // -- Vault lifecycle --
     /// A vault was created and is now open.

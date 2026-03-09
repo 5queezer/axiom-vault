@@ -67,6 +67,9 @@ pub enum AppError {
 impl From<CommonError> for AppError {
     fn from(err: CommonError) -> Self {
         match err {
+            CommonError::NotFound(msg) if msg.contains("Vault") || msg.contains("vault") => {
+                AppError::VaultNotFound(msg)
+            }
             CommonError::NotFound(msg) => AppError::PathNotFound(msg),
             CommonError::AlreadyExists(msg) => AppError::PathAlreadyExists(msg),
             CommonError::NotPermitted(msg) if msg.contains("password") => AppError::InvalidPassword,

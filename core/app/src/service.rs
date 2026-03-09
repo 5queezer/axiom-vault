@@ -557,6 +557,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_open_nonexistent_vault_returns_vault_not_found() {
+        let service = AppService::new();
+
+        let result = service
+            .open_vault(OpenVaultParams {
+                password: "password".to_string(),
+                provider_type: "memory".to_string(),
+                provider_config: serde_json::Value::Null,
+            })
+            .await;
+
+        assert!(
+            matches!(result, Err(AppError::VaultNotFound(_))),
+            "expected VaultNotFound, got {:?}",
+            result
+        );
+    }
+
+    #[tokio::test]
+    async fn test_event_serialization() {
+        let event = AppEvent::FileCreated {
+            path: "/test.txt".to_string(),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        let deserialized: AppEvent = serde_json::from_str(&json).unwrap();
+        assert!(matches!(deserialized, AppEvent::FileCreated { .. }));
+    }
+
+    #[tokio::test]
     async fn test_change_password() {
         let service = AppService::new();
 
