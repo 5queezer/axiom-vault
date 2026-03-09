@@ -377,6 +377,20 @@ async fn main() -> Result<()> {
     }
 }
 
+/// Minimum password length enforced for new passwords, matching the UI clients.
+const MIN_PASSWORD_LENGTH: usize = 8;
+
+/// Validate that a password meets the minimum length requirement.
+fn validate_password_strength(password: &[u8]) -> Result<()> {
+    if password.len() < MIN_PASSWORD_LENGTH {
+        anyhow::bail!(
+            "Password must be at least {} characters",
+            MIN_PASSWORD_LENGTH
+        );
+    }
+    Ok(())
+}
+
 /// Prompt for password securely.
 fn prompt_password(prompt: &str) -> Result<Vec<u8>> {
     // Allow non-interactive use via environment variable (useful for scripting/testing)
@@ -430,9 +444,7 @@ async fn cmd_create(name: &str, path: &Path, strength: &str) -> Result<()> {
         anyhow::bail!("Passwords do not match");
     }
 
-    if password.is_empty() {
-        anyhow::bail!("Password cannot be empty");
-    }
+    validate_password_strength(&password)?;
 
     let vault_id = VaultId::new(name).context("Invalid vault name")?;
     let vault_path = path.to_string_lossy().to_string();
@@ -706,9 +718,7 @@ async fn cmd_change_password(path: &Path) -> Result<()> {
         anyhow::bail!("New passwords do not match");
     }
 
-    if new_password.is_empty() {
-        anyhow::bail!("Password cannot be empty");
-    }
+    validate_password_strength(&new_password)?;
 
     let path_str = path.to_string_lossy().to_string();
 
@@ -788,9 +798,7 @@ async fn cmd_reset_password(path: &Path) -> Result<()> {
         anyhow::bail!("Passwords do not match");
     }
 
-    if new_password.is_empty() {
-        anyhow::bail!("Password cannot be empty");
-    }
+    validate_password_strength(&new_password)?;
 
     let path_str = path.to_string_lossy().to_string();
 
@@ -1111,9 +1119,7 @@ async fn cmd_gdrive_create(
         anyhow::bail!("Passwords do not match");
     }
 
-    if password.is_empty() {
-        anyhow::bail!("Password cannot be empty");
-    }
+    validate_password_strength(&password)?;
 
     // Load tokens
     let tokens_json = tokio::fs::read_to_string(tokens_path)
