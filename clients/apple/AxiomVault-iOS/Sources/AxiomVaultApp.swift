@@ -1,5 +1,4 @@
 import SwiftUI
-import UIKit
 
 @main
 struct AxiomVaultApp: App {
