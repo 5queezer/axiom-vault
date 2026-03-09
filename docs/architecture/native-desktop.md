@@ -1,6 +1,8 @@
 # Native Desktop Architecture
 
-This document defines the target architecture for AxiomVault's native desktop clients. It establishes the boundary between shared Rust core logic and platform-native UI shells, guiding implementation so that product behavior stays centralized while presentation stays native.
+This document defines the **target architecture** for AxiomVault's native desktop clients. It establishes the boundary between shared Rust core logic and platform-native UI shells, guiding implementation so that product behavior stays centralized while presentation stays native.
+
+> **Status:** This is a design document describing the intended end state. Sections marked *(existing)* reflect what is already implemented; everything else is proposed and subject to refinement during implementation.
 
 ## Architecture Overview
 
@@ -47,15 +49,15 @@ This document defines the target architecture for AxiomVault's native desktop cl
 
 | Layer | Crate | Responsibility |
 |-------|-------|---------------|
-| **Common** | `axiomvault-common` | `VaultId`, `VaultPath`, `Error`, shared types |
-| **Crypto** | `axiomvault-crypto` | AEAD, KDF, key types, streaming encryption, recovery keys |
-| **Vault** | `axiomvault-vault` | `VaultSession`, `VaultConfig`, `VaultTree`, `VaultOperations`, `VaultManager` |
-| **Storage** | `axiomvault-storage` | `StorageProvider` trait, Local/GDrive/Dropbox/OneDrive/iCloud providers, `ProviderRegistry` |
-| **Sync** | `axiomvault-sync` | `SyncEngine`, `SyncScheduler`, `ConflictResolver`, `StagingArea`, retries |
-| **FUSE** | `axiomvault-fuse` | Filesystem mounting (Linux via libfuse3, macOS via macFUSE) |
-| **App Facade** | `axiomvault-app` *(new)* | Stateful application API, session management, event emission, DTO layer |
+| **Common** | `axiomvault-common` *(existing)* | `VaultId`, `VaultPath`, `Error`, shared types |
+| **Crypto** | `axiomvault-crypto` *(existing)* | AEAD, KDF, key types, streaming encryption, recovery keys |
+| **Vault** | `axiomvault-vault` *(existing)* | `VaultSession`, `VaultConfig`, `VaultTree`, `VaultOperations`, `VaultManager` |
+| **Storage** | `axiomvault-storage` *(existing)* | `StorageProvider` trait, Local/GDrive/Dropbox/OneDrive/iCloud providers, `ProviderRegistry` |
+| **Sync** | `axiomvault-sync` *(existing)* | `SyncEngine`, `SyncScheduler`, `ConflictResolver`, `StagingArea`, retries |
+| **FUSE** | `axiomvault-fuse` *(existing)* | Filesystem mounting (Linux via libfuse3, macOS via macFUSE) |
+| **App Facade** | `axiomvault-app` *(proposed)* | Stateful application API, session management, event emission, DTO layer |
 
-### Application Facade (new crate: `axiomvault-app`)
+### Application Facade (proposed crate: `axiomvault-app`)
 
 The facade is the single entry point for all desktop clients. It wraps the lower-level vault, storage, and sync crates into a coherent application API.
 
@@ -69,40 +71,41 @@ The facade is the single entry point for all desktop clients. It wraps the lower
 - Health checks: vault integrity verification
 - Provider management: configure and switch storage backends
 
-**API style:** Synchronous-looking methods backed by an internal Tokio runtime. The facade owns the async boundary so clients never deal with Rust futures.
+**API style:** The facade exposes `async` methods. How the async boundary is presented to each platform is a bridge/adapter concern:
+
+- **Linux (GTK4):** The Rust binary owns the Tokio runtime and can call `async` methods directly.
+- **macOS (Swift FFI):** The FFI bridge can block-on-runtime, spawn-and-callback, or expose a polling model — whichever best suits cancellation, progress streaming, and UI responsiveness. The facade does not prescribe a specific strategy.
 
 ```rust
-// Conceptual API sketch
+// Conceptual API sketch (async — bridge adapters wrap as needed)
 pub struct AppService { /* ... */ }
 
 impl AppService {
-    pub fn new() -> Result<Self>;
+    pub fn new() -> Self;
 
     // Vault lifecycle
-    pub fn create_vault(&self, params: CreateVaultParams) -> Result<VaultInfo>;
-    pub fn open_vault(&self, params: OpenVaultParams) -> Result<VaultInfo>;
-    pub fn lock_vault(&self) -> Result<()>;
-    pub fn close_vault(&self) -> Result<()>;
+    pub async fn create_vault(&self, params: CreateVaultParams) -> Result<VaultCreatedDto>;
+    pub async fn open_vault(&self, params: OpenVaultParams) -> Result<VaultInfoDto>;
+    pub async fn lock_vault(&self) -> Result<()>;
+    pub async fn close_vault(&self) -> Result<()>;
 
     // File operations
-    pub fn list_directory(&self, path: &str) -> Result<Vec<EntryDto>>;
-    pub fn read_file(&self, path: &str) -> Result<Vec<u8>>;
-    pub fn write_file(&self, path: &str, data: &[u8]) -> Result<()>;
-    pub fn create_directory(&self, path: &str) -> Result<()>;
-    pub fn remove(&self, path: &str) -> Result<()>;
-    pub fn import_file(&self, local_path: &str, vault_path: &str) -> Result<()>;
-    pub fn export_file(&self, vault_path: &str, local_path: &str) -> Result<()>;
+    pub async fn list_directory(&self, path: &str) -> Result<Vec<DirectoryEntryDto>>;
+    pub async fn read_file(&self, path: &str) -> Result<Vec<u8>>;
+    pub async fn create_file(&self, path: &str, data: &[u8]) -> Result<()>;
+    pub async fn update_file(&self, path: &str, data: &[u8]) -> Result<()>;
+    pub async fn delete_file(&self, path: &str) -> Result<()>;
+    pub async fn create_directory(&self, path: &str) -> Result<()>;
 
     // Events
     pub fn subscribe(&self) -> EventReceiver;
 
     // Health & info
-    pub fn vault_info(&self) -> Result<VaultInfo>;
-    pub fn health_check(&self) -> Result<HealthReport>;
+    pub async fn vault_info(&self) -> Result<VaultInfoDto>;
 }
 ```
 
-### Platform UI Shell (owns presentation)
+### Platform UI Shell (owns presentation) *(proposed)*
 
 Each UI shell is a thin native application that:
 
@@ -112,7 +115,7 @@ Each UI shell is a thin native application that:
 4. Renders state from DTOs and events
 5. Handles platform-specific integrations
 
-**macOS shell (SwiftUI/AppKit):**
+**macOS shell (SwiftUI/AppKit):** *(proposed — refines existing iOS FFI pattern)*
 - Bridged via C-ABI FFI (same pattern as current iOS client)
 - Existing `VaultCore.swift` + `VaultManager.swift` adapted to call facade
 - Keychain integration for biometric unlock
@@ -120,7 +123,7 @@ Each UI shell is a thin native application that:
 - NSFileCoordinator for Finder integration
 - Drag-and-drop, Quick Look, Spotlight metadata
 
-**Linux shell (GTK4/libadwaita):**
+**Linux shell (GTK4/libadwaita):** *(proposed)*
 - Direct Rust linkage (no FFI overhead)
 - GTK4 + libadwaita for GNOME HIG compliance
 - Secret Service API for keyring integration
@@ -199,11 +202,11 @@ Events flow through a broadcast channel. Each client holds a receiver. The UI th
 
 **Linux:** Events are dispatched to the GLib main loop via `glib::MainContext::default().spawn_local()`.
 
-## Bridge Strategies
+## Bridge Strategies *(proposed)*
 
-### macOS: C-ABI FFI (existing pattern, refined)
+### macOS: C-ABI FFI (refines existing pattern)
 
-The current `core/ffi` crate provides C functions callable from Swift. The facade replaces the ad-hoc FFI functions with a structured API:
+The current `core/ffi` crate *(existing)* provides C functions callable from Swift. The facade would replace the ad-hoc FFI functions with a structured API:
 
 ```
 Swift (VaultCore.swift)
@@ -238,19 +241,19 @@ vault / storage / sync / crypto
 - Events consumed via `tokio::sync::broadcast::Receiver`
 - GTK4 bindings via `gtk4-rs` crate
 
-## FUSE Integration
+## FUSE Integration *(existing crate, proposed facade integration)*
 
-Both macOS and Linux support mounting a vault as a virtual filesystem:
+Both macOS and Linux support mounting a vault as a virtual filesystem via `axiomvault-fuse` *(existing)*:
 
-- **Linux:** Native `libfuse3` support via `axiomvault-fuse`
-- **macOS:** `macFUSE` support via `axiomvault-fuse`
-- Mount/unmount exposed through `AppService` methods
-- FUSE runs in a background thread; the facade manages its lifecycle
+- **Linux:** Native `libfuse3` support
+- **macOS:** `macFUSE` support
+- Mount/unmount to be exposed through `AppService` methods *(proposed)*
+- FUSE runs in a background thread; the facade would manage its lifecycle
 - When FUSE is active, file operations through the mount point are equivalent to facade calls
 
 FUSE is optional. Clients can operate entirely through the facade API without mounting.
 
-## Data Flow: Vault on Disk
+## Data Flow: Vault on Disk *(existing)*
 
 ```
 vault-root/
