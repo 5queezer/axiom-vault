@@ -26,26 +26,34 @@ pub fn build_window(app: &adw::Application, state: Rc<RefCell<AppState>>) {
         .content(&nav_view)
         .build();
 
-    // Subscribe to vault events and forward to UI.
+    // Subscribe to vault events and forward to UI via an mpsc channel.
+    // GTK objects are not Send, so they must stay on the glib main thread.
     {
         let state_ref = state.borrow();
         let mut rx = state_ref.service.subscribe();
-        let nav = nav_view.clone();
-        let st = Rc::clone(&state);
+        let (tx, mut ui_rx) = tokio::sync::mpsc::unbounded_channel();
 
+        // Tokio task: receive broadcast events and forward via channel.
         state_ref.runtime.spawn(async move {
             loop {
                 match rx.recv().await {
                     Ok(event) => {
-                        let nav = nav.clone();
-                        let st = Rc::clone(&st);
-                        glib::MainContext::default().spawn_local(async move {
-                            handle_event(&nav, &st, event);
-                        });
+                        if tx.send(event).is_err() {
+                            break;
+                        }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
                 }
+            }
+        });
+
+        // Glib main thread: receive forwarded events and update UI.
+        let nav = nav_view.clone();
+        let st = Rc::clone(&state);
+        glib::MainContext::default().spawn_local(async move {
+            while let Some(event) = ui_rx.recv().await {
+                handle_event(&nav, &st, event);
             }
         });
     }
