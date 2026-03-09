@@ -115,6 +115,24 @@ pub fn create_default_registry() -> ProviderRegistry {
         .register("gdrive", Box::new(crate::gdrive::create_gdrive_provider))
         .expect("Failed to register gdrive provider");
 
+    // Register Dropbox provider
+    registry
+        .register("dropbox", Box::new(crate::dropbox::create_dropbox_provider))
+        .expect("Failed to register dropbox provider");
+
+    // Register OneDrive provider
+    registry
+        .register(
+            "onedrive",
+            Box::new(crate::onedrive::create_onedrive_provider),
+        )
+        .expect("Failed to register onedrive provider");
+
+    // Register iCloud Drive provider
+    registry
+        .register("icloud", Box::new(crate::icloud::create_icloud_provider))
+        .expect("Failed to register icloud provider");
+
     registry
 }
 

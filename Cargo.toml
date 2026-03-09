@@ -76,3 +76,7 @@ open = "5.3"
 
 # Recovery key word encoding
 bip39 = "2.1"
+
+# Filesystem paths
+dirs = "6.0"
+percent-encoding = "2.3"
