@@ -23,3 +23,13 @@ Thumbs.db
 
 # Tauri generated files
 **/src-tauri/gen/
+
+# Claude Code
+.claude/worktrees/
+.claude/settings.local.json
+
+# Apple build artifacts
+clients/apple/Frameworks/
+clients/apple/build/
+clients/apple/**/*.xcuserstate
+clients/apple/AxiomVault.xcodeproj/project.pbxproj
