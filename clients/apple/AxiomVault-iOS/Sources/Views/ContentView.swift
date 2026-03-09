@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject var vaultManager: VaultManager
+    @EnvironmentObject var syncManager: SyncManager
     @State private var showingCreateVault = false
     @State private var showingOpenVault = false
 
@@ -33,6 +34,12 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showingOpenVault) {
             OpenVaultView()
+        }
+        .onAppear {
+            syncManager.setActiveVault(vaultManager.vaultInfo?.vaultId)
+        }
+        .onChange(of: vaultManager.vaultInfo?.vaultId) { _, newValue in
+            syncManager.setActiveVault(newValue)
         }
         .alert("Error", isPresented: .constant(vaultManager.errorMessage != nil)) {
             Button("OK") {

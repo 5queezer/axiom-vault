@@ -3,6 +3,7 @@ import SwiftUI
 @main
 struct AxiomVaultApp: App {
     @StateObject private var vaultManager = VaultManager()
+    @StateObject private var syncManager = SyncManager()
 
     init() {
         do {
@@ -16,6 +17,7 @@ struct AxiomVaultApp: App {
         WindowGroup {
             MainView()
                 .environmentObject(vaultManager)
+                .environmentObject(syncManager)
                 .frame(minWidth: 700, minHeight: 500)
         }
         .windowStyle(.titleBar)
@@ -45,11 +47,13 @@ struct AxiomVaultApp: App {
         MenuBarExtra("AxiomVault", systemImage: vaultManager.isVaultOpen ? "lock.open.fill" : "lock.fill") {
             MenuBarView()
                 .environmentObject(vaultManager)
+                .environmentObject(syncManager)
         }
 
         Settings {
             SettingsView()
                 .environmentObject(vaultManager)
+                .environmentObject(syncManager)
         }
     }
 }

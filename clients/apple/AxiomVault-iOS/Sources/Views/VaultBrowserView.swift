@@ -3,16 +3,23 @@ import UniformTypeIdentifiers
 
 struct VaultBrowserView: View {
     @EnvironmentObject var vaultManager: VaultManager
+    @EnvironmentObject var syncManager: SyncManager
     @State private var showingAddFile = false
     @State private var showingCreateDirectory = false
     @State private var showingVaultInfo = false
     @State private var showingChangePassword = false
+    @State private var showingSyncSettings = false
     @State private var selectedEntry: VaultEntry?
     @State private var showingExportSheet = false
     @State private var isDragTargeted = false
 
     var body: some View {
         VStack(spacing: 0) {
+            SyncStatusDetailView()
+                .environmentObject(syncManager)
+                .padding(.horizontal)
+                .padding(.top, 4)
+
             pathBreadcrumb
 
             if vaultManager.isLoading && vaultManager.entries.isEmpty {
@@ -27,6 +34,21 @@ struct VaultBrowserView: View {
         .navigationTitle(currentFolderName)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button {
+                    Task { await syncManager.sync() }
+                } label: {
+                    if syncManager.isSyncing {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Image(systemName: syncManager.syncStatus.iconName)
+                            .foregroundStyle(syncManager.syncStatus.tintColor)
+                    }
+                }
+                .disabled(syncManager.isSyncing || !syncManager.isSyncAvailable)
+            }
+
             ToolbarItem(placement: .navigationBarTrailing) {
                 Menu {
                     Button(action: { showingAddFile = true }) {
@@ -52,6 +74,16 @@ struct VaultBrowserView: View {
                     }
                     Divider()
                     Button(action: {
+                        Task { await syncManager.sync() }
+                    }) {
+                        Label("Sync Now", systemImage: "arrow.triangle.2.circlepath")
+                    }
+                    .disabled(syncManager.isSyncing || !syncManager.isSyncAvailable)
+                    Button(action: { showingSyncSettings = true }) {
+                        Label("Sync Settings", systemImage: "gearshape")
+                    }
+                    Divider()
+                    Button(action: {
                         Task { await vaultManager.refreshEntries() }
                     }) {
                         Label("Refresh", systemImage: "arrow.clockwise")
@@ -65,6 +97,10 @@ struct VaultBrowserView: View {
         .sheet(isPresented: $showingCreateDirectory) { CreateDirectoryView() }
         .sheet(isPresented: $showingVaultInfo) { VaultInfoView() }
         .sheet(isPresented: $showingChangePassword) { ChangePasswordView() }
+        .sheet(isPresented: $showingSyncSettings) {
+            SyncSettingsView()
+                .environmentObject(syncManager)
+        }
         .onDrop(of: [.fileURL], isTargeted: $isDragTargeted) { providers in
             handleDrop(providers)
             return true
