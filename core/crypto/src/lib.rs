@@ -14,9 +14,11 @@
 pub mod aead;
 pub mod kdf;
 pub mod keys;
+pub mod recovery;
 pub mod stream;
 
 pub use aead::{decrypt, encrypt};
 pub use kdf::{derive_key, KdfParams};
 pub use keys::{DirectoryKey, FileKey, MasterKey, Salt};
+pub use recovery::RecoveryKey;
 pub use stream::{DecryptingStream, EncryptingStream};

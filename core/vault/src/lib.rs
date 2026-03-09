@@ -17,7 +17,7 @@ pub mod session;
 pub mod tree;
 
 pub use config::{VaultConfig, VaultVersion};
-pub use manager::VaultManager;
+pub use manager::{VaultCreation, VaultManager};
 pub use operations::VaultOperations;
 pub use session::{SessionHandle, VaultSession};
 pub use tree::{NodeType, TreeNode, VaultTree};

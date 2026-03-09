@@ -73,3 +73,6 @@ fuser = "0.14"
 
 # Browser opening
 open = "5.3"
+
+# Recovery key word encoding
+bip39 = "2.1"
