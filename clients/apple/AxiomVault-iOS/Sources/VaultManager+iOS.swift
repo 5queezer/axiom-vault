@@ -38,8 +38,9 @@ extension VaultManager {
         let vaultPath = vaultsDirectory.appendingPathComponent(name).path
 
         do {
-            try VaultCore.shared.createVault(at: vaultPath, password: password)
+            let words = try VaultCore.shared.createVault(at: vaultPath, password: password)
             isVaultOpen = true
+            recoveryWords = words
             await refreshState()
             registeriOSAutoLockObservers()
             startAutoLockTimer()

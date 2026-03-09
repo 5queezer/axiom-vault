@@ -78,8 +78,9 @@ extension VaultManager {
         defer { isLoading = false }
 
         do {
-            try VaultCore.shared.createVault(at: url.path, password: password)
+            let words = try VaultCore.shared.createVault(at: url.path, password: password)
             isVaultOpen = true
+            recoveryWords = words
             currentVaultName = url.lastPathComponent
             saveBookmark(for: url)
             await refreshState()

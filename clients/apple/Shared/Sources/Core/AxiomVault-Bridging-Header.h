@@ -26,16 +26,35 @@ typedef struct {
     int version;
 } FFIVaultInfo;
 
-// FFI function declarations
+// Event callback — receives a JSON string on a background thread.
+// The pointer is only valid for the duration of the call.
+typedef void (*FFIEventCallback)(const char *json);
+
+// ---------------------------------------------------------------------------
+// Initialization
+// ---------------------------------------------------------------------------
+
 int axiom_init(void);
 const char *axiom_version(void);
+
+// ---------------------------------------------------------------------------
+// Vault lifecycle
+// ---------------------------------------------------------------------------
 
 FFIVaultHandle *axiom_vault_create(const char *path, const char *password);
 FFIVaultHandle *axiom_vault_open(const char *path, const char *password);
 int axiom_vault_close(FFIVaultHandle *handle);
 
+// ---------------------------------------------------------------------------
+// Vault info
+// ---------------------------------------------------------------------------
+
 FFIVaultInfo *axiom_vault_info(const FFIVaultHandle *handle);
 void axiom_vault_info_free(FFIVaultInfo *info);
+
+// ---------------------------------------------------------------------------
+// File and directory operations
+// ---------------------------------------------------------------------------
 
 char *axiom_vault_list(const FFIVaultHandle *handle, const char *path);
 
@@ -51,9 +70,51 @@ int axiom_vault_mkdir(const FFIVaultHandle *handle, const char *vault_path);
 
 int axiom_vault_remove(const FFIVaultHandle *handle, const char *vault_path);
 
+// ---------------------------------------------------------------------------
+// Password and recovery
+// ---------------------------------------------------------------------------
+
 int axiom_vault_change_password(const FFIVaultHandle *handle,
                                  const char *old_password,
                                  const char *new_password);
+
+// Returns recovery words from vault creation (one-time, cleared after call).
+// Returns NULL if vault was opened or words already consumed.
+char *axiom_vault_get_recovery_words(const FFIVaultHandle *handle);
+
+// Returns the recovery key for an open vault (requires active session).
+char *axiom_vault_show_recovery_key(const FFIVaultHandle *handle);
+
+// Reset password using recovery words. Returns a new vault handle on success.
+FFIVaultHandle *axiom_vault_reset_password(const char *path,
+                                            const char *recovery_words,
+                                            const char *new_password);
+
+// ---------------------------------------------------------------------------
+// Health check and migration
+// ---------------------------------------------------------------------------
+
+// Returns 0 (up to date), 1 (needs migration), -1 (error).
+int axiom_vault_check_migration(const char *path);
+
+// Returns 0 on success, -1 on error.
+int axiom_vault_migrate(const char *path, const char *password);
+
+// Returns JSON health report. password may be NULL for structure-only check.
+char *axiom_vault_health_check(const char *path, const char *password);
+
+// ---------------------------------------------------------------------------
+// Event subscription
+// ---------------------------------------------------------------------------
+
+// Subscribe to vault events. Only one subscription per handle — calling again
+// replaces the previous one. Pass NULL callback to unsubscribe.
+int axiom_vault_subscribe_events(const FFIVaultHandle *handle,
+                                  FFIEventCallback callback);
+
+// ---------------------------------------------------------------------------
+// Error and string management
+// ---------------------------------------------------------------------------
 
 char *axiom_last_error(void);
 void axiom_string_free(char *s);

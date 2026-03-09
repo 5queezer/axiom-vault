@@ -35,10 +35,16 @@ class VaultManager: ObservableObject {
     @Published var pathStack: [String] = ["/"]
     @Published var cacheSize: Int64 = 0
 
+    /// Recovery words from the most recent vault creation (shown once).
+    @Published var recoveryWords: String?
+
     /// Set after a successful password unlock to offer biometric enrollment
     @Published var shouldOfferBiometricSave = false
     /// The vault path that was just unlocked (used for biometric save prompt)
     var lastUnlockedVaultPath: String?
+
+    /// Whether platform-specific auto-lock observers have been registered.
+    var didRegisterObservers = false
 
     @Published var autoLockDuration: AutoLockDuration {
         didSet {
@@ -57,6 +63,30 @@ class VaultManager: ObservableObject {
         } else {
             self.autoLockDuration = .fifteenMinutes
             UserDefaults.standard.set(AutoLockDuration.fifteenMinutes.rawValue, forKey: Self.autoLockKey)
+        }
+
+        VaultCore.shared.onEvent = { [weak self] event in
+            Task { @MainActor [weak self] in
+                self?.handleVaultEvent(event)
+            }
+        }
+    }
+
+    // MARK: - Event handling
+
+    private func handleVaultEvent(_ event: VaultEvent) {
+        switch event {
+        case .vaultLocked, .vaultClosed:
+            if isVaultOpen {
+                closeVault()
+            }
+        case .fileCreated, .fileUpdated, .fileDeleted,
+             .directoryCreated, .directoryDeleted:
+            Task { await refreshEntries() }
+        case .error(let message):
+            errorMessage = message
+        default:
+            break
         }
     }
 
@@ -131,6 +161,7 @@ class VaultManager: ObservableObject {
         pathStack = ["/"]
         entries = []
         vaultInfo = nil
+        recoveryWords = nil
         shouldOfferBiometricSave = false
         #if os(macOS)
         currentVaultName = nil
