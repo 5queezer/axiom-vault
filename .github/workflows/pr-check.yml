@@ -26,7 +26,9 @@ jobs:
             libappindicator3-dev \
             librsvg2-dev \
             patchelf \
-            libfuse3-dev
+            libfuse3-dev \
+            libgtk-4-dev \
+            libadwaita-1-dev
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -111,6 +113,7 @@ jobs:
     outputs:
       rust_changed: ${{ steps.changes.outputs.rust }}
       apple_changed: ${{ steps.changes.outputs.apple }}
+      linux_changed: ${{ steps.changes.outputs.linux }}
       android_changed: ${{ steps.changes.outputs.android }}
       docs_changed: ${{ steps.changes.outputs.docs }}
     steps:
@@ -127,6 +130,8 @@ jobs:
               - 'Cargo.lock'
             apple:
               - 'clients/apple/**'
+            linux:
+              - 'clients/linux/**'
             android:
               - 'clients/android/**'
             docs:
@@ -137,6 +142,7 @@ jobs:
         run: |
           echo "Rust code changed: ${{ steps.changes.outputs.rust }}"
           echo "Apple code changed: ${{ steps.changes.outputs.apple }}"
+          echo "Linux code changed: ${{ steps.changes.outputs.linux }}"
           echo "Android code changed: ${{ steps.changes.outputs.android }}"
           echo "Documentation changed: ${{ steps.changes.outputs.docs }}"
 
@@ -157,7 +163,9 @@ jobs:
             libappindicator3-dev \
             librsvg2-dev \
             patchelf \
-            libfuse3-dev
+            libfuse3-dev \
+            libgtk-4-dev \
+            libadwaita-1-dev
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable

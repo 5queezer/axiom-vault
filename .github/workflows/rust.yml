@@ -26,7 +26,9 @@ jobs:
           libappindicator3-dev \
           librsvg2-dev \
           patchelf \
-          libfuse3-dev
+          libfuse3-dev \
+          libgtk-4-dev \
+          libadwaita-1-dev
 
     - name: Build
       run: cargo build --verbose
