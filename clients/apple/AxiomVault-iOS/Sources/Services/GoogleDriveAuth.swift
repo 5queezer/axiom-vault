@@ -1,5 +1,9 @@
 import Foundation
+#if canImport(UIKit)
 import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 import AuthenticationServices
 import Security
 import CryptoKit
@@ -446,10 +450,16 @@ class GoogleDriveAuth: NSObject, ObservableObject {
 
 extension GoogleDriveAuth: ASWebAuthenticationPresentationContextProviding {
     func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+        #if canImport(UIKit)
         UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }
             .flatMap { $0.windows }
             .first { $0.isKeyWindow } ?? ASPresentationAnchor()
+        #elseif canImport(AppKit)
+        NSApplication.shared.keyWindow ?? ASPresentationAnchor()
+        #else
+        ASPresentationAnchor()
+        #endif
     }
 }
 
