@@ -9,7 +9,6 @@
 )]
 
 mod commands;
-mod local_index;
 mod state;
 
 use std::sync::Arc;

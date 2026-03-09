@@ -9,11 +9,21 @@
 //! Database files are created with restrictive permissions (0600) to limit
 //! access to the owning user.
 
-use rusqlite::{params, Connection, Result as SqliteResult};
+use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::sync::Mutex;
 use tracing::{debug, info};
+
+use crate::error::{AppError, AppResult};
+
+fn sqlite_err(e: rusqlite::Error) -> AppError {
+    AppError::Storage(format!("SQLite error: {}", e))
+}
+
+fn lock_err() -> AppError {
+    AppError::Internal("Failed to acquire index lock".to_string())
+}
 
 /// Represents a cached vault entry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -31,26 +41,16 @@ pub struct LocalIndex {
     conn: Mutex<Connection>,
 }
 
-#[allow(dead_code)]
 impl LocalIndex {
     /// Create or open a local index database.
     ///
     /// The database file is created with mode 0600 (owner read/write only)
     /// to prevent other users from reading cached vault metadata.
-    ///
-    /// # Arguments
-    /// - `db_path`: Path to the SQLite database file
-    ///
-    /// # Errors
-    /// - Database creation or migration failure
-    pub fn open(db_path: impl AsRef<Path>) -> SqliteResult<Self> {
+    pub fn open(db_path: impl AsRef<Path>) -> AppResult<Self> {
         let db_path = db_path.as_ref();
         let is_new = !db_path.exists() || db_path.to_str() == Some(":memory:");
-        let conn = Connection::open(db_path)?;
+        let conn = Connection::open(db_path).map_err(sqlite_err)?;
 
-        // Set restrictive file permissions on newly created database files.
-        // This prevents other users on the system from reading cached
-        // plaintext vault metadata (filenames, sizes, timestamps).
         #[cfg(unix)]
         if is_new && db_path.to_str() != Some(":memory:") {
             use std::os::unix::fs::PermissionsExt;
@@ -61,7 +61,6 @@ impl LocalIndex {
             }
         }
 
-        // Initialize schema
         conn.execute_batch(
             r#"
             CREATE TABLE IF NOT EXISTS vault_entries (
@@ -80,7 +79,8 @@ impl LocalIndex {
 
             CREATE INDEX IF NOT EXISTS idx_parent ON vault_entries(path);
             "#,
-        )?;
+        )
+        .map_err(sqlite_err)?;
 
         info!("Local index opened successfully");
         Ok(Self {
@@ -89,19 +89,14 @@ impl LocalIndex {
     }
 
     /// Create an in-memory index (for testing).
-    pub fn in_memory() -> SqliteResult<Self> {
+    pub fn in_memory() -> AppResult<Self> {
         Self::open(":memory:")
     }
 
     /// Insert or update an entry in the index.
-    pub fn upsert_entry(&self, entry: &IndexEntry) -> SqliteResult<()> {
+    pub fn upsert_entry(&self, entry: &IndexEntry) -> AppResult<()> {
         debug!("Upserting entry: {}", entry.path);
-        let conn = self.conn.lock().map_err(|_| {
-            rusqlite::Error::SqliteFailure(
-                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
-                Some("Failed to acquire lock".to_string()),
-            )
-        })?;
+        let conn = self.conn.lock().map_err(|_| lock_err())?;
         conn.execute(
             r#"
             INSERT OR REPLACE INTO vault_entries
@@ -116,24 +111,22 @@ impl LocalIndex {
                 entry.modified_at,
                 entry.etag,
             ],
-        )?;
+        )
+        .map_err(sqlite_err)?;
         Ok(())
     }
 
     /// Get an entry by path.
-    pub fn get_entry(&self, path: &str) -> SqliteResult<Option<IndexEntry>> {
-        let conn = self.conn.lock().map_err(|_| {
-            rusqlite::Error::SqliteFailure(
-                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
-                Some("Failed to acquire lock".to_string()),
-            )
-        })?;
-        let mut stmt = conn.prepare(
-            r#"
+    pub fn get_entry(&self, path: &str) -> AppResult<Option<IndexEntry>> {
+        let conn = self.conn.lock().map_err(|_| lock_err())?;
+        let mut stmt = conn
+            .prepare(
+                r#"
             SELECT path, encrypted_name, is_directory, size, modified_at, etag
             FROM vault_entries WHERE path = ?1
             "#,
-        )?;
+            )
+            .map_err(sqlite_err)?;
 
         let entry = stmt.query_row([path], |row| {
             Ok(IndexEntry {
@@ -149,42 +142,31 @@ impl LocalIndex {
         match entry {
             Ok(e) => Ok(Some(e)),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(e),
+            Err(e) => Err(sqlite_err(e)),
         }
     }
 
     /// List children of a directory.
-    pub fn list_children(&self, parent_path: &str) -> SqliteResult<Vec<IndexEntry>> {
-        let _pattern = if parent_path == "/" {
-            "/[^/]+$".to_string()
-        } else {
-            format!("{}[/][^/]+$", regex::escape(parent_path))
-        };
-
-        // Simplified: just get direct children
+    pub fn list_children(&self, parent_path: &str) -> AppResult<Vec<IndexEntry>> {
         let prefix = if parent_path == "/" {
             "/".to_string()
         } else {
             format!("{}/", parent_path)
         };
 
-        let conn = self.conn.lock().map_err(|_| {
-            rusqlite::Error::SqliteFailure(
-                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
-                Some("Failed to acquire lock".to_string()),
-            )
-        })?;
-        let mut stmt = conn.prepare(
-            r#"
+        let conn = self.conn.lock().map_err(|_| lock_err())?;
+        let mut stmt = conn
+            .prepare(
+                r#"
             SELECT path, encrypted_name, is_directory, size, modified_at, etag
             FROM vault_entries
             WHERE path LIKE ?1 AND path != ?2
             "#,
-        )?;
+            )
+            .map_err(sqlite_err)?;
 
         let entries = stmt.query_map([format!("{}%", prefix), parent_path.to_string()], |row| {
             let path: String = row.get(0)?;
-            // Check if it's a direct child (no additional slashes after prefix)
             let relative = &path[prefix.len()..];
             if !relative.contains('/') {
                 Ok(Some(IndexEntry {
@@ -198,11 +180,11 @@ impl LocalIndex {
             } else {
                 Ok(None)
             }
-        })?;
+        });
 
         let mut result = Vec::new();
-        for entry in entries {
-            if let Some(e) = entry? {
+        for entry in entries.map_err(sqlite_err)? {
+            if let Some(e) = entry.map_err(sqlite_err)? {
                 result.push(e);
             }
         }
@@ -210,110 +192,81 @@ impl LocalIndex {
     }
 
     /// Delete an entry by path.
-    pub fn delete_entry(&self, path: &str) -> SqliteResult<()> {
+    pub fn delete_entry(&self, path: &str) -> AppResult<()> {
         debug!("Deleting entry: {}", path);
-        let conn = self.conn.lock().map_err(|_| {
-            rusqlite::Error::SqliteFailure(
-                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
-                Some("Failed to acquire lock".to_string()),
-            )
-        })?;
-        conn.execute("DELETE FROM vault_entries WHERE path = ?1", params![path])?;
+        let conn = self.conn.lock().map_err(|_| lock_err())?;
+        conn.execute("DELETE FROM vault_entries WHERE path = ?1", params![path])
+            .map_err(sqlite_err)?;
         Ok(())
     }
 
     /// Delete all entries under a path (recursively).
-    pub fn delete_tree(&self, path: &str) -> SqliteResult<()> {
+    pub fn delete_tree(&self, path: &str) -> AppResult<()> {
         debug!("Deleting tree: {}", path);
-        let conn = self.conn.lock().map_err(|_| {
-            rusqlite::Error::SqliteFailure(
-                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
-                Some("Failed to acquire lock".to_string()),
-            )
-        })?;
+        let conn = self.conn.lock().map_err(|_| lock_err())?;
         conn.execute(
             "DELETE FROM vault_entries WHERE path = ?1 OR path LIKE ?2",
             params![path, format!("{}/%", path)],
-        )?;
+        )
+        .map_err(sqlite_err)?;
         Ok(())
     }
 
     /// Clear all entries.
-    pub fn clear(&self) -> SqliteResult<()> {
+    pub fn clear(&self) -> AppResult<()> {
         info!("Clearing local index");
-        let conn = self.conn.lock().map_err(|_| {
-            rusqlite::Error::SqliteFailure(
-                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
-                Some("Failed to acquire lock".to_string()),
-            )
-        })?;
-        conn.execute("DELETE FROM vault_entries", [])?;
+        let conn = self.conn.lock().map_err(|_| lock_err())?;
+        conn.execute("DELETE FROM vault_entries", [])
+            .map_err(sqlite_err)?;
         Ok(())
     }
 
     /// Securely wipe all cached data (entries and metadata).
     ///
     /// Called when the vault is locked to ensure no plaintext metadata
-    /// (filenames, directory structure, sizes, timestamps) persists on disk
-    /// after the vault is no longer accessible.
-    pub fn wipe(&self) -> SqliteResult<()> {
+    /// persists on disk after the vault is no longer accessible.
+    pub fn wipe(&self) -> AppResult<()> {
         info!("Wiping all cached vault metadata from local index");
-        let conn = self.conn.lock().map_err(|_| {
-            rusqlite::Error::SqliteFailure(
-                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
-                Some("Failed to acquire lock".to_string()),
-            )
-        })?;
-        conn.execute("DELETE FROM vault_entries", [])?;
-        conn.execute("DELETE FROM vault_metadata", [])?;
-        // Force SQLite to reclaim space so deleted data doesn't linger in
-        // the database file on disk.
-        conn.execute_batch("VACUUM")?;
+        let conn = self.conn.lock().map_err(|_| lock_err())?;
+        conn.execute("DELETE FROM vault_entries", [])
+            .map_err(sqlite_err)?;
+        conn.execute("DELETE FROM vault_metadata", [])
+            .map_err(sqlite_err)?;
+        conn.execute_batch("VACUUM").map_err(sqlite_err)?;
         Ok(())
     }
 
     /// Get vault metadata value.
-    pub fn get_metadata(&self, key: &str) -> SqliteResult<Option<String>> {
-        let conn = self.conn.lock().map_err(|_| {
-            rusqlite::Error::SqliteFailure(
-                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
-                Some("Failed to acquire lock".to_string()),
-            )
-        })?;
-        let mut stmt = conn.prepare("SELECT value FROM vault_metadata WHERE key = ?1")?;
+    pub fn get_metadata(&self, key: &str) -> AppResult<Option<String>> {
+        let conn = self.conn.lock().map_err(|_| lock_err())?;
+        let mut stmt = conn
+            .prepare("SELECT value FROM vault_metadata WHERE key = ?1")
+            .map_err(sqlite_err)?;
 
         match stmt.query_row([key], |row| row.get(0)) {
             Ok(v) => Ok(Some(v)),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(e),
+            Err(e) => Err(sqlite_err(e)),
         }
     }
 
     /// Set vault metadata value.
-    pub fn set_metadata(&self, key: &str, value: &str) -> SqliteResult<()> {
-        let conn = self.conn.lock().map_err(|_| {
-            rusqlite::Error::SqliteFailure(
-                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
-                Some("Failed to acquire lock".to_string()),
-            )
-        })?;
+    pub fn set_metadata(&self, key: &str, value: &str) -> AppResult<()> {
+        let conn = self.conn.lock().map_err(|_| lock_err())?;
         conn.execute(
             "INSERT OR REPLACE INTO vault_metadata (key, value) VALUES (?1, ?2)",
             params![key, value],
-        )?;
+        )
+        .map_err(sqlite_err)?;
         Ok(())
     }
 
     /// Get total entry count.
-    pub fn count(&self) -> SqliteResult<u64> {
-        let conn = self.conn.lock().map_err(|_| {
-            rusqlite::Error::SqliteFailure(
-                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
-                Some("Failed to acquire lock".to_string()),
-            )
-        })?;
-        let count: i64 =
-            conn.query_row("SELECT COUNT(*) FROM vault_entries", [], |row| row.get(0))?;
+    pub fn count(&self) -> AppResult<u64> {
+        let conn = self.conn.lock().map_err(|_| lock_err())?;
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM vault_entries", [], |row| row.get(0))
+            .map_err(sqlite_err)?;
         Ok(count as u64)
     }
 }
@@ -389,5 +342,47 @@ mod tests {
         index.set_metadata("vault_id", "test-vault").unwrap();
         let value = index.get_metadata("vault_id").unwrap().unwrap();
         assert_eq!(value, "test-vault");
+    }
+
+    #[test]
+    fn test_wipe() {
+        let index = LocalIndex::in_memory().unwrap();
+
+        let entry = IndexEntry {
+            path: "/secret.txt".to_string(),
+            encrypted_name: "enc".to_string(),
+            is_directory: false,
+            size: Some(42),
+            modified_at: 1234567890,
+            etag: None,
+        };
+        index.upsert_entry(&entry).unwrap();
+        index.set_metadata("vault_id", "test").unwrap();
+
+        index.wipe().unwrap();
+
+        assert_eq!(index.count().unwrap(), 0);
+        assert!(index.get_metadata("vault_id").unwrap().is_none());
+    }
+
+    #[test]
+    fn test_delete_tree() {
+        let index = LocalIndex::in_memory().unwrap();
+
+        for path in &["/dir", "/dir/a.txt", "/dir/b.txt", "/dir/sub/c.txt"] {
+            index
+                .upsert_entry(&IndexEntry {
+                    path: path.to_string(),
+                    encrypted_name: "enc".to_string(),
+                    is_directory: path.ends_with("dir") || path.ends_with("sub"),
+                    size: None,
+                    modified_at: 0,
+                    etag: None,
+                })
+                .unwrap();
+        }
+
+        index.delete_tree("/dir").unwrap();
+        assert_eq!(index.count().unwrap(), 0);
     }
 }

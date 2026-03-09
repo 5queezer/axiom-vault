@@ -403,6 +403,28 @@ impl AppService {
         })
     }
 
+    // -- File import/export --
+
+    /// Import a local file into the vault.
+    pub async fn import_file(&self, local_path: &str, vault_path: &str) -> AppResult<()> {
+        let content = tokio::fs::read(local_path)
+            .await
+            .map_err(|e| AppError::Storage(format!("Failed to read local file: {}", e)))?;
+
+        self.create_file(vault_path, &content).await
+    }
+
+    /// Export a vault file to the local filesystem.
+    pub async fn export_file(&self, vault_path: &str, local_path: &str) -> AppResult<()> {
+        let content = self.read_file(vault_path).await?;
+
+        tokio::fs::write(local_path, content)
+            .await
+            .map_err(|e| AppError::Storage(format!("Failed to write local file: {}", e)))?;
+
+        Ok(())
+    }
+
     /// Check if a vault exists at the given location.
     pub async fn vault_exists(
         &self,
