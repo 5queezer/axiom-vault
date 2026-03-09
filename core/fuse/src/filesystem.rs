@@ -9,9 +9,9 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use fuser::{
-    Errno, FileAttr, FileHandle, FileType, Filesystem, FopenFlags, Generation, INodeNo, LockOwner,
-    OpenFlags, ReplyAttr, ReplyCreate, ReplyData, ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyOpen,
-    ReplyWrite, Request, TimeOrNow, WriteFlags,
+    BsdFileFlags, Errno, FileAttr, FileHandle, FileType, Filesystem, FopenFlags, Generation,
+    INodeNo, LockOwner, OpenFlags, ReplyAttr, ReplyCreate, ReplyData, ReplyDirectory, ReplyEmpty,
+    ReplyEntry, ReplyOpen, ReplyWrite, Request, TimeOrNow, WriteFlags,
 };
 use tokio::runtime::Handle;
 use tokio::sync::RwLock;
@@ -393,7 +393,7 @@ impl Filesystem for VaultFilesystem {
 
     fn open(&self, _req: &Request, ino: INodeNo, flags: OpenFlags, reply: ReplyOpen) {
         let ino: u64 = ino.into();
-        debug!("open: ino={}, flags={}", ino, flags);
+        debug!("open: ino={}, flags={:?}", ino, flags);
 
         let session = self.session.clone();
         let inodes = self.inodes.clone();
@@ -600,7 +600,7 @@ impl Filesystem for VaultFilesystem {
         name: &OsStr,
         _mode: u32,
         _umask: u32,
-        _flags: OpenFlags,
+        _flags: i32,
         reply: ReplyCreate,
     ) {
         let parent: u64 = parent.into();
@@ -687,7 +687,13 @@ impl Filesystem for VaultFilesystem {
 
             let attr = create_file_attr(ino, false, 0);
 
-            reply.created(&ttl, &attr, Generation(0), FileHandle(fh), FopenFlags::empty());
+            reply.created(
+                &ttl,
+                &attr,
+                Generation(0),
+                FileHandle(fh),
+                FopenFlags::empty(),
+            );
         });
     }
 
@@ -909,7 +915,7 @@ impl Filesystem for VaultFilesystem {
         _crtime: Option<SystemTime>,
         _chgtime: Option<SystemTime>,
         _bkuptime: Option<SystemTime>,
-        _flags: Option<u32>,
+        _flags: Option<BsdFileFlags>,
         reply: ReplyAttr,
     ) {
         debug!("setattr: ino={}, size={:?}", u64::from(ino), size);

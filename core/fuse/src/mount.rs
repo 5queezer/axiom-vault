@@ -144,11 +144,9 @@ pub fn mount(
         mount_options.push(MountOption::DefaultPermissions);
     }
 
-    let config = Config {
-        mount_options,
-        acl,
-        ..Config::default()
-    };
+    let mut config = Config::default();
+    config.mount_options = mount_options;
+    config.acl = acl;
 
     // Spawn the FUSE request-servicing thread via fuser::spawn_mount2.
     // The BackgroundSession returned here:
