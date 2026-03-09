@@ -2,9 +2,7 @@
 let _invoke = null;
 
 function getTauriInvoke() {
-    // Check withGlobalTauri API (preferred)
-    if (window.__TAURI__?.core?.invoke) return window.__TAURI__.core.invoke;
-    // Fallback to internal IPC bridge
+    // Use the internal IPC bridge (withGlobalTauri is disabled for security)
     if (window.__TAURI_INTERNALS__?.invoke) return window.__TAURI_INTERNALS__.invoke;
     return null;
 }
@@ -13,7 +11,7 @@ let _tauriReady = null;
 function waitForTauri() {
     if (_tauriReady) return _tauriReady;
     _tauriReady = new Promise((resolve) => {
-        // Check immediately — with withGlobalTauri it's often already available
+        // Check immediately — the IPC bridge may already be available
         const fn = getTauriInvoke();
         if (fn) {
             console.log('[Tauri] API available immediately');
