@@ -13,10 +13,14 @@ use tracing_subscriber::FmtSubscriber;
 use url::Url;
 
 use axiomvault_common::{VaultId, VaultPath};
+use axiomvault_crypto::recovery::RecoveryKey;
 use axiomvault_crypto::KdfParams;
 use axiomvault_storage::gdrive::{AuthConfig, AuthManager, GDriveConfig, Tokens};
 use axiomvault_sync::{ConflictStrategy, SyncConfig, SyncEngine, SyncMode, SyncState};
-use axiomvault_vault::{VaultManager, VaultOperations};
+use axiomvault_vault::{
+    check_migration_needed, check_vault_health, check_vault_structure, MigrationRegistry,
+    MigrationStatus, VaultConfig, VaultManager, VaultOperations, VaultVersion,
+};
 
 #[derive(Parser)]
 #[command(name = "axiomvault")]
@@ -132,6 +136,38 @@ enum Commands {
         path: PathBuf,
     },
 
+    /// Show recovery key for a vault (requires password).
+    ShowRecoveryKey {
+        /// Path to the vault.
+        #[arg(short, long)]
+        path: PathBuf,
+    },
+
+    /// Reset vault password using recovery key words.
+    ResetPassword {
+        /// Path to the vault.
+        #[arg(short, long)]
+        path: PathBuf,
+    },
+
+    /// Migrate a legacy vault to support recovery keys.
+    MigrateVault {
+        /// Path to the vault.
+        #[arg(short, long)]
+        path: PathBuf,
+    },
+
+    /// Check vault health and integrity.
+    Check {
+        /// Path to the vault.
+        #[arg(short, long)]
+        path: PathBuf,
+
+        /// Run shallow check only (no password required).
+        #[arg(long)]
+        shallow: bool,
+    },
+
     /// Authenticate with Google Drive and get tokens.
     GdriveAuth {
         /// Optional custom client ID.
@@ -231,6 +267,17 @@ enum Commands {
         #[arg(short, long)]
         interval: Option<u64>,
     },
+
+    /// Migrate vault to the latest format version.
+    Migrate {
+        /// Path to the vault.
+        #[arg(short, long)]
+        path: PathBuf,
+
+        /// Only show what migrations would run, without executing them.
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 #[tokio::main]
@@ -282,6 +329,14 @@ async fn main() -> Result<()> {
 
         Commands::ChangePassword { path } => cmd_change_password(&path).await,
 
+        Commands::ShowRecoveryKey { path } => cmd_show_recovery_key(&path).await,
+
+        Commands::ResetPassword { path } => cmd_reset_password(&path).await,
+
+        Commands::MigrateVault { path } => cmd_migrate_vault(&path).await,
+
+        Commands::Check { path, shallow } => cmd_check(&path, shallow).await,
+
         Commands::GdriveAuth {
             client_id,
             client_secret,
@@ -317,6 +372,8 @@ async fn main() -> Result<()> {
             mode,
             interval,
         } => cmd_sync_configure(&vault_path, &mode, interval).await,
+
+        Commands::Migrate { path, dry_run } => cmd_migrate(&path, dry_run).await,
     }
 }
 
@@ -330,6 +387,27 @@ fn prompt_password(prompt: &str) -> Result<Vec<u8>> {
     }
     let password = rpassword::prompt_password(prompt).context("Failed to read password")?;
     Ok(password.into_bytes())
+}
+
+/// Display recovery words and prompt user to confirm they've saved them.
+fn display_recovery_words(words: &str) {
+    println!();
+    println!("=== RECOVERY KEY ===");
+    println!("Write down these 24 words and store them in a safe place.");
+    println!("You will need them to recover your vault if you forget your password.");
+    println!();
+    for (i, word) in words.split_whitespace().enumerate() {
+        println!("  {:>2}. {}", i + 1, word);
+    }
+    println!();
+    println!("WARNING: This is the only time the recovery key will be shown.");
+    println!("If you lose it, you will not be able to recover your vault.");
+    println!();
+    print!("Press Enter after you have written down the recovery key...");
+    use std::io::Write;
+    std::io::stdout().flush().ok();
+    let mut buf = String::new();
+    std::io::stdin().read_line(&mut buf).ok();
 }
 
 /// Create a new vault.
@@ -364,15 +442,16 @@ async fn cmd_create(name: &str, path: &Path, strength: &str) -> Result<()> {
         "root": vault_path
     });
 
-    let session = manager
+    let creation = manager
         .create_vault(vault_id, &password, "local", provider_config, kdf_params)
         .await
         .context("Failed to create vault")?;
 
     println!("Vault created successfully!");
-    println!("  ID: {}", session.vault_id());
+    println!("  ID: {}", creation.session.vault_id());
     println!("  Location: {}", path.display());
-    println!("  Provider: {}", session.config().provider_type);
+    println!("  Provider: {}", creation.session.config().provider_type);
+    display_recovery_words(&creation.recovery_words);
 
     Ok(())
 }
@@ -655,6 +734,188 @@ async fn cmd_change_password(path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Show recovery key for a vault.
+async fn cmd_show_recovery_key(path: &Path) -> Result<()> {
+    info!("Showing recovery key");
+
+    let password = prompt_password("Enter password: ")?;
+    let path_str = path.to_string_lossy().to_string();
+
+    let manager = VaultManager::new();
+    let provider_config = serde_json::json!({
+        "root": path_str
+    });
+
+    let session = manager
+        .open_vault("local", provider_config, &password)
+        .await
+        .context("Failed to open vault")?;
+
+    let master_key = session.master_key().context("Session not active")?;
+    let recovery_key = session
+        .config()
+        .decrypt_recovery_key(master_key)
+        .context("Failed to decrypt recovery key. Vault may not have a recovery key.")?;
+
+    let words = recovery_key
+        .to_mnemonic()
+        .context("Failed to encode recovery key")?;
+
+    display_recovery_words(&words);
+
+    Ok(())
+}
+
+/// Reset vault password using recovery key.
+async fn cmd_reset_password(path: &Path) -> Result<()> {
+    info!("Resetting vault password using recovery key");
+
+    println!("Enter your 24-word recovery key (space-separated):");
+    let mut recovery_input = String::new();
+    std::io::stdin()
+        .read_line(&mut recovery_input)
+        .context("Failed to read recovery key")?;
+    let recovery_words = recovery_input.trim();
+
+    // Validate the recovery key format first.
+    RecoveryKey::from_mnemonic(recovery_words)
+        .context("Invalid recovery key. Please check your words and try again.")?;
+
+    let new_password = prompt_password("Enter new password: ")?;
+    let confirm = prompt_password("Confirm new password: ")?;
+
+    if new_password != confirm {
+        anyhow::bail!("Passwords do not match");
+    }
+
+    if new_password.is_empty() {
+        anyhow::bail!("Password cannot be empty");
+    }
+
+    let path_str = path.to_string_lossy().to_string();
+
+    let manager = VaultManager::new();
+    let provider_config = serde_json::json!({
+        "root": path_str
+    });
+
+    let _session = manager
+        .recover_vault("local", provider_config, recovery_words, &new_password)
+        .await
+        .context("Failed to reset password. Recovery key may be incorrect.")?;
+
+    println!("Password reset successfully!");
+
+    Ok(())
+}
+
+/// Migrate a legacy vault to support recovery keys.
+async fn cmd_migrate_vault(path: &Path) -> Result<()> {
+    info!("Migrating vault to v1.1 format");
+
+    let password = prompt_password("Enter password: ")?;
+    let path_str = path.to_string_lossy().to_string();
+
+    let manager = VaultManager::new();
+    let provider_config = serde_json::json!({
+        "root": path_str
+    });
+
+    let mut session = manager
+        .open_vault("local", provider_config, &password)
+        .await
+        .context("Failed to open vault")?;
+
+    if !session.config().is_legacy_format() {
+        println!("Vault is already in v1.1 format with recovery key support.");
+        return Ok(());
+    }
+
+    let recovery_words = session
+        .config_mut()
+        .migrate_to_v1_1(&password)
+        .context("Failed to migrate vault")?;
+
+    // Save updated config.
+    manager
+        .save_config(&session)
+        .await
+        .context("Failed to save migrated config")?;
+
+    println!("Vault migrated successfully to v1.1 format!");
+    display_recovery_words(&recovery_words);
+
+    Ok(())
+}
+
+/// Check vault health and integrity.
+async fn cmd_check(path: &Path, shallow: bool) -> Result<()> {
+    let path_str = path.to_string_lossy().to_string();
+
+    let provider_config = serde_json::json!({
+        "root": path_str
+    });
+
+    let manager = VaultManager::new();
+    let provider = manager
+        .registry()
+        .resolve("local", provider_config.clone())
+        .context("Failed to create storage provider")?;
+
+    if shallow {
+        info!("Running shallow vault check (no password required)");
+        let report = check_vault_structure(provider.as_ref(), &path_str)
+            .await
+            .context("Failed to run shallow health check")?;
+
+        print_health_report(&report);
+        return Ok(());
+    }
+
+    info!("Running full vault health check");
+    let password = prompt_password("Enter password: ")?;
+
+    let session = manager
+        .open_vault("local", provider_config, &password)
+        .await
+        .context("Failed to open vault")?;
+
+    let master_key = session.master_key().context("Session not active")?;
+
+    let report = check_vault_health(provider.as_ref(), session.config(), master_key, &path_str)
+        .await
+        .context("Failed to run health check")?;
+
+    print_health_report(&report);
+
+    Ok(())
+}
+
+/// Print a health report to stdout.
+fn print_health_report(report: &axiomvault_vault::HealthReport) {
+    println!("Vault Health Report: {}", report.vault_path);
+    println!("{}", "=".repeat(50));
+
+    for result in &report.results {
+        let icon = match result.severity {
+            axiomvault_vault::Severity::Info => "[OK]  ",
+            axiomvault_vault::Severity::Warning => "[WARN]",
+            axiomvault_vault::Severity::Error => "[ERR] ",
+        };
+        println!("  {} {}: {}", icon, result.check_name, result.message);
+        if result.auto_fixable {
+            println!("         (auto-fixable)");
+        }
+    }
+
+    println!();
+    if report.has_errors() {
+        println!("Result: ERRORS FOUND");
+    } else {
+        println!("Result: HEALTHY");
+    }
+}
+
 /// Authenticate with Google Drive and save tokens.
 async fn cmd_gdrive_auth(
     client_id: Option<String>,
@@ -874,15 +1135,16 @@ async fn cmd_gdrive_create(
     let provider_config =
         serde_json::to_value(gdrive_config).context("Failed to serialize GDrive config")?;
 
-    let session = manager
+    let creation = manager
         .create_vault(vault_id, &password, "gdrive", provider_config, kdf_params)
         .await
         .context("Failed to create vault on Google Drive")?;
 
     println!("Vault created successfully on Google Drive!");
-    println!("  ID: {}", session.vault_id());
+    println!("  ID: {}", creation.session.vault_id());
     println!("  Folder ID: {}", folder_id);
-    println!("  Provider: {}", session.config().provider_type);
+    println!("  Provider: {}", creation.session.config().provider_type);
+    display_recovery_words(&creation.recovery_words);
 
     Ok(())
 }
@@ -1175,6 +1437,79 @@ async fn cmd_sync_configure(vault_path: &Path, mode: &str, interval: Option<u64>
     println!("Sync configuration updated!");
     println!("  Mode: {}", mode_str);
     println!("  Config saved to: {}", config_file.display());
+
+    Ok(())
+}
+
+/// Detect and run vault format migrations.
+async fn cmd_migrate(path: &Path, dry_run: bool) -> Result<()> {
+    info!("Checking vault migration status: {}", path.display());
+
+    let config_path = path.join("vault.config");
+    if !config_path.exists() {
+        anyhow::bail!("No vault found at {}", path.display());
+    }
+
+    let config_bytes = tokio::fs::read(&config_path)
+        .await
+        .context("Failed to read vault config")?;
+    let mut config = VaultConfig::from_bytes(&config_bytes).context("Failed to parse config")?;
+
+    let status = check_migration_needed(&config);
+
+    match &status {
+        MigrationStatus::UpToDate => {
+            println!("Vault is up to date (version {}).", config.version);
+            return Ok(());
+        }
+        MigrationStatus::Incompatible { version } => {
+            anyhow::bail!(
+                "Vault version {} is incompatible with this software (current: {})",
+                version,
+                VaultVersion::CURRENT
+            );
+        }
+        MigrationStatus::NeedsMigration { from, to } => {
+            println!("Migration needed: {} -> {}", from, to);
+        }
+    }
+
+    let registry = MigrationRegistry::default();
+    let target = VaultVersion::CURRENT;
+
+    if let Some(steps) = registry.find_path(&config.version, &target) {
+        println!("Migration plan ({} step(s)):", steps.len());
+        for (i, step) in steps.iter().enumerate() {
+            println!(
+                "  {}. {} -> {}: {}",
+                i + 1,
+                step.source_version(),
+                step.target_version(),
+                step.description()
+            );
+        }
+    } else {
+        anyhow::bail!(
+            "No migration path found from {} to {}",
+            config.version,
+            target
+        );
+    }
+
+    if dry_run {
+        println!("\nDry run complete. No changes were made.");
+        return Ok(());
+    }
+
+    println!("\nRunning migrations...");
+    registry
+        .migrate(path, &mut config, &target)
+        .context("Migration failed")?;
+
+    println!(
+        "Migration completed successfully! Vault is now at version {}.",
+        config.version
+    );
 
     Ok(())
 }

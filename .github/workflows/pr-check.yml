@@ -110,7 +110,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       rust_changed: ${{ steps.changes.outputs.rust }}
-      ios_changed: ${{ steps.changes.outputs.ios }}
+      apple_changed: ${{ steps.changes.outputs.apple }}
       android_changed: ${{ steps.changes.outputs.android }}
       docs_changed: ${{ steps.changes.outputs.docs }}
     steps:
@@ -125,8 +125,8 @@ jobs:
               - 'tools/**'
               - 'Cargo.toml'
               - 'Cargo.lock'
-            ios:
-              - 'clients/ios/**'
+            apple:
+              - 'clients/apple/**'
             android:
               - 'clients/android/**'
             docs:
@@ -136,7 +136,7 @@ jobs:
       - name: Report changes
         run: |
           echo "Rust code changed: ${{ steps.changes.outputs.rust }}"
-          echo "iOS code changed: ${{ steps.changes.outputs.ios }}"
+          echo "Apple code changed: ${{ steps.changes.outputs.apple }}"
           echo "Android code changed: ${{ steps.changes.outputs.android }}"
           echo "Documentation changed: ${{ steps.changes.outputs.docs }}"
 

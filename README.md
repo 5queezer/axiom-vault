@@ -1,24 +1,77 @@
-# AxiomVault
+<p align="center">
+  <img src="clients/desktop/src-tauri/icons/icon.png" alt="AxiomVault" width="120">
+</p>
 
-> **Warning**
-> This project is in **early design phase** and is **not production ready**. APIs may change without notice, features may be incomplete, and there may be security vulnerabilities. Do not use for storing sensitive data in production environments.
+<h1 align="center">AxiomVault</h1>
 
-A cross-platform encrypted vault system with client-side encryption, independent of cloud provider trust. Built in Rust with support for Linux, macOS, iOS, and Android.
+<p align="center">
+  Cross-platform encrypted vault with client-side encryption, built in Rust.
+</p>
+
+<p align="center">
+  <a href="https://github.com/5queezer/axiom-vault/actions/workflows/rust-ci.yml"><img src="https://github.com/5queezer/axiom-vault/actions/workflows/rust-ci.yml/badge.svg" alt="Rust CI"></a>
+  <a href="https://github.com/5queezer/axiom-vault/actions/workflows/pr-check.yml"><img src="https://github.com/5queezer/axiom-vault/actions/workflows/pr-check.yml/badge.svg" alt="PR Check"></a>
+  <a href="https://github.com/5queezer/axiom-vault/releases/latest"><img src="https://img.shields.io/github/v/release/5queezer/axiom-vault?include_prereleases" alt="Latest Release"></a>
+  <a href="https://github.com/5queezer/axiom-vault/blob/master/LICENSE"><img src="https://img.shields.io/github/license/5queezer/axiom-vault" alt="License"></a>
+</p>
+
+---
+
+> [!WARNING]
+> This project is in **early development** and is **not production ready**. APIs may change, features may be incomplete. Do not use for storing sensitive data in production.
+
+## Overview
+
+AxiomVault encrypts your files locally before they touch any cloud service. A single Rust core powers every platform &mdash; no JVM, no Electron, just native performance with native UIs.
+
+**Platforms:** Linux, macOS, iOS, Android
+**Clients:** CLI, Desktop (Tauri), macOS (SwiftUI), iOS (SwiftUI), Android (Compose)
 
 ## Features
 
-- **Strong Encryption**: XChaCha20-Poly1305 with Argon2id key derivation
-- **Cloud Storage**: Google Drive integration (iCloud, OneDrive planned)
-- **FUSE Mounting**: Mount vaults as virtual filesystems
-- **Cross-Platform**: CLI, desktop GUI, iOS, and Android clients
-- **Sync Engine**: Conflict detection and resolution strategies
+### Encryption
+
+| Property | Details |
+|----------|---------|
+| Content encryption | XChaCha20-Poly1305 (AEAD) with 24-byte nonces |
+| Key derivation | Argon2id (memory-hard, GPU-resistant) |
+| Filename encryption | Deterministic XChaCha20-Poly1305 |
+| Directory structure | Fully encrypted tree index |
+| Streaming | Chunked encryption (64 KiB) with per-chunk authentication |
+| Key hierarchy | Blake2b-derived file keys, directory keys, and index keys |
+| Memory safety | Automatic zeroization, constant-time comparisons, no plaintext logging |
+
+### Platform Features
+
+| Feature | CLI | Desktop | macOS | iOS | Android |
+|---------|:---:|:-------:|:-----:|:---:|:-------:|
+| Create / unlock vault | x | x | x | x | x |
+| Browse files | x | x | x | x | x |
+| Add files & folders | x | x | x | x | x |
+| Extract / export | x | x | x | x | x |
+| Drag & drop | | x | x | x | |
+| FUSE mount | x | x | | | |
+| File Provider | | | x | x | |
+| Google Drive sync | x | x | x | x | x |
+| Change password | x | x | x | x | x |
+
+### Cloud Storage
+
+- **Google Drive** &mdash; full OAuth2 integration with resumable uploads
+- **Local filesystem** &mdash; for offline or self-hosted storage
+- iCloud, Dropbox, OneDrive &mdash; planned ([#60](https://github.com/5queezer/axiom-vault/issues/60))
+
+### Sync Engine
+
+- On-demand or periodic background sync
+- Conflict detection via ETags with configurable resolution (keep both, prefer local, prefer remote, manual)
+- Exponential backoff retry
 
 ## Quick Start
 
 ### Prerequisites
 
-**All Platforms:**
-- Rust stable toolchain
+- [Rust](https://rustup.rs/) stable toolchain
 
 **Linux (Debian/Ubuntu):**
 ```bash
@@ -31,64 +84,51 @@ sudo apt-get install -y libfuse3-dev libgtk-3-dev libwebkit2gtk-4.1-dev \
 brew install --cask macfuse
 ```
 
-### Build & Install
+### Build
 
 ```bash
-# Clone the repository
-git clone <repository-url>
+git clone https://github.com/5queezer/axiom-vault.git
 cd axiom-vault
 
-# Build the CLI tool
+# CLI
 cargo build --release -p axiomvault-cli
 
-# Optional: Add to PATH
-sudo cp target/release/axiomvault /usr/local/bin/
+# Desktop (with FUSE)
+cargo build --release --package axiomvault-desktop --features axiomvault-fuse/fuse
+
+# Apple clients (requires Xcode + XcodeGen)
+cd clients/apple
+./Scripts/build-apple.sh --platform all
+xcodegen generate
+open AxiomVault.xcodeproj
 ```
 
-### Basic Usage
-
-#### Create a Vault
+### Usage
 
 ```bash
+# Create a vault
 axiomvault create --name MyVault --path ~/my-vault
-# Enter password when prompted
-```
 
-#### Add Files
+# Add files
+axiomvault add --vault-path ~/my-vault --source ~/secret.pdf --dest /secret.pdf
 
-```bash
-axiomvault add --vault-path ~/my-vault \
-    --source ~/documents/secret.pdf \
-    --dest /secret.pdf
-```
-
-#### List Contents
-
-```bash
+# List contents
 axiomvault list --vault-path ~/my-vault
-```
 
-#### Extract Files
+# Extract files
+axiomvault extract --vault-path ~/my-vault --source /secret.pdf --dest ~/secret.pdf
 
-```bash
-axiomvault extract --vault-path ~/my-vault \
-    --source /secret.pdf \
-    --dest ~/downloads/secret.pdf
-```
-
-#### Open Interactive Session
-
-```bash
+# Interactive session
 axiomvault open --path ~/my-vault
 ```
 
-### Google Drive Integration
+### Google Drive
 
 ```bash
 # Authenticate (opens browser)
 axiomvault gdrive-auth --output ~/gdrive-tokens.json
 
-# Create vault on Google Drive
+# Create vault on Drive
 axiomvault gdrive-create --name CloudVault \
     --folder-id YOUR_FOLDER_ID \
     --tokens ~/gdrive-tokens.json
@@ -98,118 +138,100 @@ axiomvault gdrive-open --folder-id YOUR_FOLDER_ID \
     --tokens ~/gdrive-tokens.json
 ```
 
-### Sync Operations
+### Sync
 
 ```bash
-# Sync vault with remote
 axiomvault sync --vault-path ~/my-vault --strategy keep-both
-
-# Check sync status
 axiomvault sync-status --vault-path ~/my-vault
-
-# Configure automatic sync
-axiomvault sync-configure --vault-path ~/my-vault \
-    --mode periodic --interval 300
+axiomvault sync-configure --vault-path ~/my-vault --mode periodic --interval 300
 ```
-
-## Desktop Application
-
-```bash
-# Build desktop GUI (with dependency check)
-make desktop
-
-# Or use cargo directly
-cargo build --package axiomvault-desktop
-
-# With FUSE support
-cargo build --package axiomvault-desktop --features axiomvault-fuse/fuse
-```
-
-See `make help` for all available build targets.
 
 ## CLI Reference
 
 | Command | Description |
 |---------|-------------|
 | `create` | Create a new encrypted vault |
-| `open` | Open/unlock vault interactively |
+| `open` | Open vault interactively |
 | `info` | Display vault information |
 | `list` | List vault contents |
 | `add` | Add file to vault |
 | `extract` | Extract file from vault |
 | `mkdir` | Create directory in vault |
-| `remove` | Remove file/directory |
+| `remove` | Remove file or directory |
 | `change-password` | Change vault password |
 | `gdrive-auth` | Authenticate with Google Drive |
 | `gdrive-create` | Create vault on Google Drive |
 | `gdrive-open` | Open vault from Google Drive |
-| `sync` | Synchronize vault |
+| `sync` | Synchronize vault with remote |
 | `sync-status` | Show sync status |
 | `sync-configure` | Configure sync behavior |
 
-### Global Options
+**KDF strength levels:**
 
-```bash
--v, --verbose    Enable debug logging
---help           Show help information
+```
+--strength interactive   # ~0.5s, mobile-friendly (64 MiB, 3 iterations)
+--strength moderate      # ~1s, balanced (default, 32 MiB, 3 iterations)
+--strength sensitive     # ~3s, high security (256 MiB, 4 iterations)
 ```
 
-### KDF Strength Levels
-
-```bash
---strength interactive  # Fast, mobile-friendly
---strength moderate     # Balanced (default)
---strength sensitive    # High security, slower
-```
-
-## Project Structure
+## Architecture
 
 ```
 axiom-vault/
-├── core/                 # Core library modules
-│   ├── crypto/          # Encryption & key derivation
-│   ├── vault/           # Vault management
-│   ├── storage/         # Storage providers (Google Drive)
-│   ├── sync/            # Sync engine
-│   ├── fuse/            # FUSE filesystem
-│   └── ffi/             # Mobile FFI bindings
+├── core/
+│   ├── crypto/           # XChaCha20-Poly1305, Argon2id, Blake2b
+│   ├── vault/            # Vault engine, config, tree index
+│   ├── storage/          # Storage provider trait + Google Drive
+│   ├── sync/             # Sync engine, conflict resolution
+│   ├── fuse/             # FUSE virtual filesystem
+│   ├── ffi/              # C-ABI bindings for mobile (cbindgen)
+│   └── common/           # Shared types
 ├── clients/
-│   ├── ios/             # SwiftUI iOS app
-│   ├── android/         # Kotlin Android app
-│   └── desktop/         # Tauri desktop GUI
-└── tools/cli/           # Command-line interface
+│   ├── apple/            # Unified iOS + macOS (SwiftUI, XcodeGen)
+│   ├── android/          # Android (Kotlin Compose)
+│   └── desktop/          # Desktop GUI (Tauri)
+└── tools/
+    └── cli/              # Command-line interface
 ```
+
+### Vault Format
+
+```
+vault-root/
+├── vault.config          # Encrypted metadata (salt, KDF params, version)
+├── d/                    # Encrypted file content
+└── m/
+    └── tree.json         # Encrypted directory tree index
+```
+
+### Security Design
+
+- **Client-side only** &mdash; data is encrypted before leaving your device
+- **Zero-knowledge** &mdash; no server, no accounts, no key escrow
+- **Authenticated encryption** &mdash; AEAD on every chunk prevents tampering
+- **Chunk ordering protection** &mdash; chunk index is authenticated to prevent reordering
+- **Memory safety** &mdash; `Zeroize` + `ZeroizeOnDrop` on all key types, `subtle` for constant-time ops
+- **No plaintext in logs** &mdash; keys and sensitive data are redacted in `Display` impls
 
 ## Development
 
 ```bash
-# Format code
-cargo fmt --all
-
-# Run linter
-cargo clippy --all -- -D warnings
-
-# Run tests
-cargo test --all
-
-# Build all packages
-cargo build --workspace
+cargo fmt --all                       # Format
+cargo clippy --workspace -- -D warnings  # Lint
+cargo test --workspace                # Test
 ```
 
-## Environment Variables
+## Contributing
 
-```bash
-RUST_LOG=debug           # Set logging level (info, debug, trace)
-RUST_BACKTRACE=1         # Enable backtraces for debugging
-```
+Contributions are welcome. Please open an issue first to discuss what you'd like to change.
 
-## Security
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/my-feature`)
+3. Commit your changes
+4. Push and open a pull request
 
-- Client-side encryption: data encrypted before leaving your device
-- Memory zeroization: sensitive data wiped from memory
-- No plaintext logging: secrets never appear in logs
-- Constant-time comparisons for cryptographic operations
+All PRs must pass CI checks (formatting, clippy, tests) before merging.
 
 ## License
 
-MIT
+[Apache 2.0](LICENSE)

@@ -26,6 +26,14 @@ pub struct VaultInfo {
     pub mount_point: Option<String>,
 }
 
+/// Result of vault creation, including recovery words.
+#[derive(Debug, Clone, Serialize)]
+pub struct VaultCreationResult {
+    pub vault: VaultInfo,
+    /// Recovery key as 24 BIP39 words. Must be shown to the user exactly once.
+    pub recovery_words: String,
+}
+
 /// File entry for the frontend.
 #[derive(Debug, Clone, Serialize)]
 pub struct FileEntry {
@@ -147,13 +155,13 @@ pub async fn create_vault(
     id: String,
     password: String,
     provider_type: String,
-) -> Result<VaultInfo, String> {
+) -> Result<VaultCreationResult, String> {
     info!("Creating vault: {}", id);
 
     let vault_id = VaultId::new(&id).map_err(|e| e.to_string())?;
     let kdf_params = KdfParams::moderate();
 
-    let config = VaultConfig::new(
+    let creation = VaultConfig::new(
         vault_id,
         password.as_bytes(),
         &provider_type,
@@ -164,14 +172,19 @@ pub async fn create_vault(
 
     // Persist config to disk so unlock_vault can find it later
     let config_path = state.data_dir.join(format!("{}.json", id));
-    let config_json = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
+    let config_json = serde_json::to_string_pretty(&creation.config).map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&state.data_dir).map_err(|e| e.to_string())?;
     std::fs::write(&config_path, config_json).map_err(|e| e.to_string())?;
 
-    let vault_info = setup_vault_session(&state, &id, config, &password, true).await?;
+    let recovery_words = creation.recovery_words.clone();
+
+    let vault_info = setup_vault_session(&state, &id, creation.config, &password, true).await?;
 
     info!("Vault created successfully");
-    Ok(vault_info)
+    Ok(VaultCreationResult {
+        vault: vault_info,
+        recovery_words,
+    })
 }
 
 /// Unlock an existing vault.

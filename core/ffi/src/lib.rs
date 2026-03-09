@@ -473,6 +473,87 @@ pub unsafe extern "C" fn axiom_string_free(s: *mut c_char) {
     }
 }
 
+/// Check if a vault at the given path needs migration.
+///
+/// # Safety
+/// - `path` must be a valid null-terminated UTF-8 string pointing to a vault directory
+///
+/// # Returns
+/// - 0: up to date
+/// - 1: needs migration
+/// - -1: incompatible or error (check `axiom_last_error`)
+#[no_mangle]
+pub unsafe extern "C" fn axiom_vault_check_migration(path: *const c_char) -> c_int {
+    if path.is_null() {
+        error::set_last_error(FFIError::NullPointer("path is null".into()));
+        return -1;
+    }
+
+    let path_str = match CStr::from_ptr(path).to_str() {
+        Ok(s) => s,
+        Err(_) => {
+            error::set_last_error(FFIError::InvalidUtf8("path".into()));
+            return -1;
+        }
+    };
+
+    match vault_ops::check_migration(path_str) {
+        Ok(status) => status,
+        Err(e) => {
+            error::set_last_error(e);
+            -1
+        }
+    }
+}
+
+/// Run migrations on a vault at the given path.
+///
+/// The password is needed to re-open the vault after migration if the config
+/// changes affect encrypted data. For structural-only migrations the password
+/// is used for verification.
+///
+/// # Safety
+/// - `path` must be a valid null-terminated UTF-8 string pointing to a vault directory
+/// - `password` must be a valid null-terminated UTF-8 string
+///
+/// # Returns
+/// - 0 on success
+/// - -1 on error (check `axiom_last_error`)
+#[no_mangle]
+pub unsafe extern "C" fn axiom_vault_migrate(
+    path: *const c_char,
+    password: *const c_char,
+) -> c_int {
+    if path.is_null() || password.is_null() {
+        error::set_last_error(FFIError::NullPointer("path or password is null".into()));
+        return -1;
+    }
+
+    let path_str = match CStr::from_ptr(path).to_str() {
+        Ok(s) => s,
+        Err(_) => {
+            error::set_last_error(FFIError::InvalidUtf8("path".into()));
+            return -1;
+        }
+    };
+
+    let password_str = match CStr::from_ptr(password).to_str() {
+        Ok(s) => s,
+        Err(_) => {
+            error::set_last_error(FFIError::InvalidUtf8("password".into()));
+            return -1;
+        }
+    };
+
+    match vault_ops::run_migration(path_str, password_str) {
+        Ok(_) => 0,
+        Err(e) => {
+            error::set_last_error(e);
+            -1
+        }
+    }
+}
+
 /// Change the vault password.
 ///
 /// # Safety
@@ -519,6 +600,195 @@ pub unsafe extern "C" fn axiom_vault_change_password(
         Err(e) => {
             error::set_last_error(e);
             -1
+        }
+    }
+}
+
+/// Get the recovery words from a newly created vault.
+///
+/// Only returns words if the handle was obtained via `axiom_vault_create`.
+/// Returns null if the vault was opened (not created) or words already consumed.
+///
+/// # Safety
+/// - `handle` must be a valid vault handle
+/// - Returned string must be freed with `axiom_string_free`
+#[no_mangle]
+pub unsafe extern "C" fn axiom_vault_get_recovery_words(
+    handle: *const FFIVaultHandle,
+) -> *mut c_char {
+    if handle.is_null() {
+        error::set_last_error(FFIError::NullPointer("handle is null".into()));
+        return ptr::null_mut();
+    }
+
+    let handle = &*handle;
+    match &handle.recovery_words {
+        Some(words) => match CString::new(words.as_str()) {
+            Ok(cstr) => cstr.into_raw(),
+            Err(_) => {
+                error::set_last_error(FFIError::StringConversionError);
+                ptr::null_mut()
+            }
+        },
+        None => ptr::null_mut(),
+    }
+}
+
+/// Show recovery key for an open vault (requires password to have been used to open).
+///
+/// # Safety
+/// - `handle` must be a valid vault handle
+/// - Returned string must be freed with `axiom_string_free`
+#[no_mangle]
+pub unsafe extern "C" fn axiom_vault_show_recovery_key(
+    handle: *const FFIVaultHandle,
+) -> *mut c_char {
+    if handle.is_null() {
+        error::set_last_error(FFIError::NullPointer("handle is null".into()));
+        return ptr::null_mut();
+    }
+
+    let handle = &*handle;
+
+    let runtime = match get_runtime() {
+        Ok(rt) => rt,
+        Err(e) => {
+            error::set_last_error(FFIError::RuntimeError(e.to_string()));
+            return ptr::null_mut();
+        }
+    };
+
+    match runtime.block_on(vault_ops::show_recovery_key(handle)) {
+        Ok(words) => match CString::new(words) {
+            Ok(cstr) => cstr.into_raw(),
+            Err(_) => {
+                error::set_last_error(FFIError::StringConversionError);
+                ptr::null_mut()
+            }
+        },
+        Err(e) => {
+            error::set_last_error(e);
+            ptr::null_mut()
+        }
+    }
+}
+
+/// Run a vault health check and return results as JSON.
+///
+/// # Safety
+/// - `path` must be a valid null-terminated UTF-8 string
+/// - `password` may be null for a shallow (structure-only) check
+/// - Returned string must be freed with `axiom_string_free`
+#[no_mangle]
+pub unsafe extern "C" fn axiom_vault_health_check(
+    path: *const c_char,
+    password: *const c_char,
+) -> *mut c_char {
+    if path.is_null() {
+        error::set_last_error(FFIError::NullPointer("path is null".into()));
+        return ptr::null_mut();
+    }
+
+    let path_str = match CStr::from_ptr(path).to_str() {
+        Ok(s) => s,
+        Err(_) => {
+            error::set_last_error(FFIError::InvalidUtf8("path".into()));
+            return ptr::null_mut();
+        }
+    };
+
+    let password_opt = if password.is_null() {
+        None
+    } else {
+        match CStr::from_ptr(password).to_str() {
+            Ok(s) => Some(s),
+            Err(_) => {
+                error::set_last_error(FFIError::InvalidUtf8("password".into()));
+                return ptr::null_mut();
+            }
+        }
+    };
+
+    let runtime = match get_runtime() {
+        Ok(rt) => rt,
+        Err(e) => {
+            error::set_last_error(FFIError::RuntimeError(e.to_string()));
+            return ptr::null_mut();
+        }
+    };
+
+    match runtime.block_on(vault_ops::health_check(path_str, password_opt)) {
+        Ok(json) => match CString::new(json) {
+            Ok(cstr) => cstr.into_raw(),
+            Err(_) => {
+                error::set_last_error(FFIError::StringConversionError);
+                ptr::null_mut()
+            }
+        },
+        Err(e) => {
+            error::set_last_error(e);
+            ptr::null_mut()
+        }
+    }
+}
+
+/// Reset the vault password using recovery key words.
+///
+/// # Safety
+/// - `path` must be a valid null-terminated UTF-8 string
+/// - `recovery_words` must be a valid null-terminated UTF-8 string (24 space-separated words)
+/// - `new_password` must be a valid null-terminated UTF-8 string
+/// - Returns a vault handle on success, null on failure
+#[no_mangle]
+pub unsafe extern "C" fn axiom_vault_reset_password(
+    path: *const c_char,
+    recovery_words: *const c_char,
+    new_password: *const c_char,
+) -> *mut FFIVaultHandle {
+    if path.is_null() || recovery_words.is_null() || new_password.is_null() {
+        error::set_last_error(FFIError::NullPointer(
+            "path, recovery_words, or new_password is null".into(),
+        ));
+        return ptr::null_mut();
+    }
+
+    let path_str = match CStr::from_ptr(path).to_str() {
+        Ok(s) => s,
+        Err(_) => {
+            error::set_last_error(FFIError::InvalidUtf8("path".into()));
+            return ptr::null_mut();
+        }
+    };
+
+    let words_str = match CStr::from_ptr(recovery_words).to_str() {
+        Ok(s) => s,
+        Err(_) => {
+            error::set_last_error(FFIError::InvalidUtf8("recovery_words".into()));
+            return ptr::null_mut();
+        }
+    };
+
+    let password_str = match CStr::from_ptr(new_password).to_str() {
+        Ok(s) => s,
+        Err(_) => {
+            error::set_last_error(FFIError::InvalidUtf8("new_password".into()));
+            return ptr::null_mut();
+        }
+    };
+
+    let runtime = match get_runtime() {
+        Ok(rt) => rt,
+        Err(e) => {
+            error::set_last_error(FFIError::RuntimeError(e.to_string()));
+            return ptr::null_mut();
+        }
+    };
+
+    match runtime.block_on(vault_ops::reset_password(path_str, words_str, password_str)) {
+        Ok(handle) => Box::into_raw(Box::new(handle)),
+        Err(e) => {
+            error::set_last_error(e);
+            ptr::null_mut()
         }
     }
 }

@@ -9,7 +9,10 @@ use tokio::sync::RwLock;
 
 use axiomvault_common::{VaultId, VaultPath};
 use axiomvault_crypto::KdfParams;
-use axiomvault_vault::{VaultManager as CoreVaultManager, VaultOperations};
+use axiomvault_vault::{
+    check_migration_needed, check_vault_health, check_vault_structure, MigrationRegistry,
+    MigrationStatus, VaultConfig, VaultManager as CoreVaultManager, VaultOperations, VaultVersion,
+};
 
 use crate::error::{FFIError, FFIResult};
 use crate::types::{FFIVaultHandle, FFIVaultInfo, VaultHandleData};
@@ -69,7 +72,7 @@ pub async fn create_vault(path: &str, password: &str) -> FFIResult<FFIVaultHandl
 
     let manager = CoreVaultManager::new();
 
-    let session = manager
+    let creation = manager
         .create_vault(
             vault_id,
             password.as_bytes(),
@@ -80,9 +83,13 @@ pub async fn create_vault(path: &str, password: &str) -> FFIResult<FFIVaultHandl
         .await
         .map_err(|e| FFIError::VaultError(e.to_string()))?;
 
+    // Note: recovery_words from creation are available but not returned
+    // through this simple FFI. Use axiom_vault_create_with_recovery instead.
+
     Ok(VaultHandleData {
-        session: Arc::new(RwLock::new(session)),
+        session: Arc::new(RwLock::new(creation.session)),
         path: abs_path_str,
+        recovery_words: Some(creation.recovery_words),
     })
 }
 
@@ -116,6 +123,7 @@ pub async fn open_vault(path: &str, password: &str) -> FFIResult<FFIVaultHandle>
     Ok(VaultHandleData {
         session: Arc::new(RwLock::new(session)),
         path: abs_path_str,
+        recovery_words: None,
     })
 }
 
@@ -259,6 +267,47 @@ pub async fn remove_entry(handle: &FFIVaultHandle, vault_path: &str) -> FFIResul
     }
 }
 
+/// Check migration status for a vault at the given path.
+///
+/// Returns:
+/// - 0: up to date
+/// - 1: needs migration
+/// - -1 (via error): incompatible or error
+pub fn check_migration(path: &str) -> FFIResult<i32> {
+    let vault_path = std::path::Path::new(path);
+    let config_path = vault_path.join("vault.config");
+
+    let config_bytes = std::fs::read(&config_path).map_err(|e| FFIError::IOError(e.to_string()))?;
+    let config =
+        VaultConfig::from_bytes(&config_bytes).map_err(|e| FFIError::VaultError(e.to_string()))?;
+
+    match check_migration_needed(&config) {
+        MigrationStatus::UpToDate => Ok(0),
+        MigrationStatus::NeedsMigration { .. } => Ok(1),
+        MigrationStatus::Incompatible { version } => Err(FFIError::VaultError(format!(
+            "Incompatible vault version: {}",
+            version
+        ))),
+    }
+}
+
+/// Run migrations on a vault at the given path.
+pub fn run_migration(path: &str, _password: &str) -> FFIResult<()> {
+    let vault_path = std::path::Path::new(path);
+    let config_path = vault_path.join("vault.config");
+
+    let config_bytes = std::fs::read(&config_path).map_err(|e| FFIError::IOError(e.to_string()))?;
+    let mut config =
+        VaultConfig::from_bytes(&config_bytes).map_err(|e| FFIError::VaultError(e.to_string()))?;
+
+    let registry = MigrationRegistry::default();
+    let target = VaultVersion::CURRENT;
+
+    registry
+        .migrate(vault_path, &mut config, &target)
+        .map_err(|e| FFIError::VaultError(e.to_string()))
+}
+
 /// Change the vault password.
 pub async fn change_password(
     handle: &FFIVaultHandle,
@@ -277,4 +326,120 @@ pub async fn change_password(
         .save_config(&session)
         .await
         .map_err(|e| FFIError::VaultError(e.to_string()))
+}
+
+/// Show recovery key for an open vault.
+pub async fn show_recovery_key(handle: &FFIVaultHandle) -> FFIResult<String> {
+    let session = handle.session.read().await;
+
+    let master_key = session
+        .master_key()
+        .map_err(|e| FFIError::VaultError(e.to_string()))?;
+
+    let recovery_key = session
+        .config()
+        .decrypt_recovery_key(master_key)
+        .map_err(|e| FFIError::VaultError(e.to_string()))?;
+
+    recovery_key
+        .to_mnemonic()
+        .map_err(|e| FFIError::VaultError(e.to_string()))
+}
+
+/// Reset vault password using recovery key words.
+pub async fn reset_password(
+    path: &str,
+    recovery_words: &str,
+    new_password: &str,
+) -> FFIResult<FFIVaultHandle> {
+    let path_obj = Path::new(path);
+
+    let abs_path = if path_obj.is_absolute() {
+        path_obj.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map_err(|e| FFIError::IOError(e.to_string()))?
+            .join(path_obj)
+    };
+
+    let abs_path_str = abs_path.to_string_lossy().to_string();
+
+    let provider_config = serde_json::json!({
+        "root": abs_path_str
+    });
+
+    let manager = CoreVaultManager::new();
+
+    let session = manager
+        .recover_vault(
+            "local",
+            provider_config,
+            recovery_words,
+            new_password.as_bytes(),
+        )
+        .await
+        .map_err(|e| FFIError::VaultError(e.to_string()))?;
+
+    Ok(VaultHandleData {
+        session: Arc::new(RwLock::new(session)),
+        path: abs_path_str,
+        recovery_words: None,
+    })
+}
+
+/// Run a health check on a vault. Returns JSON report.
+///
+/// If `password` is `None`, runs a shallow structure-only check.
+/// If `password` is `Some`, runs a full integrity check.
+pub async fn health_check(path: &str, password: Option<&str>) -> FFIResult<String> {
+    let path_obj = Path::new(path);
+
+    let abs_path = if path_obj.is_absolute() {
+        path_obj.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map_err(|e| FFIError::IOError(e.to_string()))?
+            .join(path_obj)
+    };
+
+    let abs_path_str = abs_path.to_string_lossy().to_string();
+
+    let provider_config = serde_json::json!({
+        "root": abs_path_str
+    });
+
+    let manager = CoreVaultManager::new();
+    let provider = manager
+        .registry()
+        .resolve("local", provider_config.clone())
+        .map_err(|e| FFIError::VaultError(e.to_string()))?;
+
+    match password {
+        None => {
+            let report = check_vault_structure(provider.as_ref(), &abs_path_str)
+                .await
+                .map_err(|e| FFIError::VaultError(e.to_string()))?;
+            Ok(report.to_json())
+        }
+        Some(pw) => {
+            let session = manager
+                .open_vault("local", provider_config, pw.as_bytes())
+                .await
+                .map_err(|e| FFIError::VaultError(e.to_string()))?;
+
+            let master_key = session
+                .master_key()
+                .map_err(|e| FFIError::VaultError(e.to_string()))?;
+
+            let report = check_vault_health(
+                provider.as_ref(),
+                session.config(),
+                master_key,
+                &abs_path_str,
+            )
+            .await
+            .map_err(|e| FFIError::VaultError(e.to_string()))?;
+            Ok(report.to_json())
+        }
+    }
 }

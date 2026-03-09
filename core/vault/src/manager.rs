@@ -6,8 +6,17 @@ use crate::config::{VaultConfig, CONFIG_FILENAME, DATA_DIRNAME, META_DIRNAME};
 use crate::session::VaultSession;
 use crate::tree::VaultTree;
 use axiomvault_common::{Error, Result, VaultId, VaultPath};
+use axiomvault_crypto::recovery::RecoveryKey;
 use axiomvault_crypto::KdfParams;
 use axiomvault_storage::{create_default_registry, ProviderRegistry, StorageProvider};
+
+/// Result of vault creation, containing the session and recovery words.
+pub struct VaultCreation {
+    /// Active session for the newly created vault.
+    pub session: VaultSession,
+    /// Recovery key encoded as 24 BIP39 words. Must be shown to user once.
+    pub recovery_words: String,
+}
 
 /// Vault manager for creating and opening vaults.
 pub struct VaultManager {
@@ -39,20 +48,8 @@ impl VaultManager {
 
     /// Create a new vault.
     ///
-    /// # Preconditions
-    /// - Provider type must be registered
-    /// - Provider config must be valid
-    /// - Password must not be empty
-    ///
-    /// # Postconditions
-    /// - Vault structure is created in storage
-    /// - Vault configuration is persisted
-    /// - Returns an active session
-    ///
-    /// # Errors
-    /// - Provider not found
-    /// - Storage access failure
-    /// - Invalid configuration
+    /// # Returns
+    /// A `VaultCreation` with the active session and recovery words.
     pub async fn create_vault(
         &self,
         vault_id: VaultId,
@@ -60,12 +57,12 @@ impl VaultManager {
         provider_type: &str,
         provider_config: serde_json::Value,
         kdf_params: KdfParams,
-    ) -> Result<VaultSession> {
+    ) -> Result<VaultCreation> {
         let provider = self
             .registry
             .resolve(provider_type, provider_config.clone())?;
 
-        let config = VaultConfig::new(
+        let creation = VaultConfig::new(
             vault_id,
             password,
             provider_type,
@@ -73,9 +70,21 @@ impl VaultManager {
             kdf_params,
         )?;
 
-        self.initialize_vault_structure(&provider, &config).await?;
+        self.initialize_vault_structure(&provider, &creation.config)
+            .await?;
 
-        VaultSession::unlock(config, password, provider, VaultTree::new())
+        // Use from_master_key to avoid a second Argon2id KDF round.
+        let session = VaultSession::from_master_key(
+            creation.config,
+            creation.master_key,
+            provider,
+            VaultTree::new(),
+        )?;
+
+        Ok(VaultCreation {
+            session,
+            recovery_words: creation.recovery_words,
+        })
     }
 
     /// Initialize vault directory structure.
@@ -102,21 +111,6 @@ impl VaultManager {
     }
 
     /// Open an existing vault.
-    ///
-    /// Verifies the password, derives the master key exactly once (Argon2id is
-    /// expensive), then uses that key to decrypt the encrypted tree index.
-    ///
-    /// # Preconditions
-    /// - Vault must exist at provider location
-    /// - Password must be correct
-    ///
-    /// # Postconditions
-    /// - Returns an active session
-    ///
-    /// # Errors
-    /// - Vault not found
-    /// - Invalid password
-    /// - Incompatible version
     pub async fn open_vault(
         &self,
         provider_type: &str,
@@ -133,15 +127,56 @@ impl VaultManager {
         let config_bytes = provider.download(&config_path).await?;
         let config = VaultConfig::from_bytes(&config_bytes)?;
 
-        // Derive the master key once — `verify_password` runs Argon2id and
-        // authenticates the result, so we do NOT run it again in `unlock`.
         let master_key = config
             .verify_password(password)?
             .ok_or_else(|| Error::NotPermitted("Invalid password".to_string()))?;
 
-        // Load and decrypt the tree index using the verified master key.
         let tree = VaultSession::load_and_decrypt_tree(&provider, &master_key).await?;
 
+        VaultSession::from_master_key(config, master_key, provider, tree)
+    }
+
+    /// Reset vault password using recovery key words.
+    ///
+    /// # Postconditions
+    /// - Vault password is changed to new_password
+    /// - Recovery key is unchanged
+    /// - Returns an active session
+    pub async fn recover_vault(
+        &self,
+        provider_type: &str,
+        provider_config: serde_json::Value,
+        recovery_words: &str,
+        new_password: &[u8],
+    ) -> Result<VaultSession> {
+        let provider = self.registry.resolve(provider_type, provider_config)?;
+
+        let config_path = VaultPath::parse(CONFIG_FILENAME)?;
+        if !provider.exists(&config_path).await? {
+            return Err(Error::NotFound("Vault configuration not found".to_string()));
+        }
+
+        let config_bytes = provider.download(&config_path).await?;
+        let mut config = VaultConfig::from_bytes(&config_bytes)?;
+
+        let recovery_key = RecoveryKey::from_mnemonic(recovery_words)?;
+
+        // Verify recovery key and get master key for tree decryption.
+        let master_key = config
+            .verify_recovery_key(&recovery_key)?
+            .ok_or_else(|| Error::NotPermitted("Invalid recovery key".to_string()))?;
+
+        // Load the tree with the master key before resetting the password.
+        let tree = VaultSession::load_and_decrypt_tree(&provider, &master_key).await?;
+
+        // Reset password in config. The master key itself doesn't change.
+        config.reset_password(&recovery_key, new_password)?;
+
+        // Save updated config.
+        let config_bytes = config.to_bytes()?;
+        provider.upload(&config_path, config_bytes).await?;
+
+        // Reuse the master key from recovery — no need for a second Argon2id round.
         VaultSession::from_master_key(config, master_key, provider, tree)
     }
 
@@ -168,9 +203,6 @@ impl VaultManager {
     }
 
     /// Save vault tree to storage (encrypted).
-    ///
-    /// Delegates to [`VaultSession::save_tree`] which encrypts the tree index
-    /// with a key derived from the master key.
     pub async fn save_tree(&self, session: &VaultSession) -> Result<()> {
         session.save_tree().await
     }
@@ -192,7 +224,7 @@ mod tests {
         let vault_id = VaultId::new("test-vault").unwrap();
         let password = b"secure-password";
 
-        let session = manager
+        let creation = manager
             .create_vault(
                 vault_id.clone(),
                 password,
@@ -203,8 +235,9 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(session.is_active());
-        assert_eq!(session.vault_id().as_str(), vault_id.as_str());
+        assert!(creation.session.is_active());
+        assert_eq!(creation.session.vault_id().as_str(), vault_id.as_str());
+        assert_eq!(creation.recovery_words.split_whitespace().count(), 24);
     }
 
     #[tokio::test]
@@ -213,7 +246,7 @@ mod tests {
         let vault_id = VaultId::new("test-vault").unwrap();
         let password = b"secure-password";
 
-        let session = manager
+        let creation = manager
             .create_vault(
                 vault_id.clone(),
                 password,
@@ -224,11 +257,9 @@ mod tests {
             .await
             .unwrap();
 
-        let provider = session.provider();
-        drop(session);
+        let provider = creation.session.provider();
+        drop(creation.session);
 
-        // Re-open using same provider (memory provider in this case).
-        // Config is re-loaded from storage; tree is loaded+decrypted via the master key.
         let config_path = VaultPath::parse(CONFIG_FILENAME).unwrap();
         let config_bytes = provider.download(&config_path).await.unwrap();
         let config = VaultConfig::from_bytes(&config_bytes).unwrap();
@@ -254,8 +285,6 @@ mod tests {
         let exists = manager
             .vault_exists("memory", serde_json::Value::Null)
             .await;
-        // This will fail because memory provider creates fresh instance
-        // In real usage with persistent storage, this would work correctly
         assert!(exists.is_ok());
     }
 }

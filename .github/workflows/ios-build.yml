@@ -5,13 +5,13 @@ on:
     branches: [ main, master, develop ]
     paths:
       - 'core/**'
-      - 'clients/ios/**'
+      - 'clients/apple/**'
       - '.github/workflows/ios-build.yml'
   pull_request:
     branches: [ main, master, develop ]
     paths:
       - 'core/**'
-      - 'clients/ios/**'
+      - 'clients/apple/**'
   workflow_dispatch:
 
 env:
@@ -120,7 +120,7 @@ jobs:
 
       - name: Run SwiftLint
         run: |
-          cd clients/ios
+          cd clients/apple
           swiftlint lint --reporter github-actions-logging || true
 
   # Check Swift syntax (without Xcode project)
@@ -132,8 +132,8 @@ jobs:
 
       - name: Check Swift syntax
         run: |
-          cd clients/ios/AxiomVault/Sources
-          for file in $(find . -name "*.swift"); do
+          cd clients/apple
+          for file in $(find . -name "*.swift" -not -path "./.build/*"); do
             echo "Checking $file..."
             swiftc -parse "$file" 2>&1 || true
           done

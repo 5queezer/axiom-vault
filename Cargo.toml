@@ -16,7 +16,7 @@ members = [
 version = "0.1.0"
 edition = "2021"
 authors = ["Christian Pojoni <christian.pojoni@gmail.com>"]
-license = "MIT"
+license = "Apache-2.0"
 
 [workspace.dependencies]
 # Crypto
@@ -73,3 +73,6 @@ fuser = "0.14"
 
 # Browser opening
 open = "5.3"
+
+# Recovery key word encoding
+bip39 = "2.1"

@@ -16,6 +16,8 @@ APP_ICON = clients/desktop/axiomvault.svg
 
 .PHONY: all desktop desktop-release check-desktop-deps cli core install install-desktop uninstall uninstall-desktop clean-install help
 .PHONY: ios ios-framework ios-project check-ios-deps
+.PHONY: macos macos-framework macos-project check-macos-deps
+.PHONY: apple apple-framework apple-project check-apple-deps
 
 # Default target
 all: help
@@ -44,22 +46,41 @@ help:
 	@echo "  sudo make uninstall && sudo make install  - Full reinstall"
 	@echo "  sudo kbuildsycoca5 --noincremental      - Force KDE cache update"
 	@echo ""
-	@echo "iOS (macOS only):"
-	@echo "  make ios             - Build complete iOS project"
-	@echo "  make ios-framework   - Build Rust XCFramework for iOS"
-	@echo "  make ios-project     - Generate Xcode project"
-	@echo "  make check-ios-deps  - Check iOS build dependencies"
+	@echo "Apple (unified iOS + macOS):"
+	@echo "  make apple           - Build framework for all platforms + generate Xcode project"
+	@echo "  make apple-framework - Build Rust XCFramework for iOS + macOS"
+	@echo "  make apple-project   - Generate Xcode project (3 targets)"
+	@echo "  make ios             - Build iOS-only framework + project"
+	@echo "  make macos           - Build macOS-only framework + project"
 	@echo ""
 	@echo "Cleanup:"
 	@echo "  make clean-install   - Remove all installed files"
 	@echo ""
 
+# Auto-detect FUSE support
+FUSE_FEATURE :=
+ifeq ($(shell uname),Darwin)
+  ifneq ($(wildcard /Library/Frameworks/macFUSE.framework),)
+    FUSE_FEATURE := --features fuse
+  else ifneq ($(wildcard /usr/local/include/fuse/fuse.h),)
+    FUSE_FEATURE := --features fuse
+  else ifneq ($(wildcard /opt/homebrew/include/fuse/fuse.h),)
+    FUSE_FEATURE := --features fuse
+  endif
+else ifeq ($(shell uname),Linux)
+  ifneq ($(shell pkg-config --exists fuse3 2>/dev/null && echo yes),)
+    FUSE_FEATURE := --features fuse
+  else ifneq ($(shell pkg-config --exists fuse 2>/dev/null && echo yes),)
+    FUSE_FEATURE := --features fuse
+  endif
+endif
+
 # Desktop client with dependency check
 desktop: check-desktop-deps
-	cargo build --package axiomvault-desktop
+	cargo build --package axiomvault-desktop $(FUSE_FEATURE)
 
 desktop-release: check-desktop-deps
-	cargo build --package axiomvault-desktop --release
+	cargo build --package axiomvault-desktop --release $(FUSE_FEATURE)
 
 # CLI tool
 cli:
@@ -168,55 +189,51 @@ check-desktop-deps:
 		echo "Skipping dependency check (not Linux)"; \
 	fi
 
-# iOS targets (macOS only)
-ios: ios-framework ios-project
-	@echo "iOS project ready! Open clients/ios/AxiomVault.xcodeproj in Xcode"
+# Apple unified targets (iOS + macOS in one Xcode project)
+apple: apple-framework apple-project
+	@echo "Apple project ready! Open clients/apple/AxiomVault.xcodeproj in Xcode"
+	@echo "Schemes: AxiomVault-iOS, AxiomVault-macOS"
 
-ios-framework: check-ios-deps
-	@if [ "$$(uname)" = "Darwin" ]; then \
-		echo "Building Rust XCFramework for iOS..."; \
-		cd clients/ios/Scripts && ./build-ios.sh; \
-	else \
-		echo "ERROR: iOS framework can only be built on macOS"; \
+apple-framework: check-apple-deps
+	@echo "Building Rust XCFramework for all Apple platforms..."
+	@cd clients/apple/Scripts && ./build-apple.sh
+
+apple-project: check-apple-deps
+	@echo "Generating Xcode project with XcodeGen..."
+	@cd clients/apple && xcodegen generate
+	@echo "✓ Generated AxiomVault.xcodeproj"
+
+# Platform-specific shortcuts (still use unified project)
+ios: check-apple-deps
+	@echo "Building Rust XCFramework for iOS..."
+	@cd clients/apple/Scripts && ./build-apple.sh --platform ios
+	@cd clients/apple && xcodegen generate
+	@echo "iOS ready! Open clients/apple/AxiomVault.xcodeproj and select AxiomVault-iOS scheme"
+
+macos: check-apple-deps
+	@echo "Building Rust XCFramework for macOS..."
+	@cd clients/apple/Scripts && ./build-apple.sh --platform macos
+	@cd clients/apple && xcodegen generate
+	@echo "macOS ready! Open clients/apple/AxiomVault.xcodeproj and select AxiomVault-macOS scheme"
+
+check-apple-deps:
+	@if [ "$$(uname)" != "Darwin" ]; then \
+		echo "ERROR: Apple development requires macOS"; \
 		exit 1; \
 	fi
-
-ios-project: check-ios-deps
-	@if [ "$$(uname)" = "Darwin" ]; then \
-		echo "Generating Xcode project with XcodeGen..."; \
-		cd clients/ios && xcodegen generate; \
-		echo "✓ Generated AxiomVault.xcodeproj"; \
-	else \
-		echo "ERROR: Xcode project can only be generated on macOS"; \
+	@echo "Checking Apple build dependencies..."
+	@command -v xcodegen >/dev/null 2>&1 || { \
+		echo ""; \
+		echo "ERROR: xcodegen not found"; \
+		echo "Install with: brew install xcodegen"; \
+		echo ""; \
 		exit 1; \
-	fi
-
-check-ios-deps:
-	@if [ "$$(uname)" = "Darwin" ]; then \
-		echo "Checking iOS build dependencies..."; \
-		command -v xcodegen >/dev/null 2>&1 || { \
-			echo ""; \
-			echo "ERROR: xcodegen not found"; \
-			echo "Install with: brew install xcodegen"; \
-			echo ""; \
-			exit 1; \
-		}; \
-		command -v rustup >/dev/null 2>&1 || { \
-			echo ""; \
-			echo "ERROR: rustup not found"; \
-			echo "Install from: https://rustup.rs"; \
-			echo ""; \
-			exit 1; \
-		}; \
-		command -v xcrun >/dev/null 2>&1 || { \
-			echo ""; \
-			echo "ERROR: Xcode command line tools not found"; \
-			echo "Install with: xcode-select --install"; \
-			echo ""; \
-			exit 1; \
-		}; \
-		echo "✓ All iOS build dependencies found"; \
-	else \
-		echo "ERROR: iOS development requires macOS"; \
+	}
+	@command -v rustup >/dev/null 2>&1 || { \
+		echo ""; \
+		echo "ERROR: rustup not found"; \
+		echo "Install from: https://rustup.rs"; \
+		echo ""; \
 		exit 1; \
-	fi
+	}
+	@echo "✓ All Apple build dependencies found"
