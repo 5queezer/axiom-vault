@@ -4,8 +4,31 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Vault icon -->
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M54,24L30,36v18c0,16.5 10.2,31.9 24,36 13.8,-4.1 24,-19.5 24,-36V36L54,24zM54,54L36,54V42l18,-9v21zM54,54v18.9c-7.7,-3.4 -12,-12.5 -12,-18.9H54zM54,54h12c0,6.4 -4.3,15.5 -12,18.9V54z"/>
+        android:pathData="M54,14C64.4,17.4 74.5,19 81.6,19.8V41.9C81.6,61.6 70.1,77 54,83.3C37.9,77 26.4,61.6 26.4,41.9V19.8C33.5,19 43.6,17.4 54,14Z"/>
+    <path
+        android:fillColor="#143257"
+        android:pathData="M54,19.8C62.1,22.4 69.9,23.7 75.5,24.3V41.2C75.5,57 66.3,69.3 54,74.2C41.7,69.3 32.5,57 32.5,41.2V24.3C38.1,23.7 45.9,22.4 54,19.8Z"/>
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,32.5A13.5,13.5 0,1 0,54 59.5A13.5,13.5 0,1 0,54 32.5Z"/>
+    <path
+        android:fillColor="#143257"
+        android:pathData="M54,36.8A9.2,9.2 0,1 0,54 55.2A9.2,9.2 0,1 0,54 36.8Z"/>
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,40.8C51.7,40.8 49.9,42.6 49.9,44.9C49.9,46.4 50.7,47.7 51.9,48.4V55.8H56.1V48.4C57.3,47.7 58.1,46.4 58.1,44.9C58.1,42.6 56.3,40.8 54,40.8Z"/>
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,28L54,31.8"/>
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M67.2,44.9L71,44.9"/>
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,58L54,61.8"/>
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M37,44.9L40.8,44.9"/>
 </vector>

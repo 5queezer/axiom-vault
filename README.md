@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="clients/desktop/src-tauri/icons/icon.png" alt="AxiomVault" width="120">
+  <img src="clients/desktop/axiomvault.svg" alt="AxiomVault" width="120">
 </p>
 
 <h1 align="center">AxiomVault</h1>
