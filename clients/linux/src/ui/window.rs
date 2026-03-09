@@ -16,7 +16,7 @@ pub fn build_window(app: &adw::Application, state: Rc<RefCell<AppState>>) {
 
     // Start with the unlock/open view.
     let unlock_view = UnlockView::new(Rc::clone(&state), nav_view.clone());
-    nav_view.add(&unlock_view.page());
+    nav_view.add(unlock_view.page());
 
     let window = adw::ApplicationWindow::builder()
         .application(app)
@@ -62,7 +62,7 @@ fn handle_event(
         axiomvault_app::AppEvent::VaultOpened(_) | axiomvault_app::AppEvent::VaultCreated(_) => {
             tracing::info!("Vault opened — switching to browser view");
             let browser = BrowserView::new(Rc::clone(state), nav.clone());
-            nav.push(&browser.page());
+            nav.push(browser.page());
         }
         axiomvault_app::AppEvent::VaultClosed | axiomvault_app::AppEvent::VaultLocked => {
             tracing::info!("Vault closed — returning to unlock view");

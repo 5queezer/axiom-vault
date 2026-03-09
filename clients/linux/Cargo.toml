@@ -7,7 +7,7 @@ license.workspace = true
 description = "AxiomVault GTK4/libadwaita desktop client for Linux"
 
 [[bin]]
-name = "axiomvault"
+name = "axiomvault-gtk"
 path = "src/main.rs"
 
 [dependencies]
