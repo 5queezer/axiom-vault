@@ -38,6 +38,21 @@ fn main() {
         std::fs::create_dir_all(&data_dir).expect("Failed to create data directory");
     }
 
+    // Restrict data directory permissions to owner-only (0700) to prevent
+    // other users from accessing vault configs, index databases, or any
+    // cached plaintext metadata. See: https://github.com/5queezer/axiom-vault/issues/80
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Err(e) = std::fs::set_permissions(&data_dir, std::fs::Permissions::from_mode(0o700))
+        {
+            tracing::warn!(
+                "Failed to set restrictive permissions on data directory: {}",
+                e
+            );
+        }
+    }
+
     info!("Data directory: {:?}", data_dir);
 
     // Create application state
