@@ -170,11 +170,26 @@ pub async fn create_vault(
     )
     .map_err(|e| e.to_string())?;
 
-    // Persist config to disk so unlock_vault can find it later
+    // Persist config to disk so unlock_vault can find it later.
+    // Config contains KDF parameters and encrypted key material — restrict
+    // file permissions to owner-only (0600) to limit exposure.
     let config_path = state.data_dir.join(format!("{}.json", id));
     let config_json = serde_json::to_string_pretty(&creation.config).map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&state.data_dir).map_err(|e| e.to_string())?;
-    std::fs::write(&config_path, config_json).map_err(|e| e.to_string())?;
+    std::fs::write(&config_path, &config_json).map_err(|e| e.to_string())?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Err(e) =
+            std::fs::set_permissions(&config_path, std::fs::Permissions::from_mode(0o600))
+        {
+            tracing::warn!(
+                "Failed to set restrictive permissions on vault config: {}",
+                e
+            );
+        }
+    }
 
     let recovery_words = creation.recovery_words.clone();
 
@@ -212,12 +227,20 @@ pub async fn unlock_vault(
 }
 
 /// Lock a vault.
+///
+/// Clears all cached plaintext metadata from the local index to prevent
+/// leaking vault structure (filenames, sizes, timestamps) while locked.
 #[tauri::command]
 pub async fn lock_vault(state: State<'_, Arc<AppState>>, id: String) -> Result<(), String> {
     info!("Locking vault: {}", id);
 
     let mut vaults = state.vaults.write().await;
-    if vaults.remove(&id).is_some() {
+    if let Some(vault) = vaults.remove(&id) {
+        // Wipe cached plaintext metadata before dropping the index.
+        // This ensures no vault structure leaks to disk after locking.
+        if let Err(e) = vault.index.wipe() {
+            tracing::warn!("Failed to wipe local index on lock: {}", e);
+        }
         info!("Vault locked successfully");
         Ok(())
     } else {
