@@ -19,6 +19,8 @@ extension VaultManager {
     }
 
     /// Documents/Vaults directory for iOS vault storage
+    /// TODO: migrate vault storage from Documents/ to Application Support/ so data
+    /// is not user-visible even if UIFileSharingEnabled is accidentally re-enabled.
     var vaultsDirectory: URL {
         let paths = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)
         return paths[0].appendingPathComponent("Vaults", isDirectory: true)
