@@ -3,6 +3,53 @@ import SwiftUI
 
 // MARK: - Sync types
 
+/// Available cloud sync providers
+enum SyncProvider: String, CaseIterable, Identifiable {
+    case none = "none"
+    case icloud = "icloud"
+    case googleDrive = "google-drive"
+    case webdav = "webdav"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .none: return "None"
+        case .icloud: return "iCloud Drive"
+        case .googleDrive: return "Google Drive"
+        case .webdav: return "WebDAV"
+        }
+    }
+
+    var iconName: String {
+        switch self {
+        case .none: return "icloud.slash"
+        case .icloud: return "icloud.fill"
+        case .googleDrive: return "externaldrive.fill"
+        case .webdav: return "server.rack"
+        }
+    }
+
+    var description: String {
+        switch self {
+        case .none: return "No sync provider configured"
+        case .icloud: return "Sync via iCloud Drive. Works across all Apple devices."
+        case .googleDrive: return "Sync via Google Drive. Works across all platforms."
+        case .webdav: return "Sync via a self-hosted WebDAV server."
+        }
+    }
+
+    /// Whether this provider requires additional configuration before use
+    var needsSetup: Bool {
+        switch self {
+        case .none: return false
+        case .icloud: return false
+        case .googleDrive: return true
+        case .webdav: return true
+        }
+    }
+}
+
 /// Current synchronization status
 enum SyncStatus: String, CaseIterable {
     case synced = "Synced"
@@ -140,6 +187,15 @@ class SyncManager: ObservableObject {
         }
     }
 
+    @Published var syncProvider: SyncProvider = .none {
+        didSet {
+            guard !isLoadingScopedState else { return }
+            persist(syncProvider.rawValue, for: .syncProvider)
+            cancelAutoSync()
+            syncStatus = .notConfigured
+        }
+    }
+
     private var autoSyncTimer: Timer?
     private var isLoadingScopedState = false
 
@@ -148,17 +204,33 @@ class SyncManager: ObservableObject {
         case syncInterval
         case conflictStrategy
         case lastSyncDate
+        case syncProvider
     }
 
     init() {}
 
-    var isSyncAvailable: Bool { false }
+    /// Whether a sync provider has been chosen for the active vault.
+    var isProviderSelected: Bool {
+        activeVaultKey != nil && syncProvider != .none
+    }
+
+    /// Whether sync is fully operational (provider selected, configured, and backend connected).
+    /// Returns `false` until a real sync backend is wired up.
+    var isSyncAvailable: Bool {
+        false
+    }
 
     var availabilityMessage: String {
         guard activeVaultKey != nil else {
             return "Open a vault to configure sync settings."
         }
-        return "Cloud sync is not yet connected to the backend. Settings are saved per-vault and will take effect once the sync engine is integrated."
+        if syncProvider == .none {
+            return "Select a sync provider above to enable cloud sync."
+        }
+        if syncProvider.needsSetup {
+            return "\(syncProvider.displayName) requires additional configuration. Setup will be available in a future update."
+        }
+        return "Sync engine integration is in progress. Settings are saved per-vault and will take effect once the \(syncProvider.displayName) backend is connected."
     }
 
     func setActiveVault(_ vaultKey: String?) {
@@ -237,6 +309,7 @@ class SyncManager: ObservableObject {
             autoSyncEnabled = false
             syncInterval = .fifteenMinutes
             conflictStrategy = .keepBoth
+            syncProvider = .none
             lastSyncDate = nil
             syncStatus = .notConfigured
             syncError = nil
@@ -248,6 +321,7 @@ class SyncManager: ObservableObject {
         autoSyncEnabled = defaults.bool(forKey: scopedKey(.autoSyncEnabled)!)
         syncInterval = SyncInterval(rawValue: defaults.integer(forKey: scopedKey(.syncInterval)!)) ?? .fifteenMinutes
         conflictStrategy = ConflictResolutionStrategy(rawValue: defaults.string(forKey: scopedKey(.conflictStrategy)!) ?? "") ?? .keepBoth
+        syncProvider = SyncProvider(rawValue: defaults.string(forKey: scopedKey(.syncProvider)!) ?? "") ?? .none
         lastSyncDate = defaults.object(forKey: scopedKey(.lastSyncDate)!) as? Date
         syncStatus = .notConfigured
         syncError = nil
