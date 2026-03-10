@@ -538,7 +538,7 @@ async fn cmd_list(vault_path: &Path, dir: &str) -> Result<()> {
 
 /// Add a file to the vault.
 async fn cmd_add(vault_path: &Path, source: &Path, dest: &str) -> Result<()> {
-    info!("Adding file {} to vault as {}", source.display(), dest);
+    info!("Adding file to vault");
 
     let password = prompt_password("Enter password: ")?;
     let path_str = vault_path.to_string_lossy().to_string();
@@ -576,7 +576,7 @@ async fn cmd_add(vault_path: &Path, source: &Path, dest: &str) -> Result<()> {
 
 /// Extract a file from the vault.
 async fn cmd_extract(vault_path: &Path, source: &str, dest: &Path) -> Result<()> {
-    info!("Extracting {} from vault to {}", source, dest.display());
+    info!("Extracting file from vault");
 
     let password = prompt_password("Enter password: ")?;
     let path_str = vault_path.to_string_lossy().to_string();

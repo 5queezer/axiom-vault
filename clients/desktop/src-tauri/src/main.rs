@@ -52,7 +52,7 @@ fn main() {
         }
     }
 
-    info!("Data directory: {:?}", data_dir);
+    info!("Data directory initialized");
 
     // Create application state
     let app_state = Arc::new(AppState::new(data_dir));

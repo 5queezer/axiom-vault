@@ -158,8 +158,12 @@ pub fn verify_recovery_key(recovery_key: &RecoveryKey, verification: &[u8]) -> R
     use subtle::ConstantTimeEq;
     let kek = recovery_key.derive_kek();
     match aead::decrypt(&kek, verification) {
-        Ok(plaintext) => Ok(plaintext.len() == RECOVERY_VERIFICATION_PLAINTEXT.len()
-            && bool::from(plaintext.as_slice().ct_eq(RECOVERY_VERIFICATION_PLAINTEXT))),
+        Ok(mut plaintext) => {
+            let valid = plaintext.len() == RECOVERY_VERIFICATION_PLAINTEXT.len()
+                && bool::from(plaintext.as_slice().ct_eq(RECOVERY_VERIFICATION_PLAINTEXT));
+            plaintext.zeroize();
+            Ok(valid)
+        }
         Err(_) => Ok(false),
     }
 }

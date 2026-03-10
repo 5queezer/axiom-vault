@@ -95,7 +95,7 @@ impl LocalIndex {
 
     /// Insert or update an entry in the index.
     pub fn upsert_entry(&self, entry: &IndexEntry) -> AppResult<()> {
-        debug!("Upserting entry: {}", entry.path);
+        debug!("Upserting index entry");
         let conn = self.conn.lock().map_err(|_| lock_err())?;
         conn.execute(
             r#"
@@ -193,7 +193,7 @@ impl LocalIndex {
 
     /// Delete an entry by path.
     pub fn delete_entry(&self, path: &str) -> AppResult<()> {
-        debug!("Deleting entry: {}", path);
+        debug!("Deleting index entry");
         let conn = self.conn.lock().map_err(|_| lock_err())?;
         conn.execute("DELETE FROM vault_entries WHERE path = ?1", params![path])
             .map_err(sqlite_err)?;
@@ -202,7 +202,7 @@ impl LocalIndex {
 
     /// Delete all entries under a path (recursively).
     pub fn delete_tree(&self, path: &str) -> AppResult<()> {
-        debug!("Deleting tree: {}", path);
+        debug!("Deleting index subtree");
         let conn = self.conn.lock().map_err(|_| lock_err())?;
         conn.execute(
             "DELETE FROM vault_entries WHERE path = ?1 OR path LIKE ?2",

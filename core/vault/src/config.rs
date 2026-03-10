@@ -210,16 +210,18 @@ impl VaultConfig {
     /// - `Err(_)` if verification failed for other reasons
     pub fn verify_password(&self, password: &[u8]) -> Result<Option<MasterKey>> {
         use axiomvault_crypto::{decrypt, derive_key};
+        use zeroize::Zeroize;
 
         let password_kek = derive_key(password, &self.salt, &self.kdf_params)?;
 
         // First, verify the password by decrypting the verification constant.
         match decrypt(password_kek.as_bytes(), &self.key_verification) {
-            Ok(plaintext) => {
+            Ok(mut plaintext) => {
                 let expected = b"AXIOMVAULT_KEY_VERIFICATION_V1";
-                if plaintext.len() != expected.len()
-                    || !bool::from(plaintext.as_slice().ct_eq(expected))
-                {
+                let valid = plaintext.len() == expected.len()
+                    && bool::from(plaintext.as_slice().ct_eq(expected));
+                plaintext.zeroize();
+                if !valid {
                     return Ok(None);
                 }
             }
