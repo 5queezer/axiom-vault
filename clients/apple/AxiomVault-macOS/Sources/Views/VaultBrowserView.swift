@@ -144,12 +144,15 @@ struct VaultBrowserView: View {
 
     private var emptyState: some View {
         VStack(spacing: 16) {
-            Image(systemName: "folder")
+            Image(systemName: "folder.badge.plus")
                 .font(.system(size: 48))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.blue.opacity(0.6))
 
             Text("This folder is empty")
                 .font(.title3)
+
+            Text("Drop files here or use the buttons to get started")
+                .font(.body)
                 .foregroundStyle(.secondary)
 
             HStack(spacing: 12) {
