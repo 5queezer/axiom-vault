@@ -66,7 +66,7 @@ jobs:
             ${{ runner.os }}-cargo-clippy-
 
       - name: Run Clippy
-        run: cargo clippy --workspace --all-targets --all-features
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
   # Build and test
   test:
@@ -309,7 +309,7 @@ jobs:
   ci-success:
     name: CI Success
     runs-on: ubuntu-latest
-    needs: [fmt, clippy, test, build-crates, docs, ffi-headers]
+    needs: [fmt, clippy, test, build-crates, security-audit, docs, ffi-headers]
     if: always()
     steps:
       - name: Check all jobs
@@ -318,6 +318,7 @@ jobs:
              [[ "${{ needs.clippy.result }}" != "success" ]] || \
              [[ "${{ needs.test.result }}" != "success" ]] || \
              [[ "${{ needs.build-crates.result }}" != "success" ]] || \
+             [[ "${{ needs.security-audit.result }}" != "success" ]] || \
              [[ "${{ needs.docs.result }}" != "success" ]] || \
              [[ "${{ needs.ffi-headers.result }}" != "success" ]]; then
             echo "One or more CI jobs failed"
