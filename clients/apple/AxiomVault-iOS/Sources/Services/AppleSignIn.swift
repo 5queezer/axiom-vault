@@ -3,7 +3,7 @@ import Foundation
 
 /// Sign in with Apple — required by App Store Review Guidelines §4.8 when
 /// any third-party (e.g. Google) sign-in is offered.
-class AppleSignIn: NSObject, ObservableObject {
+class AppleSignIn: NSObject, ObservableObject, @unchecked Sendable {
     static let shared = AppleSignIn()
 
     @Published var isAuthenticated = false
@@ -133,6 +133,7 @@ extension AppleSignIn: ASAuthorizationControllerDelegate {
             case .notHandled: mappedError = .authorizationFailed("Request not handled")
             case .unknown: mappedError = .unknown
             case .notInteractive: mappedError = .authorizationFailed("Not interactive")
+            case .matchedExcludedCredential: mappedError = .authorizationFailed("Matched excluded credential")
             @unknown default: mappedError = .unknown
             }
         } else {

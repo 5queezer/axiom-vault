@@ -16,7 +16,7 @@ import CryptoKit
 ///   2. Enable the Google Drive API
 ///   3. Create OAuth 2.0 credentials (iOS app type)
 ///   4. Download the generated `GoogleServices-Info.plist` and add it to the Xcode project
-class GoogleDriveAuth: NSObject, ObservableObject {
+class GoogleDriveAuth: NSObject, ObservableObject, @unchecked Sendable {
     /// Singleton instance
     static let shared = GoogleDriveAuth()
 
