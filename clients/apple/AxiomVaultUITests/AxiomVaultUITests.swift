@@ -323,7 +323,112 @@ final class AxiomVaultUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["SubFolder"].waitForExistence(timeout: 5))
     }
 
+    // MARK: - Sync Provider Settings
+
+    func testSyncSettingsSheetAppears() {
+        createAndOpenTestVault()
+
+        app.buttons.matching(identifier: "moreMenu").firstMatch.tap()
+        app.buttons["Sync Settings"].tap()
+
+        XCTAssertTrue(app.navigationBars["Sync Settings"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Sync Provider"].exists)
+    }
+
+    func testSyncProviderShowsAllOptions() {
+        openSyncSettings()
+
+        XCTAssertTrue(app.staticTexts["None"].exists)
+        XCTAssertTrue(app.staticTexts["iCloud Drive"].exists)
+        XCTAssertTrue(app.staticTexts["Google Drive"].exists)
+        XCTAssertTrue(app.staticTexts["WebDAV"].exists)
+    }
+
+    func testSelectICloudProviderEnablesControls() {
+        openSyncSettings()
+
+        // Select iCloud Drive
+        let icloudRow = app.otherElements.matching(identifier: "syncProvider_icloud").firstMatch
+        XCTAssertTrue(icloudRow.waitForExistence(timeout: 3))
+        icloudRow.tap()
+
+        // Verify availability message updates (no longer says "Select a sync provider")
+        XCTAssertFalse(app.staticTexts["Select a sync provider above to enable cloud sync."].exists)
+    }
+
+    func testSelectGoogleDriveShowsSetupNotice() {
+        openSyncSettings()
+
+        let googleRow = app.otherElements.matching(identifier: "syncProvider_google-drive").firstMatch
+        XCTAssertTrue(googleRow.waitForExistence(timeout: 3))
+        googleRow.tap()
+
+        // Footer should mention additional setup
+        let setupText = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'requires additional setup'")).firstMatch
+        XCTAssertTrue(setupText.waitForExistence(timeout: 3))
+    }
+
+    func testSelectNoneDisablesControls() {
+        openSyncSettings()
+
+        // First select iCloud to enable controls
+        let icloudRow = app.otherElements.matching(identifier: "syncProvider_icloud").firstMatch
+        XCTAssertTrue(icloudRow.waitForExistence(timeout: 3))
+        icloudRow.tap()
+
+        // Then select None to disable
+        let noneRow = app.otherElements.matching(identifier: "syncProvider_none").firstMatch
+        noneRow.tap()
+
+        // Should show the "Select a provider" message again
+        let selectMessage = app.staticTexts["Select a sync provider above to enable cloud sync."]
+        XCTAssertTrue(selectMessage.waitForExistence(timeout: 3))
+    }
+
+    func testSyncProviderSelectionPersists() {
+        openSyncSettings()
+
+        // Select iCloud Drive
+        let icloudRow = app.otherElements.matching(identifier: "syncProvider_icloud").firstMatch
+        XCTAssertTrue(icloudRow.waitForExistence(timeout: 3))
+        icloudRow.tap()
+
+        // Dismiss sync settings
+        app.buttons["Done"].tap()
+
+        // Reopen sync settings
+        app.buttons.matching(identifier: "moreMenu").firstMatch.tap()
+        app.buttons["Sync Settings"].tap()
+        XCTAssertTrue(app.navigationBars["Sync Settings"].waitForExistence(timeout: 3))
+
+        // iCloud should still show the checkmark (availability message should not be the "select" prompt)
+        XCTAssertFalse(app.staticTexts["Select a sync provider above to enable cloud sync."].exists)
+    }
+
+    func testWebDAVShowsSetupNotice() {
+        openSyncSettings()
+
+        let webdavRow = app.otherElements.matching(identifier: "syncProvider_webdav").firstMatch
+        XCTAssertTrue(webdavRow.waitForExistence(timeout: 3))
+        webdavRow.tap()
+
+        let setupText = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'requires additional setup'")).firstMatch
+        XCTAssertTrue(setupText.waitForExistence(timeout: 3))
+    }
+
     // MARK: - Helpers
+
+    /// Opens Sync Settings from the vault browser menu.
+    private func openSyncSettings() {
+        createAndOpenTestVault()
+
+        app.buttons.matching(identifier: "moreMenu").firstMatch.tap()
+        app.buttons["Sync Settings"].tap()
+
+        XCTAssertTrue(app.navigationBars["Sync Settings"].waitForExistence(timeout: 3))
+    }
+
+    // MARK: - Existing Helpers
 
     /// Tap a SwiftUI Toggle by its accessibility identifier.
     /// Taps the right side of the switch where the control lives.
