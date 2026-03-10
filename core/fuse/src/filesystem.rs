@@ -24,7 +24,7 @@ use axiomvault_vault::{VaultOperations, VaultSession};
 fn create_file_attr(ino: INodeNo, is_dir: bool, size: u64) -> FileAttr {
     let now = SystemTime::now();
     FileAttr {
-        ino: INodeNo(ino),
+        ino,
         size,
         blocks: size.div_ceil(512),
         atime: now,
@@ -278,8 +278,7 @@ impl Filesystem for VaultFilesystem {
         offset: u64,
         mut reply: ReplyDirectory,
     ) {
-        let ino: u64 = ino.into();
-        debug!("readdir: ino={}, offset={}", ino, offset);
+        debug!("readdir: ino={}, offset={}", u64::from(ino), offset);
 
         let session = self.session.clone();
         let inodes = self.inodes.clone();
@@ -325,7 +324,7 @@ impl Filesystem for VaultFilesystem {
 
             // . and .. entries
             if i == 0 {
-                if reply.add(INodeNo(ino), 1, FileType::Directory, ".") {
+                if reply.add(ino, 1, FileType::Directory, ".") {
                     reply.ok();
                     return;
                 }
@@ -354,7 +353,7 @@ impl Filesystem for VaultFilesystem {
                         map.get_inode_for_path(parent_path).unwrap_or(INodeNo::ROOT)
                     }
                 };
-                if reply.add(INodeNo(parent_ino), 2, FileType::Directory, "..") {
+                if reply.add(parent_ino, 2, FileType::Directory, "..") {
                     reply.ok();
                     return;
                 }
@@ -469,8 +468,7 @@ impl Filesystem for VaultFilesystem {
         _lock_owner: Option<LockOwner>,
         reply: ReplyData,
     ) {
-        let fh: u64 = fh.into();
-        debug!("read: fh={}, offset={}, size={}", fh, offset, size);
+        debug!("read: fh={}, offset={}, size={}", u64::from(fh), offset, size);
 
         let open_files = self.open_files.clone();
 
@@ -505,8 +503,7 @@ impl Filesystem for VaultFilesystem {
         _lock_owner: Option<LockOwner>,
         reply: ReplyWrite,
     ) {
-        let fh: u64 = fh.into();
-        debug!("write: fh={}, offset={}, size={}", fh, offset, data.len());
+        debug!("write: fh={}, offset={}, size={}", u64::from(fh), offset, data.len());
 
         let open_files = self.open_files.clone();
 
@@ -544,8 +541,7 @@ impl Filesystem for VaultFilesystem {
         _flush: bool,
         reply: ReplyEmpty,
     ) {
-        let fh: u64 = fh.into();
-        debug!("release: fh={}", fh);
+        debug!("release: fh={}", u64::from(fh));
 
         let session = self.session.clone();
         let open_files = self.open_files.clone();
@@ -600,7 +596,6 @@ impl Filesystem for VaultFilesystem {
         _flags: i32,
         reply: ReplyCreate,
     ) {
-        let parent: u64 = parent.into();
         let name_str = match name.to_str() {
             Some(s) => s,
             None => {
@@ -609,7 +604,7 @@ impl Filesystem for VaultFilesystem {
             }
         };
 
-        debug!("create: parent={}", parent);
+        debug!("create: parent={}", u64::from(parent));
 
         let session = self.session.clone();
         let inodes = self.inodes.clone();
@@ -697,7 +692,6 @@ impl Filesystem for VaultFilesystem {
         _umask: u32,
         reply: ReplyEntry,
     ) {
-        let parent: u64 = parent.into();
         let name_str = match name.to_str() {
             Some(s) => s,
             None => {
@@ -706,7 +700,7 @@ impl Filesystem for VaultFilesystem {
             }
         };
 
-        debug!("mkdir: parent={}", parent);
+        debug!("mkdir: parent={}", u64::from(parent));
 
         let session = self.session.clone();
         let inodes = self.inodes.clone();
