@@ -5,6 +5,7 @@ struct ContentView: View {
     @EnvironmentObject var syncManager: SyncManager
     @State private var showingCreateVault = false
     @State private var showingOpenVault = false
+    @State private var selectedRecentVault: URL?
 
     var body: some View {
         NavigationView {
@@ -14,7 +15,8 @@ struct ContentView: View {
                 } else {
                     VaultSelectionView(
                         showingCreateVault: $showingCreateVault,
-                        showingOpenVault: $showingOpenVault
+                        showingOpenVault: $showingOpenVault,
+                        selectedRecentVault: $selectedRecentVault
                     )
                 }
             }
@@ -33,7 +35,9 @@ struct ContentView: View {
             CreateVaultView()
         }
         .sheet(isPresented: $showingOpenVault) {
-            OpenVaultView()
+            selectedRecentVault = nil
+        } content: {
+            OpenVaultView(initialVault: selectedRecentVault)
         }
         .onAppear {
             syncManager.setActiveVault(vaultManager.vaultInfo?.vaultId)
@@ -55,6 +59,7 @@ struct VaultSelectionView: View {
     @EnvironmentObject var vaultManager: VaultManager
     @Binding var showingCreateVault: Bool
     @Binding var showingOpenVault: Bool
+    @Binding var selectedRecentVault: URL?
 
     var body: some View {
         VStack(spacing: 24) {
@@ -119,6 +124,7 @@ struct VaultSelectionView: View {
                         .background(Color(.systemGray6))
                         .cornerRadius(10)
                         .onTapGesture {
+                            selectedRecentVault = url
                             showingOpenVault = true
                         }
                     }

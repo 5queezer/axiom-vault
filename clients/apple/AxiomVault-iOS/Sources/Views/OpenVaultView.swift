@@ -4,6 +4,8 @@ struct OpenVaultView: View {
     @EnvironmentObject var vaultManager: VaultManager
     @Environment(\.dismiss) var dismiss
 
+    var initialVault: URL?
+
     @State private var selectedVault: URL?
     @State private var password = ""
     @State private var showPassword = false
@@ -101,6 +103,11 @@ struct OpenVaultView: View {
                     Button("Cancel") {
                         dismiss()
                     }
+                }
+            }
+            .onAppear {
+                if let initialVault, selectedVault == nil {
+                    selectedVault = initialVault
                 }
             }
             .onDisappear {
