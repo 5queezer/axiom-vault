@@ -107,7 +107,7 @@ struct SettingsView: View {
                 .font(.title2)
                 .fontWeight(.bold)
 
-            Text("Version 0.1.0")
+            Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown")")
                 .foregroundStyle(.secondary)
 
             Text("Core: v\(VaultCore.shared.version())")
