@@ -41,7 +41,7 @@ check() {
 check "Cargo.toml" "workspace version" "$CARGO_VERSION"
 
 # Apple project.yml MARKETING_VERSION
-APPLE_MARKETING=$(sed -n 's/^    MARKETING_VERSION: *"\(.*\)"/\1/p' "$REPO_ROOT/clients/apple/project.yml")
+APPLE_MARKETING=$(sed -n 's/^[[:space:]]*MARKETING_VERSION: *"\(.*\)"/\1/p' "$REPO_ROOT/clients/apple/project.yml")
 check "clients/apple/project.yml" "MARKETING_VERSION" "$APPLE_MARKETING"
 
 # Android versionName
@@ -49,7 +49,7 @@ ANDROID_VERSION=$(sed -n 's/.*versionName *= *"\(.*\)"/\1/p' "$REPO_ROOT/clients
 check "clients/android/app/build.gradle.kts" "versionName" "$ANDROID_VERSION"
 
 # Tauri version
-TAURI_VERSION=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['version'])" "$REPO_ROOT/clients/desktop/src-tauri/tauri.conf.json")
+TAURI_VERSION=$(jq -r '.version' "$REPO_ROOT/clients/desktop/src-tauri/tauri.conf.json")
 check "clients/desktop/src-tauri/tauri.conf.json" "version" "$TAURI_VERSION"
 
 echo "---"
