@@ -32,56 +32,81 @@ struct SyncStatusView: View {
 /// A more detailed sync status view with last-sync time, used in menus or sheets.
 struct SyncStatusDetailView: View {
     @EnvironmentObject var syncManager: SyncManager
+    @State private var isDismissed = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                statusIcon
-                    .font(.title2)
+        if !isDismissed {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    statusIcon
+                        .font(.title3)
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(syncManager.syncStatus.rawValue)
-                        .font(.headline)
+                    if syncManager.isSyncAvailable {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(syncManager.syncStatus.rawValue)
+                                .font(.subheadline.weight(.medium))
 
-                    Text(syncManager.isSyncAvailable ? "Last sync: \(syncManager.lastSyncDescription)" : "Sync is not yet connected to the backend.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                            Text("Last sync: \(syncManager.lastSyncDescription)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    } else {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Cloud Sync Available")
+                                .font(.subheadline.weight(.medium))
+
+                            Text("Sync your vault across devices.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    Spacer()
+
+                    if syncManager.isSyncAvailable {
+                        Button {
+                            Task { await syncManager.sync() }
+                        } label: {
+                            Label("Sync Now", systemImage: "arrow.triangle.2.circlepath")
+                        }
+                        .disabled(syncManager.isSyncing)
+                        #if os(macOS)
+                        .buttonStyle(.bordered)
+                        #else
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        #endif
+                    } else {
+                        Button {
+                            isDismissed = true
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
 
-                Spacer()
-
-                Button {
-                    Task { await syncManager.sync() }
-                } label: {
-                    Label("Sync Now", systemImage: "arrow.triangle.2.circlepath")
+                if let error = syncManager.syncError {
+                    HStack(spacing: 4) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.yellow)
+                            .imageScale(.small)
+                        Text(error)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
                 }
-                .disabled(syncManager.isSyncing || !syncManager.isSyncAvailable)
-                #if os(macOS)
-                .buttonStyle(.bordered)
-                #else
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-                #endif
             }
-
-            if let error = syncManager.syncError {
-                HStack(spacing: 4) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.yellow)
-                        .imageScale(.small)
-                    Text(error)
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                }
-            }
+            .padding(12)
+            #if os(macOS)
+            .background(.background)
+            #else
+            .background(Color(.secondarySystemGroupedBackground))
+            .cornerRadius(12)
+            #endif
         }
-        .padding()
-        #if os(macOS)
-        .background(.background)
-        #else
-        .background(Color(.systemGroupedBackground))
-        .cornerRadius(12)
-        #endif
     }
 
     @ViewBuilder
@@ -89,9 +114,12 @@ struct SyncStatusDetailView: View {
         if syncManager.isSyncing {
             ProgressView()
                 .controlSize(.regular)
-        } else {
+        } else if syncManager.isSyncAvailable {
             Image(systemName: syncManager.syncStatus.iconName)
                 .foregroundStyle(syncManager.syncStatus.tintColor)
+        } else {
+            Image(systemName: "icloud")
+                .foregroundStyle(.blue)
         }
     }
 }

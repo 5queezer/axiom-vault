@@ -129,13 +129,16 @@ class BiometricAuth {
     func hasStoredPassword(for vaultPath: String) -> Bool {
         let account = keychainAccount(for: vaultPath)
 
+        let context = LAContext()
+        context.interactionNotAllowed = true
+
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: Self.serviceName,
             kSecAttrAccount as String: account,
             kSecReturnAttributes as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne,
-            kSecUseAuthenticationUI as String: kSecUseAuthenticationUIFail,
+            kSecUseAuthenticationContext as String: context,
         ]
 
         var result: AnyObject?
