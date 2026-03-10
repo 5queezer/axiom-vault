@@ -57,64 +57,67 @@ struct VaultSelectionView: View {
     @Binding var showingOpenVault: Bool
 
     var body: some View {
-        VStack(spacing: 30) {
-            Image(systemName: "lock.shield.fill")
-                .font(.system(size: 80))
-                .foregroundColor(.blue)
+        VStack(spacing: 24) {
+            Spacer()
 
-            Text("AxiomVault")
-                .font(.largeTitle)
-                .fontWeight(.bold)
+            Image(systemName: "lock.shield.fill")
+                .font(.system(size: 72))
+                .foregroundStyle(.blue.gradient)
 
             Text("Secure, encrypted file storage")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
 
-            Text("Version: \(VaultCore.shared.version())")
-                .font(.caption)
-                .foregroundColor(.secondary)
+            VStack(spacing: 12) {
+                Button(action: {
+                    showingOpenVault = true
+                }) {
+                    Label("Open Existing Vault", systemImage: "folder.fill")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
 
-            VStack(spacing: 16) {
                 Button(action: {
                     showingCreateVault = true
                 }) {
                     Label("Create New Vault", systemImage: "plus.circle.fill")
                         .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(Color.blue)
-                        .foregroundColor(.white)
-                        .cornerRadius(10)
+                        .padding(.vertical, 14)
                 }
-
-                Button(action: {
-                    showingOpenVault = true
-                }) {
-                    Label("Open Existing Vault", systemImage: "folder.fill")
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(Color.green)
-                        .foregroundColor(.white)
-                        .cornerRadius(10)
-                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
             }
             .padding(.horizontal, 40)
 
             if !vaultManager.listExistingVaults().isEmpty {
-                VStack(alignment: .leading) {
+                VStack(alignment: .leading, spacing: 8) {
                     Text("Recent Vaults")
                         .font(.headline)
                         .padding(.horizontal)
 
                     ForEach(vaultManager.listExistingVaults(), id: \.path) { url in
                         HStack {
-                            Image(systemName: "lock.fill")
-                                .foregroundColor(.gray)
-                            Text(url.lastPathComponent)
+                            Image(systemName: "lock.shield")
+                                .foregroundColor(.blue)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(url.lastPathComponent)
+                                    .font(.body)
+                                Text(url.deletingLastPathComponent().path)
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                                    .lineLimit(1)
+                            }
                             Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
                         }
-                        .padding()
+                        .padding(12)
                         .background(Color(.systemGray6))
-                        .cornerRadius(8)
+                        .cornerRadius(10)
                         .onTapGesture {
                             showingOpenVault = true
                         }
@@ -125,6 +128,5 @@ struct VaultSelectionView: View {
 
             Spacer()
         }
-        .padding(.top, 50)
     }
 }

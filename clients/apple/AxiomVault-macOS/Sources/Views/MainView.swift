@@ -59,7 +59,7 @@ struct WelcomeView: View {
         VStack(spacing: 24) {
             Image(systemName: "lock.shield.fill")
                 .font(.system(size: 64))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.blue.gradient)
 
             Text("AxiomVault")
                 .font(.largeTitle)
@@ -72,27 +72,23 @@ struct WelcomeView: View {
 
             HStack(spacing: 16) {
                 Button {
-                    showCreateVault = true
+                    showUnlockVault = true
                 } label: {
-                    Label("Create Vault", systemImage: "plus.circle.fill")
+                    Label("Open Vault", systemImage: "folder.fill")
                         .frame(width: 160)
                 }
                 .controlSize(.large)
                 .buttonStyle(.borderedProminent)
 
                 Button {
-                    showUnlockVault = true
+                    showCreateVault = true
                 } label: {
-                    Label("Open Vault", systemImage: "lock.open.fill")
+                    Label("Create Vault", systemImage: "plus.circle.fill")
                         .frame(width: 160)
                 }
                 .controlSize(.large)
                 .buttonStyle(.bordered)
             }
-
-            Text("v\(VaultCore.shared.version())")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
