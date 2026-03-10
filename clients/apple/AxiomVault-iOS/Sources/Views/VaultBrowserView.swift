@@ -170,25 +170,32 @@ struct VaultBrowserView: View {
     }
 
     private var emptyFolderView: some View {
-        VStack(spacing: 20) {
-            Image(systemName: "folder")
-                .font(.system(size: 60))
-                .foregroundColor(.secondary)
+        VStack(spacing: 16) {
+            Image(systemName: "folder.badge.plus")
+                .font(.system(size: 56))
+                .foregroundStyle(.blue.opacity(0.6))
 
             Text("This folder is empty")
                 .font(.headline)
+
+            Text("Add your first file to get started")
+                .font(.subheadline)
                 .foregroundColor(.secondary)
 
-            HStack(spacing: 16) {
+            VStack(spacing: 10) {
                 Button(action: { showingAddFile = true }) {
                     Label("Add File", systemImage: "doc.badge.plus")
+                        .frame(maxWidth: 200)
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.borderedProminent)
+                .controlSize(.regular)
 
                 Button(action: { showingCreateDirectory = true }) {
                     Label("New Folder", systemImage: "folder.badge.plus")
+                        .frame(maxWidth: 200)
                 }
                 .buttonStyle(.bordered)
+                .controlSize(.regular)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
