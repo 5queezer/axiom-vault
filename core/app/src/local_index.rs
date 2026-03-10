@@ -31,7 +31,7 @@ pub struct IndexEntry {
     pub path: String,
     pub encrypted_name: String,
     pub is_directory: bool,
-    pub size: Option<u64>,
+    pub size: Option<i64>,
     pub modified_at: i64,
     pub etag: Option<String>,
 }
@@ -133,7 +133,7 @@ impl LocalIndex {
                 path: row.get(0)?,
                 encrypted_name: row.get(1)?,
                 is_directory: row.get::<_, i32>(2)? != 0,
-                size: row.get::<_, Option<i64>>(3)?.map(|v| v as u64),
+                size: row.get::<_, Option<i64>>(3)?,
                 modified_at: row.get(4)?,
                 etag: row.get(5)?,
             })
@@ -173,7 +173,7 @@ impl LocalIndex {
                     path,
                     encrypted_name: row.get(1)?,
                     is_directory: row.get::<_, i32>(2)? != 0,
-                    size: row.get::<_, Option<i64>>(3)?.map(|v| v as u64),
+                    size: row.get::<_, Option<i64>>(3)?,
                     modified_at: row.get(4)?,
                     etag: row.get(5)?,
                 }))

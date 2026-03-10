@@ -161,7 +161,7 @@ pub async fn mount_vault(
     id: String,
     mount_point: String,
 ) -> Result<VaultInfo, String> {
-    info!("Mounting vault {} at {}", id, mount_point);
+    info!("Mounting vault");
 
     let mount_path = PathBuf::from(&mount_point);
     if !mount_path.exists() {
@@ -236,7 +236,7 @@ pub async fn create_file(
     path: String,
     content: Vec<u8>,
 ) -> Result<(), String> {
-    info!("Creating file: {}", path);
+    info!("Creating file");
     state
         .service
         .create_file(&path, &content)
@@ -266,7 +266,7 @@ pub async fn update_file(
     path: String,
     content: Vec<u8>,
 ) -> Result<(), String> {
-    info!("Updating file: {}", path);
+    info!("Updating file");
     state
         .service
         .update_file(&path, &content)
@@ -281,7 +281,7 @@ pub async fn delete_file(
     #[allow(unused_variables)] vault_id: String,
     path: String,
 ) -> Result<(), String> {
-    info!("Deleting file: {}", path);
+    info!("Deleting file");
     state
         .service
         .delete_file(&path)
@@ -296,7 +296,7 @@ pub async fn create_directory(
     #[allow(unused_variables)] vault_id: String,
     path: String,
 ) -> Result<(), String> {
-    info!("Creating directory: {}", path);
+    info!("Creating directory");
     state
         .service
         .create_directory(&path)
@@ -311,7 +311,7 @@ pub async fn delete_directory(
     #[allow(unused_variables)] vault_id: String,
     path: String,
 ) -> Result<(), String> {
-    info!("Deleting directory: {}", path);
+    info!("Deleting directory");
     state
         .service
         .delete_directory(&path)

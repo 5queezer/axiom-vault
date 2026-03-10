@@ -315,16 +315,22 @@ impl VaultConfig {
             Error::Vault("No encrypted recovery key stored in this vault".to_string())
         })?;
 
-        let plaintext = decrypt(master_key.as_bytes(), encrypted)?;
+        use zeroize::{Zeroize, Zeroizing};
+
+        let mut plaintext = decrypt(master_key.as_bytes(), encrypted)?;
         if plaintext.len() != 32 {
             return Err(Error::Crypto(format!(
                 "Decrypted recovery key has wrong length: expected 32, got {}",
                 plaintext.len()
             )));
         }
-        let mut bytes = [0u8; 32];
+        let mut bytes = Zeroizing::new([0u8; 32]);
         bytes.copy_from_slice(&plaintext);
-        Ok(RecoveryKey::from_bytes(bytes))
+
+        // Best-effort: wipe plaintext buffer containing key material.
+        plaintext.zeroize();
+
+        Ok(RecoveryKey::from_bytes(*bytes))
     }
 
     /// Migrate a legacy v1.0 vault to the v1.1 key-wrapping format.
