@@ -35,6 +35,13 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Release version: $VERSION"
 
+      - name: Validate version consistency
+        run: |
+          TAG_VERSION="${{ steps.get_version.outputs.version }}"
+          # Strip leading 'v' if present
+          EXPECTED="${TAG_VERSION#v}"
+          bash scripts/check-versions.sh "$EXPECTED"
+
       - name: Generate changelog
         id: changelog
         run: |
