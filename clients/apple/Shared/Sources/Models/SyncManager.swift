@@ -191,10 +191,8 @@ class SyncManager: ObservableObject {
         didSet {
             guard !isLoadingScopedState else { return }
             persist(syncProvider.rawValue, for: .syncProvider)
-            if syncProvider == .none {
-                cancelAutoSync()
-                syncStatus = .notConfigured
-            }
+            cancelAutoSync()
+            syncStatus = .notConfigured
         }
     }
 
@@ -211,8 +209,15 @@ class SyncManager: ObservableObject {
 
     init() {}
 
-    var isSyncAvailable: Bool {
+    /// Whether a sync provider has been chosen for the active vault.
+    var isProviderSelected: Bool {
         activeVaultKey != nil && syncProvider != .none
+    }
+
+    /// Whether sync is fully operational (provider selected, configured, and backend connected).
+    /// Returns `false` until a real sync backend is wired up.
+    var isSyncAvailable: Bool {
+        false
     }
 
     var availabilityMessage: String {
@@ -221,6 +226,9 @@ class SyncManager: ObservableObject {
         }
         if syncProvider == .none {
             return "Select a sync provider above to enable cloud sync."
+        }
+        if syncProvider.needsSetup {
+            return "\(syncProvider.displayName) requires additional configuration. Setup will be available in a future update."
         }
         return "Sync engine integration is in progress. Settings are saved per-vault and will take effect once the \(syncProvider.displayName) backend is connected."
     }
@@ -315,7 +323,7 @@ class SyncManager: ObservableObject {
         conflictStrategy = ConflictResolutionStrategy(rawValue: defaults.string(forKey: scopedKey(.conflictStrategy)!) ?? "") ?? .keepBoth
         syncProvider = SyncProvider(rawValue: defaults.string(forKey: scopedKey(.syncProvider)!) ?? "") ?? .none
         lastSyncDate = defaults.object(forKey: scopedKey(.lastSyncDate)!) as? Date
-        syncStatus = syncProvider == .none ? .notConfigured : .offline
+        syncStatus = .notConfigured
         syncError = nil
         syncLog = []
     }
