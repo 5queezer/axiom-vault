@@ -246,15 +246,48 @@ targets:
     entitlements:
       path: FileProvider/Resources/FileProvider.entitlements
 
+  # ============================================================
+  # iOS UI Tests
+  # ============================================================
+  AxiomVaultUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: "16.0"
+
+    sources:
+      - path: AxiomVaultUITests
+        type: group
+        excludes:
+          - "**/.DS_Store"
+
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.axiomvault.ios.uitests
+        TEST_TARGET_NAME: AxiomVault-iOS
+        GENERATE_INFOPLIST_FILE: YES
+      configs:
+        Debug:
+          SWIFT_OPTIMIZATION_LEVEL: "-Onone"
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG
+        Release:
+          SWIFT_OPTIMIZATION_LEVEL: "-O"
+
+    dependencies:
+      - target: AxiomVault-iOS
+
 schemes:
   AxiomVault-iOS:
     build:
       targets:
         AxiomVault-iOS: all
+        AxiomVaultUITests:
+          - testing
     run:
       config: Debug
     test:
       config: Debug
+      targets:
+        - AxiomVaultUITests
     profile:
       config: Release
     analyze:

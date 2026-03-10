@@ -91,6 +91,7 @@ struct VaultBrowserView: View {
                 } label: {
                     Image(systemName: "ellipsis.circle")
                 }
+                .accessibilityIdentifier("moreMenu")
             }
         }
         .sheet(isPresented: $showingAddFile) { AddFileView() }
