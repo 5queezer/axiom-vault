@@ -107,7 +107,7 @@ impl LocalIndex {
                 entry.path,
                 entry.encrypted_name,
                 entry.is_directory as i32,
-                entry.size.map(|s| s as i64),
+                entry.size,
                 entry.modified_at,
                 entry.etag,
             ],
