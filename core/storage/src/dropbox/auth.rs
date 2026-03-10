@@ -2,12 +2,19 @@
 
 use chrono::{DateTime, Duration, Utc};
 use oauth2::{
-    basic::BasicClient, AuthUrl, ClientId, ClientSecret, EndpointNotSet, EndpointSet, RedirectUrl,
-    TokenResponse, TokenUrl,
+    basic::BasicClient, AuthUrl, ClientId, ClientSecret, RedirectUrl, TokenResponse, TokenUrl,
 };
 use serde::{Deserialize, Serialize};
 
 use axiomvault_common::{Error, Result};
+
+type OAuthClient = BasicClient<
+    oauth2::EndpointSet,
+    oauth2::EndpointNotSet,
+    oauth2::EndpointNotSet,
+    oauth2::EndpointNotSet,
+    oauth2::EndpointSet,
+>;
 
 /// OAuth2 authorization endpoint.
 const DROPBOX_AUTH_URL: &str = "https://www.dropbox.com/oauth2/authorize";
@@ -80,7 +87,7 @@ impl DropboxAuthConfig {
 
 /// OAuth2 authentication manager for Dropbox.
 pub struct DropboxAuthManager {
-    client: BasicClient<EndpointSet, EndpointNotSet, EndpointNotSet, EndpointNotSet, EndpointSet>,
+    client: OAuthClient,
     config: DropboxAuthConfig,
 }
 
@@ -167,9 +174,10 @@ impl DropboxAuthManager {
             .build()
             .map_err(|e| Error::Authentication(format!("Failed to build HTTP client: {}", e)))?;
 
+        let refresh_token_value = refresh_token.to_string();
         let token_result = self
             .client
-            .exchange_refresh_token(&RefreshToken::new(refresh_token.to_string()))
+            .exchange_refresh_token(&RefreshToken::new(refresh_token_value.clone()))
             .request_async(&http_client)
             .await
             .map_err(|e| Error::Authentication(format!("Token refresh failed: {}", e)))?;
@@ -178,7 +186,7 @@ impl DropboxAuthManager {
         let new_refresh_token = token_result
             .refresh_token()
             .map(|t| t.secret().clone())
-            .unwrap_or_else(|| refresh_token.to_string());
+            .unwrap_or_else(|| refresh_token_value.clone());
 
         let expires_in = token_result
             .expires_in()

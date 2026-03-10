@@ -121,7 +121,7 @@ pub fn wrap_key(master_key: &MasterKey, kek: &[u8; KEY_LENGTH]) -> Result<Vec<u8
 
 /// Unwrap (decrypt) a master key with a key-encryption key.
 pub fn unwrap_key(wrapped: &[u8], kek: &[u8; KEY_LENGTH]) -> Result<MasterKey> {
-    let plaintext = aead::decrypt(kek, wrapped)?;
+    let mut plaintext = aead::decrypt(kek, wrapped)?;
     if plaintext.len() != KEY_LENGTH {
         return Err(Error::Crypto(format!(
             "Unwrapped key has wrong length: expected {}, got {}",
@@ -129,8 +129,13 @@ pub fn unwrap_key(wrapped: &[u8], kek: &[u8; KEY_LENGTH]) -> Result<MasterKey> {
             plaintext.len()
         )));
     }
+
     let mut key = [0u8; KEY_LENGTH];
     key.copy_from_slice(&plaintext);
+
+    // Best-effort: wipe plaintext buffer containing key material.
+    plaintext.zeroize();
+
     Ok(MasterKey::from_bytes(key))
 }
 

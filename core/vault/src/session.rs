@@ -499,15 +499,17 @@ mod tests {
             VaultSession::unlock(config, b"test-password", provider.clone(), VaultTree::new())
                 .unwrap();
 
-        // Write files before password change.
-        let ops = VaultOperations::new(&session).unwrap();
         let file_a = VaultPath::parse("/secret.txt").unwrap();
         let file_b = VaultPath::parse("/photo.bin").unwrap();
         let content_a = b"top-secret document content";
         let content_b: Vec<u8> = (0..=255).collect();
-        ops.create_file(&file_a, content_a).await.unwrap();
-        ops.create_file(&file_b, &content_b).await.unwrap();
-        drop(ops);
+
+        // Write files before password change.
+        {
+            let ops = VaultOperations::new(&session).unwrap();
+            ops.create_file(&file_a, content_a).await.unwrap();
+            ops.create_file(&file_b, &content_b).await.unwrap();
+        }
 
         // Rotate the password.
         session
@@ -516,10 +518,11 @@ mod tests {
 
         // All previously encrypted files must still be readable in the
         // same session (master key unchanged in memory).
-        let ops = VaultOperations::new(&session).unwrap();
-        assert_eq!(ops.read_file(&file_a).await.unwrap(), content_a);
-        assert_eq!(ops.read_file(&file_b).await.unwrap(), content_b);
-        drop(ops);
+        {
+            let ops = VaultOperations::new(&session).unwrap();
+            assert_eq!(ops.read_file(&file_a).await.unwrap(), content_a);
+            assert_eq!(ops.read_file(&file_b).await.unwrap(), content_b);
+        }
 
         // Simulate closing and reopening the vault with the new password:
         // serialize the config, build a fresh session, and verify files.

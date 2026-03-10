@@ -6,6 +6,7 @@
 use argon2::{Algorithm, Argon2, Params, Version};
 use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
+use zeroize::Zeroizing;
 
 use crate::keys::{MasterKey, Salt, KEY_LENGTH};
 use axiomvault_common::{Error, Result};
@@ -93,12 +94,12 @@ pub fn derive_key(password: &[u8], salt: &Salt, params: &KdfParams) -> Result<Ma
 
     let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, argon2_params);
 
-    let mut key_bytes = [0u8; KEY_LENGTH];
+    let mut key_bytes = Zeroizing::new([0u8; KEY_LENGTH]);
     argon2
-        .hash_password_into(password, salt.as_bytes(), &mut key_bytes)
+        .hash_password_into(password, salt.as_bytes(), &mut key_bytes[..])
         .map_err(|e| Error::Crypto(format!("Key derivation failed: {}", e)))?;
 
-    Ok(MasterKey::from_bytes(key_bytes))
+    Ok(MasterKey::from_bytes(*key_bytes))
 }
 
 /// Verify that a password produces the expected key.

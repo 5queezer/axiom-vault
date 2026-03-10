@@ -31,7 +31,7 @@ pub struct IndexEntry {
     pub path: String,
     pub encrypted_name: String,
     pub is_directory: bool,
-    pub size: Option<u64>,
+    pub size: Option<i64>,
     pub modified_at: i64,
     pub etag: Option<String>,
 }
