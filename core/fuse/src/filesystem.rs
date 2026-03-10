@@ -468,7 +468,12 @@ impl Filesystem for VaultFilesystem {
         _lock_owner: Option<LockOwner>,
         reply: ReplyData,
     ) {
-        debug!("read: fh={}, offset={}, size={}", u64::from(fh), offset, size);
+        debug!(
+            "read: fh={}, offset={}, size={}",
+            u64::from(fh),
+            offset,
+            size
+        );
 
         let open_files = self.open_files.clone();
 
@@ -503,7 +508,12 @@ impl Filesystem for VaultFilesystem {
         _lock_owner: Option<LockOwner>,
         reply: ReplyWrite,
     ) {
-        debug!("write: fh={}, offset={}, size={}", u64::from(fh), offset, data.len());
+        debug!(
+            "write: fh={}, offset={}, size={}",
+            u64::from(fh),
+            offset,
+            data.len()
+        );
 
         let open_files = self.open_files.clone();
 
