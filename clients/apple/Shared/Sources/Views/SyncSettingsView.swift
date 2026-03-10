@@ -49,6 +49,7 @@ struct SyncSettingsView: View {
     private var iOSLayout: some View {
         NavigationView {
             Form {
+                syncProviderSection
                 syncStatusSection
                 syncConfigSection
                 conflictSection
@@ -60,6 +61,42 @@ struct SyncSettingsView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
                 }
+            }
+        }
+    }
+
+    private var syncProviderSection: some View {
+        Section {
+            ForEach(SyncProvider.allCases) { provider in
+                HStack {
+                    Image(systemName: provider.iconName)
+                        .foregroundStyle(provider == .none ? .secondary : .blue)
+                        .frame(width: 24)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(provider.displayName)
+                        Text(provider.description)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    if syncManager.syncProvider == provider {
+                        Image(systemName: "checkmark")
+                            .foregroundStyle(.blue)
+                    }
+                }
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    syncManager.syncProvider = provider
+                }
+            }
+        } header: {
+            Text("Sync Provider")
+        } footer: {
+            if syncManager.syncProvider.needsSetup {
+                Text("\(syncManager.syncProvider.displayName) requires additional setup. Configuration will be available in a future update.")
             }
         }
     }
@@ -152,6 +189,32 @@ struct SyncSettingsView: View {
 
     private var syncSettingsForm: some View {
         Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
+            GridRow {
+                Text("Provider")
+                    .foregroundStyle(.secondary)
+                Picker("", selection: $syncManager.syncProvider) {
+                    ForEach(SyncProvider.allCases) { provider in
+                        Label(provider.displayName, systemImage: provider.iconName)
+                            .tag(provider)
+                    }
+                }
+                .labelsHidden()
+                .frame(maxWidth: 200)
+            }
+
+            if syncManager.syncProvider.needsSetup {
+                GridRow {
+                    Color.clear
+                        .gridCellUnsizedAxes([.horizontal, .vertical])
+                    Text("\(syncManager.syncProvider.displayName) requires additional setup. Configuration will be available in a future update.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Divider()
+                .gridCellColumns(2)
+
             GridRow {
                 Text("Status")
                     .foregroundStyle(.secondary)
