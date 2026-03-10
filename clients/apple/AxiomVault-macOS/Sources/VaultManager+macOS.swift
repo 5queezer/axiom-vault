@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 /// Persisted vault bookmark for remembering user-selected vault locations (sandbox-safe)
