@@ -384,7 +384,12 @@ async fn main() -> Result<()> {
         Commands::Migrate { path, dry_run } => cmd_migrate(&path, dry_run).await,
 
         Commands::Completions { shell } => {
-            clap_complete::generate(shell, &mut Cli::command(), "axiomvault", &mut std::io::stdout());
+            clap_complete::generate(
+                shell,
+                &mut Cli::command(),
+                "axiomvault",
+                &mut std::io::stdout(),
+            );
             Ok(())
         }
     }
