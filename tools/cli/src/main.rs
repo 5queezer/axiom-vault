@@ -4,7 +4,8 @@
 //! and operating on encrypted vaults.
 
 use anyhow::{Context, Result};
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
+use clap_complete::Shell;
 use std::path::{Path, PathBuf};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -278,6 +279,13 @@ enum Commands {
         #[arg(long)]
         dry_run: bool,
     },
+
+    /// Generate shell completions.
+    Completions {
+        /// Shell to generate completions for.
+        #[arg(value_enum)]
+        shell: Shell,
+    },
 }
 
 #[tokio::main]
@@ -374,6 +382,11 @@ async fn main() -> Result<()> {
         } => cmd_sync_configure(&vault_path, &mode, interval).await,
 
         Commands::Migrate { path, dry_run } => cmd_migrate(&path, dry_run).await,
+
+        Commands::Completions { shell } => {
+            clap_complete::generate(shell, &mut Cli::command(), "axiomvault", &mut std::io::stdout());
+            Ok(())
+        }
     }
 }
 
