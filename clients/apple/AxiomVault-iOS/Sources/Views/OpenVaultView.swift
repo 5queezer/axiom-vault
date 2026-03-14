@@ -76,11 +76,14 @@ struct OpenVaultView: View {
                     if showPassword {
                         TextField("Password", text: $password)
                             .autocapitalization(.none)
+                            .accessibilityIdentifier("passwordField")
                     } else {
                         SecureField("Password", text: $password)
+                            .accessibilityIdentifier("passwordField")
                     }
 
                     Toggle("Show Password", isOn: $showPassword)
+                        .accessibilityIdentifier("showPasswordToggle")
                 }
 
                 Section {

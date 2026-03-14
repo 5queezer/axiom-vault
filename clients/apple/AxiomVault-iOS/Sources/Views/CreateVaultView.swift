@@ -30,14 +30,19 @@ struct CreateVaultView: View {
                     if showPassword {
                         TextField("Password", text: $password)
                             .autocapitalization(.none)
+                            .accessibilityIdentifier("passwordField")
                         TextField("Confirm Password", text: $confirmPassword)
                             .autocapitalization(.none)
+                            .accessibilityIdentifier("confirmPasswordField")
                     } else {
                         SecureField("Password", text: $password)
+                            .accessibilityIdentifier("passwordField")
                         SecureField("Confirm Password", text: $confirmPassword)
+                            .accessibilityIdentifier("confirmPasswordField")
                     }
 
                     Toggle("Show Password", isOn: $showPassword)
+                        .accessibilityIdentifier("showPasswordToggle")
                 }
 
                 Section {
