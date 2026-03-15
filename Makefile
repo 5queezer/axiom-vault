@@ -49,6 +49,13 @@ help:
 	@echo "  PREFIX=/opt/axiom make install  - Install to /opt/axiom"
 	@echo "  DESTDIR=/staging make install   - Stage install to /staging"
 	@echo ""
+	@echo "FUSE Support:"
+	@if [ -n "$(FUSE_FEATURE)" ]; then \
+		echo "  ✓ FUSE detected — vault mount support will be compiled in"; \
+	else \
+		echo "  ✗ FUSE not found — install libfuse3-dev for vault mount support"; \
+	fi
+	@echo ""
 	@echo "Troubleshooting:"
 	@echo "  sudo make uninstall && sudo make install  - Full reinstall"
 	@echo "  sudo kbuildsycoca5 --noincremental      - Force KDE cache update"
@@ -91,9 +98,19 @@ linux-release: check-linux-deps
 
 # Tauri desktop client (legacy)
 desktop: check-desktop-deps
+	@if [ -n "$(FUSE_FEATURE)" ]; then \
+		echo "✓ FUSE detected — building with FUSE mount support"; \
+	else \
+		echo "⚠ FUSE not found (install libfuse3-dev) — building without mount support"; \
+	fi
 	$(CARGO) build --package axiomvault-desktop $(FUSE_FEATURE)
 
 desktop-release: check-desktop-deps
+	@if [ -n "$(FUSE_FEATURE)" ]; then \
+		echo "✓ FUSE detected — building with FUSE mount support"; \
+	else \
+		echo "⚠ FUSE not found (install libfuse3-dev) — building without mount support"; \
+	fi
 	$(CARGO) build --package axiomvault-desktop --release $(FUSE_FEATURE)
 
 # CLI tool
