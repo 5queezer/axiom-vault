@@ -4,7 +4,7 @@
 //! and operating on encrypted vaults.
 
 use anyhow::{Context, Result};
-use clap::{CommandFactory, Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::Shell;
 use std::path::{Path, PathBuf};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -22,6 +22,41 @@ use axiomvault_vault::{
     check_migration_needed, check_vault_health, check_vault_structure, MigrationRegistry,
     MigrationStatus, VaultConfig, VaultManager, VaultOperations, VaultVersion,
 };
+
+/// KDF strength level for key derivation.
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum KdfStrength {
+    /// Fast key derivation, lower security margin.
+    Interactive,
+    /// Balanced key derivation (default).
+    Moderate,
+    /// Slow key derivation, maximum security margin.
+    Sensitive,
+}
+
+/// Conflict resolution strategy for sync operations.
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum ConflictStrategyArg {
+    /// Keep both local and remote versions.
+    KeepBoth,
+    /// Prefer the local version.
+    PreferLocal,
+    /// Prefer the remote version.
+    PreferRemote,
+}
+
+/// Sync mode for vault synchronisation.
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum SyncModeArg {
+    /// Sync only when explicitly triggered.
+    Manual,
+    /// Sync on file changes.
+    OnDemand,
+    /// Sync at a fixed interval.
+    Periodic,
+    /// Combine on-demand and periodic sync.
+    Hybrid,
+}
 
 #[derive(Parser)]
 #[command(name = "axiomvault")]
@@ -48,9 +83,9 @@ enum Commands {
         #[arg(short, long)]
         path: PathBuf,
 
-        /// KDF strength: "interactive", "moderate", or "sensitive".
-        #[arg(short, long, default_value = "moderate")]
-        strength: String,
+        /// KDF strength level.
+        #[arg(short, long, value_enum, default_value_t = KdfStrength::Moderate)]
+        strength: KdfStrength,
     },
 
     /// Open an existing vault and start interactive session.
@@ -198,9 +233,9 @@ enum Commands {
         #[arg(short, long)]
         tokens: PathBuf,
 
-        /// KDF strength: "interactive", "moderate", or "sensitive".
-        #[arg(short, long, default_value = "moderate")]
-        strength: String,
+        /// KDF strength level.
+        #[arg(short, long, value_enum, default_value_t = KdfStrength::Moderate)]
+        strength: KdfStrength,
     },
 
     /// Open a vault on Google Drive.
@@ -220,9 +255,9 @@ enum Commands {
         #[arg(short = 'p', long)]
         vault_path: PathBuf,
 
-        /// Conflict resolution strategy: "keep-both", "prefer-local", "prefer-remote".
-        #[arg(short, long, default_value = "keep-both")]
-        strategy: String,
+        /// Conflict resolution strategy.
+        #[arg(short, long, value_enum, default_value_t = ConflictStrategyArg::KeepBoth)]
+        strategy: ConflictStrategyArg,
     },
 
     /// Show sync status for the vault.
@@ -249,9 +284,9 @@ enum Commands {
         #[arg(short, long)]
         file: String,
 
-        /// Resolution strategy: "keep-both", "prefer-local", "prefer-remote".
-        #[arg(short, long)]
-        strategy: String,
+        /// Resolution strategy.
+        #[arg(short, long, value_enum)]
+        strategy: ConflictStrategyArg,
     },
 
     /// Configure sync mode for the vault.
@@ -260,9 +295,9 @@ enum Commands {
         #[arg(short = 'p', long)]
         vault_path: PathBuf,
 
-        /// Sync mode: "manual", "on-demand", "periodic", "hybrid".
-        #[arg(short, long)]
-        mode: String,
+        /// Sync mode.
+        #[arg(short, long, value_enum)]
+        mode: SyncModeArg,
 
         /// Interval in seconds for periodic sync (required for periodic/hybrid modes).
         #[arg(short, long)]
@@ -285,6 +320,10 @@ enum Commands {
         /// Shell to generate completions for.
         #[arg(value_enum)]
         shell: Shell,
+
+        /// Install completions to the standard location for the shell.
+        #[arg(long)]
+        install: bool,
     },
 }
 
@@ -311,7 +350,7 @@ async fn main() -> Result<()> {
             name,
             path,
             strength,
-        } => cmd_create(&name, &path, &strength).await,
+        } => cmd_create(&name, &path, strength).await,
 
         Commands::Open { path } => cmd_open(&path).await,
 
@@ -356,14 +395,14 @@ async fn main() -> Result<()> {
             folder_id,
             tokens,
             strength,
-        } => cmd_gdrive_create(&name, &folder_id, &tokens, &strength).await,
+        } => cmd_gdrive_create(&name, &folder_id, &tokens, strength).await,
 
         Commands::GdriveOpen { folder_id, tokens } => cmd_gdrive_open(&folder_id, &tokens).await,
 
         Commands::Sync {
             vault_path,
             strategy,
-        } => cmd_sync(&vault_path, &strategy).await,
+        } => cmd_sync(&vault_path, strategy).await,
 
         Commands::SyncStatus { vault_path } => cmd_sync_status(&vault_path).await,
 
@@ -373,23 +412,27 @@ async fn main() -> Result<()> {
             vault_path,
             file,
             strategy,
-        } => cmd_sync_resolve(&vault_path, &file, &strategy).await,
+        } => cmd_sync_resolve(&vault_path, &file, strategy).await,
 
         Commands::SyncConfigure {
             vault_path,
             mode,
             interval,
-        } => cmd_sync_configure(&vault_path, &mode, interval).await,
+        } => cmd_sync_configure(&vault_path, mode, interval).await,
 
         Commands::Migrate { path, dry_run } => cmd_migrate(&path, dry_run).await,
 
-        Commands::Completions { shell } => {
-            clap_complete::generate(
-                shell,
-                &mut Cli::command(),
-                "axiomvault",
-                &mut std::io::stdout(),
-            );
+        Commands::Completions { shell, install } => {
+            if install {
+                install_completions(shell)?;
+            } else {
+                clap_complete::generate(
+                    shell,
+                    &mut Cli::command(),
+                    "axiomvault",
+                    &mut std::io::stdout(),
+                );
+            }
             Ok(())
         }
     }
@@ -442,18 +485,98 @@ fn display_recovery_words(words: &str) {
     std::io::stdin().read_line(&mut buf).ok();
 }
 
-/// Create a new vault.
-async fn cmd_create(name: &str, path: &Path, strength: &str) -> Result<()> {
-    info!("Creating new vault: {}", name);
+/// Convert KDF strength enum to crypto params.
+fn kdf_params_from(strength: KdfStrength) -> KdfParams {
+    match strength {
+        KdfStrength::Interactive => KdfParams::interactive(),
+        KdfStrength::Moderate => KdfParams::moderate(),
+        KdfStrength::Sensitive => KdfParams::sensitive(),
+    }
+}
 
-    let kdf_params = match strength {
-        "interactive" => KdfParams::interactive(),
-        "moderate" => KdfParams::moderate(),
-        "sensitive" => KdfParams::sensitive(),
+/// Convert conflict strategy enum to sync type.
+fn conflict_strategy_from(arg: ConflictStrategyArg) -> ConflictStrategy {
+    match arg {
+        ConflictStrategyArg::KeepBoth => ConflictStrategy::KeepBoth,
+        ConflictStrategyArg::PreferLocal => ConflictStrategy::PreferLocal,
+        ConflictStrategyArg::PreferRemote => ConflictStrategy::PreferRemote,
+    }
+}
+
+/// Convert sync mode enum to sync type.
+fn sync_mode_from(arg: SyncModeArg, interval: Option<u64>) -> Result<SyncMode> {
+    match arg {
+        SyncModeArg::Manual => Ok(SyncMode::Manual),
+        SyncModeArg::OnDemand => Ok(SyncMode::OnDemand),
+        SyncModeArg::Periodic => {
+            let secs =
+                interval.ok_or_else(|| anyhow::anyhow!("Interval required for periodic mode"))?;
+            Ok(SyncMode::Periodic {
+                interval: std::time::Duration::from_secs(secs),
+            })
+        }
+        SyncModeArg::Hybrid => {
+            let secs =
+                interval.ok_or_else(|| anyhow::anyhow!("Interval required for hybrid mode"))?;
+            Ok(SyncMode::Hybrid {
+                interval: std::time::Duration::from_secs(secs),
+            })
+        }
+    }
+}
+
+/// Install shell completions to the standard location.
+fn install_completions(shell: Shell) -> Result<()> {
+    let home = std::env::var("HOME").context("HOME not set")?;
+    let (dir, filename) = match shell {
+        Shell::Zsh => {
+            let dir = PathBuf::from(&home).join(".zsh/completions");
+            (dir, "_axiomvault".to_string())
+        }
+        Shell::Bash => {
+            let dir = PathBuf::from(&home).join(".local/share/bash-completion/completions");
+            (dir, "axiomvault".to_string())
+        }
+        Shell::Fish => {
+            let dir = PathBuf::from(&home).join(".config/fish/completions");
+            (dir, "axiomvault.fish".to_string())
+        }
         _ => {
-            anyhow::bail!("Invalid strength. Use: interactive, moderate, or sensitive");
+            anyhow::bail!(
+                "Automatic installation not supported for {:?}. Use `axiomvault completions {:?}` and redirect to a file.",
+                shell,
+                shell,
+            );
         }
     };
+
+    std::fs::create_dir_all(&dir).with_context(|| format!("Failed to create {}", dir.display()))?;
+
+    let dest = dir.join(&filename);
+    let mut file = std::fs::File::create(&dest)
+        .with_context(|| format!("Failed to create {}", dest.display()))?;
+    clap_complete::generate(shell, &mut Cli::command(), "axiomvault", &mut file);
+
+    println!("Completions installed to {}", dest.display());
+
+    if shell == Shell::Zsh {
+        println!();
+        println!("Add the following to your ~/.zshrc if not already present:");
+        println!();
+        println!("  fpath=(~/.zsh/completions $fpath)");
+        println!("  autoload -Uz compinit && compinit");
+        println!();
+        println!("Then restart your shell or run: exec zsh");
+    }
+
+    Ok(())
+}
+
+/// Create a new vault.
+async fn cmd_create(name: &str, path: &Path, strength: KdfStrength) -> Result<()> {
+    info!("Creating new vault: {}", name);
+
+    let kdf_params = kdf_params_from(strength);
 
     let password = prompt_password("Enter password: ")?;
     let confirm = prompt_password("Confirm password: ")?;
@@ -1117,18 +1240,11 @@ async fn cmd_gdrive_create(
     name: &str,
     folder_id: &str,
     tokens_path: &Path,
-    strength: &str,
+    strength: KdfStrength,
 ) -> Result<()> {
     info!("Creating new vault on Google Drive: {}", name);
 
-    let kdf_params = match strength {
-        "interactive" => KdfParams::interactive(),
-        "moderate" => KdfParams::moderate(),
-        "sensitive" => KdfParams::sensitive(),
-        _ => {
-            anyhow::bail!("Invalid strength. Use: interactive, moderate, or sensitive");
-        }
-    };
+    let kdf_params = kdf_params_from(strength);
 
     let password = prompt_password("Enter password: ")?;
     let confirm = prompt_password("Confirm password: ")?;
@@ -1210,44 +1326,11 @@ async fn cmd_gdrive_open(folder_id: &str, tokens_path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Parse conflict strategy from string.
-fn parse_conflict_strategy(strategy: &str) -> Result<ConflictStrategy> {
-    match strategy {
-        "keep-both" => Ok(ConflictStrategy::KeepBoth),
-        "prefer-local" => Ok(ConflictStrategy::PreferLocal),
-        "prefer-remote" => Ok(ConflictStrategy::PreferRemote),
-        _ => anyhow::bail!("Invalid strategy. Use: keep-both, prefer-local, or prefer-remote"),
-    }
-}
-
-/// Parse sync mode from string.
-fn parse_sync_mode(mode: &str, interval: Option<u64>) -> Result<SyncMode> {
-    match mode {
-        "manual" => Ok(SyncMode::Manual),
-        "on-demand" => Ok(SyncMode::OnDemand),
-        "periodic" => {
-            let secs =
-                interval.ok_or_else(|| anyhow::anyhow!("Interval required for periodic mode"))?;
-            Ok(SyncMode::Periodic {
-                interval: std::time::Duration::from_secs(secs),
-            })
-        }
-        "hybrid" => {
-            let secs =
-                interval.ok_or_else(|| anyhow::anyhow!("Interval required for hybrid mode"))?;
-            Ok(SyncMode::Hybrid {
-                interval: std::time::Duration::from_secs(secs),
-            })
-        }
-        _ => anyhow::bail!("Invalid mode. Use: manual, on-demand, periodic, or hybrid"),
-    }
-}
-
 /// Sync vault with remote storage.
-async fn cmd_sync(vault_path: &Path, strategy: &str) -> Result<()> {
+async fn cmd_sync(vault_path: &Path, strategy: ConflictStrategyArg) -> Result<()> {
     info!("Starting vault sync");
 
-    let conflict_strategy = parse_conflict_strategy(strategy)?;
+    let conflict_strategy = conflict_strategy_from(strategy);
     let password = prompt_password("Enter password: ")?;
     let path_str = vault_path.to_string_lossy().to_string();
 
@@ -1376,10 +1459,14 @@ async fn cmd_sync_conflicts(vault_path: &Path) -> Result<()> {
 }
 
 /// Resolve a sync conflict for a specific file.
-async fn cmd_sync_resolve(vault_path: &Path, file: &str, strategy: &str) -> Result<()> {
+async fn cmd_sync_resolve(
+    vault_path: &Path,
+    file: &str,
+    strategy: ConflictStrategyArg,
+) -> Result<()> {
     info!("Resolving sync conflict for {}", file);
 
-    let conflict_strategy = parse_conflict_strategy(strategy)?;
+    let conflict_strategy = conflict_strategy_from(strategy);
     let password = prompt_password("Enter password: ")?;
     let path_str = vault_path.to_string_lossy().to_string();
 
@@ -1419,7 +1506,7 @@ async fn cmd_sync_resolve(vault_path: &Path, file: &str, strategy: &str) -> Resu
         .context("Failed to resolve conflict")?;
 
     println!(
-        "Conflict resolved for {} using strategy: {}",
+        "Conflict resolved for {} using strategy: {:?}",
         file, strategy
     );
 
@@ -1427,10 +1514,14 @@ async fn cmd_sync_resolve(vault_path: &Path, file: &str, strategy: &str) -> Resu
 }
 
 /// Configure sync mode for the vault.
-async fn cmd_sync_configure(vault_path: &Path, mode: &str, interval: Option<u64>) -> Result<()> {
-    info!("Configuring sync mode: {}", mode);
+async fn cmd_sync_configure(
+    vault_path: &Path,
+    mode: SyncModeArg,
+    interval: Option<u64>,
+) -> Result<()> {
+    info!("Configuring sync mode: {:?}", mode);
 
-    let sync_mode = parse_sync_mode(mode, interval)?;
+    let sync_mode = sync_mode_from(mode, interval)?;
 
     let staging_dir = vault_path.join(".axiom_sync");
     tokio::fs::create_dir_all(&staging_dir)
