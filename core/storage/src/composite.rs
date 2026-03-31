@@ -276,7 +276,7 @@ impl CompositeStorageProvider {
         let shard_size = if data.is_empty() {
             1
         } else {
-            (data.len() + data_shards - 1) / data_shards
+            data.len().div_ceil(data_shards)
         };
 
         let mut shards: Vec<Vec<u8>> = Vec::with_capacity(total_shards);
@@ -316,10 +316,8 @@ impl CompositeStorageProvider {
             .map_err(|e| Error::Storage(format!("Reed-Solomon reconstruct failed: {}", e)))?;
 
         let mut data = Vec::with_capacity(original_size);
-        for shard in shard_opts.iter().take(data_shards) {
-            if let Some(s) = shard {
-                data.extend_from_slice(s);
-            }
+        for s in shard_opts.iter().take(data_shards).flatten() {
+            data.extend_from_slice(s);
         }
         data.truncate(original_size);
         Ok(data)
