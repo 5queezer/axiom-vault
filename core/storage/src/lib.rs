@@ -10,6 +10,7 @@
 //! - Streaming support: Large files are handled via streams
 //! - Unified error semantics: Consistent error types across providers
 
+pub mod composite;
 pub mod dropbox;
 pub mod gdrive;
 pub mod icloud;
@@ -19,6 +20,7 @@ pub mod onedrive;
 pub mod provider;
 pub mod registry;
 
+pub use composite::{CompositeConfig, CompositeStorageProvider, RaidMode};
 pub use dropbox::{DropboxConfig, DropboxProvider};
 pub use gdrive::{GDriveConfig, GDriveProvider};
 pub use icloud::{ICloudConfig, ICloudProvider};
