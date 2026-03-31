@@ -4,7 +4,10 @@
 //! delegating operations according to the configured RAID mode.
 
 use async_trait::async_trait;
+use bytes::Bytes;
 use futures::stream;
+use serde::{Deserialize, Serialize};
+use std::future::Future;
 use std::sync::Arc;
 use tracing::warn;
 
@@ -12,17 +15,19 @@ use crate::provider::{ByteStream, Metadata, StorageProvider};
 use axiomvault_common::{Error, Result, VaultPath};
 
 /// RAID mode for the composite provider.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RaidMode {
     /// Mirror (RAID 1): write all chunks to all backends, read from first success.
     Mirror,
     /// Erasure coding (RAID 5/6): Reed-Solomon sharding across backends.
-    /// Fields: (data_shards, parity_shards).
-    Erasure { data_shards: usize, parity_shards: usize },
+    Erasure {
+        data_shards: usize,
+        parity_shards: usize,
+    },
 }
 
 /// Configuration for the composite storage provider.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompositeConfig {
     /// RAID mode to use.
     pub mode: RaidMode,
@@ -54,7 +59,11 @@ impl CompositeStorageProvider {
             ));
         }
 
-        if let RaidMode::Erasure { data_shards, parity_shards } = config.mode {
+        if let RaidMode::Erasure {
+            data_shards,
+            parity_shards,
+        } = config.mode
+        {
             if data_shards == 0 {
                 return Err(Error::InvalidInput(
                     "Erasure mode requires at least 1 data shard".to_string(),
@@ -68,7 +77,9 @@ impl CompositeStorageProvider {
             if data_shards + parity_shards != backends.len() {
                 return Err(Error::InvalidInput(format!(
                     "Erasure mode requires data_shards({}) + parity_shards({}) == backend count({})",
-                    data_shards, parity_shards, backends.len()
+                    data_shards,
+                    parity_shards,
+                    backends.len()
                 )));
             }
         }
@@ -90,27 +101,20 @@ impl CompositeStorageProvider {
     pub fn backend_names(&self) -> Vec<&str> {
         self.backends.iter().map(|b| b.name()).collect()
     }
-}
 
-/// Fan out a write operation to all backends, returning the first successful
-/// metadata result. Logs warnings for individual backend failures.
-/// Returns error only if ALL backends fail.
-macro_rules! fan_out_write {
-    ($self:expr, $op_name:expr, $call:expr) => {{
-        let futures: Vec<_> = $self
-            .backends
-            .iter()
-            .map(|backend| {
-                let backend = Arc::clone(backend);
-                $call(backend)
-            })
-            .collect();
-
+    /// Fan out a `Result<Metadata>` operation to all backends concurrently.
+    /// Returns the first successful result; fails only if ALL backends fail.
+    async fn fan_out<F, Fut>(&self, op: &str, f: F) -> Result<Metadata>
+    where
+        F: Fn(Arc<dyn StorageProvider>) -> Fut,
+        Fut: Future<Output = Result<Metadata>>,
+    {
+        let futures: Vec<_> = self.backends.iter().map(|b| f(Arc::clone(b))).collect();
         let results = futures::future::join_all(futures).await;
 
         let mut first_success: Option<Metadata> = None;
         let mut last_error: Option<Error> = None;
-        let mut failure_count = 0;
+        let mut failure_count = 0usize;
 
         for (i, result) in results.into_iter().enumerate() {
             match result {
@@ -122,8 +126,8 @@ macro_rules! fan_out_write {
                 Err(e) => {
                     failure_count += 1;
                     warn!(
-                        backend = $self.backends[i].name(),
-                        operation = $op_name,
+                        backend = self.backends[i].name(),
+                        operation = op,
                         error = %e,
                         "Backend write failed"
                     );
@@ -134,48 +138,108 @@ macro_rules! fan_out_write {
 
         if failure_count > 0 && first_success.is_some() {
             warn!(
-                operation = $op_name,
+                operation = op,
                 failed = failure_count,
-                total = $self.backends.len(),
-                "Partial write failure: {}/{} backends failed",
+                total = self.backends.len(),
+                "Partial write: {}/{} backends failed",
                 failure_count,
-                $self.backends.len()
+                self.backends.len()
             );
         }
 
-        match first_success {
-            Some(meta) => Ok(meta),
-            None => Err(last_error.unwrap_or_else(|| {
-                Error::Storage(format!("All backends failed for {}", $op_name))
-            })),
-        }
-    }};
-}
+        first_success.ok_or_else(|| {
+            last_error
+                .unwrap_or_else(|| Error::Storage(format!("All backends failed for {}", op)))
+        })
+    }
 
-/// Try backends in order for a read operation, returning the first success.
-macro_rules! try_read {
-    ($self:expr, $op_name:expr, $call:expr) => {{
-        let mut last_error = None;
+    /// Fan out a `Result<()>` operation to all backends concurrently.
+    async fn fan_out_void<F, Fut>(&self, op: &str, f: F) -> Result<()>
+    where
+        F: Fn(Arc<dyn StorageProvider>) -> Fut,
+        Fut: Future<Output = Result<()>>,
+    {
+        let futures: Vec<_> = self.backends.iter().map(|b| f(Arc::clone(b))).collect();
+        let results = futures::future::join_all(futures).await;
 
-        for backend in &$self.backends {
-            match $call(Arc::clone(backend)).await {
-                Ok(result) => return Ok(result),
+        let mut any_success = false;
+        let mut last_error: Option<Error> = None;
+        let mut failure_count = 0usize;
+
+        for (i, result) in results.into_iter().enumerate() {
+            match result {
+                Ok(()) => any_success = true,
                 Err(e) => {
+                    failure_count += 1;
                     warn!(
-                        backend = backend.name(),
-                        operation = $op_name,
+                        backend = self.backends[i].name(),
+                        operation = op,
                         error = %e,
-                        "Backend read failed, trying next"
+                        "Backend write failed"
                     );
                     last_error = Some(e);
                 }
             }
         }
 
-        Err(last_error.unwrap_or_else(|| {
-            Error::Storage(format!("All backends failed for {}", $op_name))
-        }))
-    }};
+        if failure_count > 0 && any_success {
+            warn!(
+                operation = op,
+                failed = failure_count,
+                total = self.backends.len(),
+                "Partial write: {}/{} backends failed",
+                failure_count,
+                self.backends.len()
+            );
+        }
+
+        if any_success {
+            Ok(())
+        } else {
+            Err(last_error
+                .unwrap_or_else(|| Error::Storage(format!("All backends failed for {}", op))))
+        }
+    }
+
+    /// Try backends in priority order, returning the first success.
+    /// Only warns on errors that are not `NotFound` (which is a normal result).
+    async fn try_first<T, F, Fut>(&self, op: &str, f: F) -> Result<T>
+    where
+        F: Fn(Arc<dyn StorageProvider>) -> Fut,
+        Fut: Future<Output = Result<T>>,
+    {
+        let mut last_error: Option<Error> = None;
+
+        for backend in &self.backends {
+            match f(Arc::clone(backend)).await {
+                Ok(val) => return Ok(val),
+                Err(e) => {
+                    if !matches!(&e, Error::NotFound(_)) {
+                        warn!(
+                            backend = backend.name(),
+                            operation = op,
+                            error = %e,
+                            "Backend read failed, trying next"
+                        );
+                    }
+                    last_error = Some(e);
+                }
+            }
+        }
+
+        Err(last_error
+            .unwrap_or_else(|| Error::Storage(format!("All backends failed for {}", op))))
+    }
+
+    fn require_mirror(&self, op: &str) -> Result<()> {
+        match self.config.mode {
+            RaidMode::Mirror => Ok(()),
+            RaidMode::Erasure { .. } => Err(Error::Storage(format!(
+                "Erasure mode not yet implemented for {}",
+                op
+            ))),
+        }
+    }
 }
 
 #[async_trait]
@@ -185,24 +249,18 @@ impl StorageProvider for CompositeStorageProvider {
     }
 
     async fn upload(&self, path: &VaultPath, data: Vec<u8>) -> Result<Metadata> {
-        match self.config.mode {
-            RaidMode::Mirror => {
-                let path = path.clone();
-                let data = Arc::new(data);
-                fan_out_write!(self, "upload", |backend: Arc<dyn StorageProvider>| {
-                    let path = path.clone();
-                    let data = Arc::clone(&data);
-                    async move { backend.upload(&path, (*data).clone()).await }
-                })
-            }
-            RaidMode::Erasure { .. } => {
-                Err(Error::Storage("Erasure mode not yet implemented".to_string()))
-            }
-        }
+        self.require_mirror("upload")?;
+        let path = path.clone();
+        let data: Bytes = data.into();
+        self.fan_out("upload", |backend| {
+            let path = path.clone();
+            let data = data.clone();
+            async move { backend.upload(&path, data.to_vec()).await }
+        })
+        .await
     }
 
     async fn upload_stream(&self, path: &VaultPath, stream: ByteStream) -> Result<Metadata> {
-        // For streams, we must buffer the data to replicate across backends.
         use futures::StreamExt;
         let mut data = Vec::new();
         let mut stream = stream;
@@ -213,225 +271,100 @@ impl StorageProvider for CompositeStorageProvider {
     }
 
     async fn download(&self, path: &VaultPath) -> Result<Vec<u8>> {
-        match self.config.mode {
-            RaidMode::Mirror => {
-                try_read!(self, "download", |backend: Arc<dyn StorageProvider>| {
-                    let path = path.clone();
-                    async move { backend.download(&path).await }
-                })
-            }
-            RaidMode::Erasure { .. } => {
-                Err(Error::Storage("Erasure mode not yet implemented".to_string()))
-            }
-        }
+        self.require_mirror("download")?;
+        let path = path.clone();
+        self.try_first("download", |backend| {
+            let path = path.clone();
+            async move { backend.download(&path).await }
+        })
+        .await
     }
 
     async fn download_stream(&self, path: &VaultPath) -> Result<ByteStream> {
-        // Download full data then wrap as a single-chunk stream.
         let data = self.download(path).await?;
-        let stream = stream::once(async move { Ok(data) });
-        Ok(Box::pin(stream))
+        Ok(Box::pin(stream::once(async move { Ok(data) })))
     }
 
     async fn exists(&self, path: &VaultPath) -> Result<bool> {
-        try_read!(self, "exists", |backend: Arc<dyn StorageProvider>| {
+        let path = path.clone();
+        self.try_first("exists", |backend| {
             let path = path.clone();
             async move { backend.exists(&path).await }
         })
+        .await
     }
 
     async fn delete(&self, path: &VaultPath) -> Result<()> {
-        match self.config.mode {
-            RaidMode::Mirror => {
-                let path = path.clone();
-                let futures: Vec<_> = self
-                    .backends
-                    .iter()
-                    .map(|backend| {
-                        let backend = Arc::clone(backend);
-                        let path = path.clone();
-                        async move { backend.delete(&path).await }
-                    })
-                    .collect();
-
-                let results = futures::future::join_all(futures).await;
-
-                let mut any_success = false;
-                let mut last_error = None;
-                let mut failure_count = 0;
-
-                for (i, result) in results.into_iter().enumerate() {
-                    match result {
-                        Ok(()) => any_success = true,
-                        Err(e) => {
-                            failure_count += 1;
-                            warn!(
-                                backend = self.backends[i].name(),
-                                operation = "delete",
-                                error = %e,
-                                "Backend delete failed"
-                            );
-                            last_error = Some(e);
-                        }
-                    }
-                }
-
-                if failure_count > 0 && any_success {
-                    warn!(
-                        operation = "delete",
-                        failed = failure_count,
-                        total = self.backends.len(),
-                        "Partial delete failure: {}/{} backends failed",
-                        failure_count,
-                        self.backends.len()
-                    );
-                }
-
-                if any_success {
-                    Ok(())
-                } else {
-                    Err(last_error.unwrap_or_else(|| {
-                        Error::Storage("All backends failed for delete".to_string())
-                    }))
-                }
-            }
-            RaidMode::Erasure { .. } => {
-                Err(Error::Storage("Erasure mode not yet implemented".to_string()))
-            }
-        }
+        self.require_mirror("delete")?;
+        let path = path.clone();
+        self.fan_out_void("delete", |backend| {
+            let path = path.clone();
+            async move { backend.delete(&path).await }
+        })
+        .await
     }
 
     async fn list(&self, path: &VaultPath) -> Result<Vec<Metadata>> {
-        match self.config.mode {
-            RaidMode::Mirror => {
-                // In mirror mode, all backends should have the same contents.
-                // Read from first successful backend.
-                try_read!(self, "list", |backend: Arc<dyn StorageProvider>| {
-                    let path = path.clone();
-                    async move { backend.list(&path).await }
-                })
-            }
-            RaidMode::Erasure { .. } => {
-                Err(Error::Storage("Erasure mode not yet implemented".to_string()))
-            }
-        }
+        self.require_mirror("list")?;
+        let path = path.clone();
+        self.try_first("list", |backend| {
+            let path = path.clone();
+            async move { backend.list(&path).await }
+        })
+        .await
     }
 
     async fn metadata(&self, path: &VaultPath) -> Result<Metadata> {
-        try_read!(self, "metadata", |backend: Arc<dyn StorageProvider>| {
+        let path = path.clone();
+        self.try_first("metadata", |backend| {
             let path = path.clone();
             async move { backend.metadata(&path).await }
         })
+        .await
     }
 
     async fn create_dir(&self, path: &VaultPath) -> Result<Metadata> {
-        match self.config.mode {
-            RaidMode::Mirror => {
-                let path = path.clone();
-                fan_out_write!(self, "create_dir", |backend: Arc<dyn StorageProvider>| {
-                    let path = path.clone();
-                    async move { backend.create_dir(&path).await }
-                })
-            }
-            RaidMode::Erasure { .. } => {
-                Err(Error::Storage("Erasure mode not yet implemented".to_string()))
-            }
-        }
+        self.require_mirror("create_dir")?;
+        let path = path.clone();
+        self.fan_out("create_dir", |backend| {
+            let path = path.clone();
+            async move { backend.create_dir(&path).await }
+        })
+        .await
     }
 
     async fn delete_dir(&self, path: &VaultPath) -> Result<()> {
-        match self.config.mode {
-            RaidMode::Mirror => {
-                let path = path.clone();
-                let futures: Vec<_> = self
-                    .backends
-                    .iter()
-                    .map(|backend| {
-                        let backend = Arc::clone(backend);
-                        let path = path.clone();
-                        async move { backend.delete_dir(&path).await }
-                    })
-                    .collect();
-
-                let results = futures::future::join_all(futures).await;
-
-                let mut any_success = false;
-                let mut last_error = None;
-                let mut failure_count = 0;
-
-                for (i, result) in results.into_iter().enumerate() {
-                    match result {
-                        Ok(()) => any_success = true,
-                        Err(e) => {
-                            failure_count += 1;
-                            warn!(
-                                backend = self.backends[i].name(),
-                                operation = "delete_dir",
-                                error = %e,
-                                "Backend delete_dir failed"
-                            );
-                            last_error = Some(e);
-                        }
-                    }
-                }
-
-                if failure_count > 0 && any_success {
-                    warn!(
-                        operation = "delete_dir",
-                        failed = failure_count,
-                        total = self.backends.len(),
-                        "Partial delete_dir failure: {}/{} backends failed",
-                        failure_count,
-                        self.backends.len()
-                    );
-                }
-
-                if any_success {
-                    Ok(())
-                } else {
-                    Err(last_error.unwrap_or_else(|| {
-                        Error::Storage("All backends failed for delete_dir".to_string())
-                    }))
-                }
-            }
-            RaidMode::Erasure { .. } => {
-                Err(Error::Storage("Erasure mode not yet implemented".to_string()))
-            }
-        }
+        self.require_mirror("delete_dir")?;
+        let path = path.clone();
+        self.fan_out_void("delete_dir", |backend| {
+            let path = path.clone();
+            async move { backend.delete_dir(&path).await }
+        })
+        .await
     }
 
     async fn rename(&self, from: &VaultPath, to: &VaultPath) -> Result<Metadata> {
-        match self.config.mode {
-            RaidMode::Mirror => {
-                let from = from.clone();
-                let to = to.clone();
-                fan_out_write!(self, "rename", |backend: Arc<dyn StorageProvider>| {
-                    let from = from.clone();
-                    let to = to.clone();
-                    async move { backend.rename(&from, &to).await }
-                })
-            }
-            RaidMode::Erasure { .. } => {
-                Err(Error::Storage("Erasure mode not yet implemented".to_string()))
-            }
-        }
+        self.require_mirror("rename")?;
+        let from = from.clone();
+        let to = to.clone();
+        self.fan_out("rename", |backend| {
+            let from = from.clone();
+            let to = to.clone();
+            async move { backend.rename(&from, &to).await }
+        })
+        .await
     }
 
     async fn copy(&self, from: &VaultPath, to: &VaultPath) -> Result<Metadata> {
-        match self.config.mode {
-            RaidMode::Mirror => {
-                let from = from.clone();
-                let to = to.clone();
-                fan_out_write!(self, "copy", |backend: Arc<dyn StorageProvider>| {
-                    let from = from.clone();
-                    let to = to.clone();
-                    async move { backend.copy(&from, &to).await }
-                })
-            }
-            RaidMode::Erasure { .. } => {
-                Err(Error::Storage("Erasure mode not yet implemented".to_string()))
-            }
-        }
+        self.require_mirror("copy")?;
+        let from = from.clone();
+        let to = to.clone();
+        self.fan_out("copy", |backend| {
+            let from = from.clone();
+            let to = to.clone();
+            async move { backend.copy(&from, &to).await }
+        })
+        .await
     }
 }
 
@@ -452,15 +385,60 @@ mod tests {
         }
     }
 
+    // -- A provider that always fails, for partial-failure tests -----------
+
+    struct FailingProvider;
+
+    #[async_trait]
+    impl StorageProvider for FailingProvider {
+        fn name(&self) -> &str {
+            "failing"
+        }
+        async fn upload(&self, _: &VaultPath, _: Vec<u8>) -> Result<Metadata> {
+            Err(Error::Storage("backend down".into()))
+        }
+        async fn upload_stream(&self, _: &VaultPath, _: ByteStream) -> Result<Metadata> {
+            Err(Error::Storage("backend down".into()))
+        }
+        async fn download(&self, _: &VaultPath) -> Result<Vec<u8>> {
+            Err(Error::Storage("backend down".into()))
+        }
+        async fn download_stream(&self, _: &VaultPath) -> Result<ByteStream> {
+            Err(Error::Storage("backend down".into()))
+        }
+        async fn exists(&self, _: &VaultPath) -> Result<bool> {
+            Err(Error::Storage("backend down".into()))
+        }
+        async fn delete(&self, _: &VaultPath) -> Result<()> {
+            Err(Error::Storage("backend down".into()))
+        }
+        async fn list(&self, _: &VaultPath) -> Result<Vec<Metadata>> {
+            Err(Error::Storage("backend down".into()))
+        }
+        async fn metadata(&self, _: &VaultPath) -> Result<Metadata> {
+            Err(Error::Storage("backend down".into()))
+        }
+        async fn create_dir(&self, _: &VaultPath) -> Result<Metadata> {
+            Err(Error::Storage("backend down".into()))
+        }
+        async fn delete_dir(&self, _: &VaultPath) -> Result<()> {
+            Err(Error::Storage("backend down".into()))
+        }
+        async fn rename(&self, _: &VaultPath, _: &VaultPath) -> Result<Metadata> {
+            Err(Error::Storage("backend down".into()))
+        }
+        async fn copy(&self, _: &VaultPath, _: &VaultPath) -> Result<Metadata> {
+            Err(Error::Storage("backend down".into()))
+        }
+    }
+
+    // -- Construction tests ------------------------------------------------
+
     #[test]
     fn test_requires_minimum_two_backends() {
         let result = CompositeStorageProvider::new(make_backends(1), mirror_config());
         assert!(result.is_err());
-        let err = match result {
-            Err(e) => e,
-            Ok(_) => unreachable!(),
-        };
-        assert!(err.to_string().contains("at least 2 backends"));
+        assert!(result.err().unwrap().to_string().contains("at least 2 backends"));
     }
 
     #[test]
@@ -474,7 +452,7 @@ mod tests {
     #[test]
     fn test_erasure_validation() {
         // Mismatched shard count
-        let result = CompositeStorageProvider::new(
+        assert!(CompositeStorageProvider::new(
             make_backends(3),
             CompositeConfig {
                 mode: RaidMode::Erasure {
@@ -482,11 +460,11 @@ mod tests {
                     parity_shards: 2,
                 },
             },
-        );
-        assert!(result.is_err());
+        )
+        .is_err());
 
         // Valid erasure config
-        let result = CompositeStorageProvider::new(
+        assert!(CompositeStorageProvider::new(
             make_backends(5),
             CompositeConfig {
                 mode: RaidMode::Erasure {
@@ -494,11 +472,11 @@ mod tests {
                     parity_shards: 2,
                 },
             },
-        );
-        assert!(result.is_ok());
+        )
+        .is_ok());
 
         // Zero data shards
-        let result = CompositeStorageProvider::new(
+        assert!(CompositeStorageProvider::new(
             make_backends(2),
             CompositeConfig {
                 mode: RaidMode::Erasure {
@@ -506,9 +484,33 @@ mod tests {
                     parity_shards: 2,
                 },
             },
-        );
-        assert!(result.is_err());
+        )
+        .is_err());
     }
+
+    #[test]
+    fn test_backend_names() {
+        let provider =
+            CompositeStorageProvider::new(make_backends(3), mirror_config()).unwrap();
+        let names = provider.backend_names();
+        assert_eq!(names.len(), 3);
+        assert!(names.iter().all(|n| *n == "memory"));
+    }
+
+    #[test]
+    fn test_config_serde_roundtrip() {
+        let config = CompositeConfig {
+            mode: RaidMode::Erasure {
+                data_shards: 3,
+                parity_shards: 2,
+            },
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        let decoded: CompositeConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.mode, config.mode);
+    }
+
+    // -- Mirror happy-path tests -------------------------------------------
 
     #[tokio::test]
     async fn test_mirror_upload_download() {
@@ -523,13 +525,11 @@ mod tests {
 
         // All backends should have the data
         for backend in &backends {
-            let downloaded = backend.download(&path).await.unwrap();
-            assert_eq!(downloaded, data);
+            assert_eq!(backend.download(&path).await.unwrap(), data);
         }
 
         // Download via composite should work
-        let downloaded = provider.download(&path).await.unwrap();
-        assert_eq!(downloaded, data);
+        assert_eq!(provider.download(&path).await.unwrap(), data);
     }
 
     #[tokio::test]
@@ -554,7 +554,6 @@ mod tests {
         provider.upload(&path, vec![1, 2, 3]).await.unwrap();
         provider.delete(&path).await.unwrap();
 
-        // All backends should have the file deleted
         for backend in &backends {
             assert!(!backend.exists(&path).await.unwrap());
         }
@@ -669,12 +668,59 @@ mod tests {
         assert_eq!(result, data);
     }
 
-    #[test]
-    fn test_backend_names() {
-        let provider =
-            CompositeStorageProvider::new(make_backends(3), mirror_config()).unwrap();
-        let names = provider.backend_names();
-        assert_eq!(names.len(), 3);
-        assert!(names.iter().all(|n| *n == "memory"));
+    // -- Partial-failure tests ---------------------------------------------
+
+    #[tokio::test]
+    async fn test_mirror_upload_succeeds_with_one_failing_backend() {
+        let backends: Vec<Arc<dyn StorageProvider>> = vec![
+            Arc::new(FailingProvider),
+            Arc::new(MemoryProvider::new()),
+        ];
+        let provider = CompositeStorageProvider::new(backends, mirror_config()).unwrap();
+
+        let path = VaultPath::parse("/test.txt").unwrap();
+        // Should succeed — the MemoryProvider backend is healthy
+        provider.upload(&path, vec![1, 2, 3]).await.unwrap();
+        assert_eq!(provider.download(&path).await.unwrap(), vec![1, 2, 3]);
+    }
+
+    #[tokio::test]
+    async fn test_mirror_upload_fails_when_all_backends_fail() {
+        let backends: Vec<Arc<dyn StorageProvider>> = vec![
+            Arc::new(FailingProvider),
+            Arc::new(FailingProvider),
+        ];
+        let provider = CompositeStorageProvider::new(backends, mirror_config()).unwrap();
+
+        let path = VaultPath::parse("/test.txt").unwrap();
+        assert!(provider.upload(&path, vec![1, 2, 3]).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_mirror_download_falls_back_to_healthy_backend() {
+        let healthy = Arc::new(MemoryProvider::new());
+        let path = VaultPath::parse("/test.txt").unwrap();
+        healthy.upload(&path, vec![42]).await.unwrap();
+
+        let backends: Vec<Arc<dyn StorageProvider>> =
+            vec![Arc::new(FailingProvider), healthy];
+        let provider = CompositeStorageProvider::new(backends, mirror_config()).unwrap();
+
+        // First backend fails, second succeeds
+        assert_eq!(provider.download(&path).await.unwrap(), vec![42]);
+    }
+
+    #[tokio::test]
+    async fn test_mirror_delete_succeeds_with_partial_failure() {
+        let healthy = Arc::new(MemoryProvider::new());
+        let path = VaultPath::parse("/test.txt").unwrap();
+        healthy.upload(&path, vec![1]).await.unwrap();
+
+        let backends: Vec<Arc<dyn StorageProvider>> =
+            vec![Arc::new(FailingProvider), healthy.clone()];
+        let provider = CompositeStorageProvider::new(backends, mirror_config()).unwrap();
+
+        provider.delete(&path).await.unwrap();
+        assert!(!healthy.exists(&path).await.unwrap());
     }
 }
