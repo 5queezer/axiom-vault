@@ -684,12 +684,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_atomic_update_does_not_leave_tmp() {
-        let backend = Arc::new(MemoryProvider::new());
+        let backend: Arc<dyn StorageProvider> = Arc::new(MemoryProvider::new());
 
         let mut map = ShardMap::new();
         map.insert(
             "/test",
-            ShardMap::mirror_entry("/test", 42, &[backend.clone()]),
+            ShardMap::mirror_entry("/test", 42, std::slice::from_ref(&backend)),
         );
         map.save_to_backend(backend.as_ref()).await.unwrap();
 
