@@ -49,10 +49,7 @@ impl CompositeStorageProvider {
     /// # Errors
     /// Returns `InvalidInput` if fewer than 2 backends are provided, or if
     /// erasure mode parameters don't match the backend count.
-    pub fn new(
-        backends: Vec<Arc<dyn StorageProvider>>,
-        config: CompositeConfig,
-    ) -> Result<Self> {
+    pub fn new(backends: Vec<Arc<dyn StorageProvider>>, config: CompositeConfig) -> Result<Self> {
         if backends.len() < 2 {
             return Err(Error::InvalidInput(
                 "CompositeStorageProvider requires at least 2 backends".to_string(),
@@ -148,8 +145,7 @@ impl CompositeStorageProvider {
         }
 
         first_success.ok_or_else(|| {
-            last_error
-                .unwrap_or_else(|| Error::Storage(format!("All backends failed for {}", op)))
+            last_error.unwrap_or_else(|| Error::Storage(format!("All backends failed for {}", op)))
         })
     }
 
@@ -227,8 +223,7 @@ impl CompositeStorageProvider {
             }
         }
 
-        Err(last_error
-            .unwrap_or_else(|| Error::Storage(format!("All backends failed for {}", op))))
+        Err(last_error.unwrap_or_else(|| Error::Storage(format!("All backends failed for {}", op))))
     }
 
     fn require_mirror(&self, op: &str) -> Result<()> {
@@ -438,7 +433,11 @@ mod tests {
     fn test_requires_minimum_two_backends() {
         let result = CompositeStorageProvider::new(make_backends(1), mirror_config());
         assert!(result.is_err());
-        assert!(result.err().unwrap().to_string().contains("at least 2 backends"));
+        assert!(result
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("at least 2 backends"));
     }
 
     #[test]
@@ -490,8 +489,7 @@ mod tests {
 
     #[test]
     fn test_backend_names() {
-        let provider =
-            CompositeStorageProvider::new(make_backends(3), mirror_config()).unwrap();
+        let provider = CompositeStorageProvider::new(make_backends(3), mirror_config()).unwrap();
         let names = provider.backend_names();
         assert_eq!(names.len(), 3);
         assert!(names.iter().all(|n| *n == "memory"));
@@ -515,8 +513,7 @@ mod tests {
     #[tokio::test]
     async fn test_mirror_upload_download() {
         let backends = make_backends(3);
-        let provider =
-            CompositeStorageProvider::new(backends.clone(), mirror_config()).unwrap();
+        let provider = CompositeStorageProvider::new(backends.clone(), mirror_config()).unwrap();
 
         let path = VaultPath::parse("/test.txt").unwrap();
         let data = b"hello world".to_vec();
@@ -534,8 +531,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mirror_exists() {
-        let provider =
-            CompositeStorageProvider::new(make_backends(2), mirror_config()).unwrap();
+        let provider = CompositeStorageProvider::new(make_backends(2), mirror_config()).unwrap();
 
         let path = VaultPath::parse("/test.txt").unwrap();
         assert!(!provider.exists(&path).await.unwrap());
@@ -547,8 +543,7 @@ mod tests {
     #[tokio::test]
     async fn test_mirror_delete() {
         let backends = make_backends(3);
-        let provider =
-            CompositeStorageProvider::new(backends.clone(), mirror_config()).unwrap();
+        let provider = CompositeStorageProvider::new(backends.clone(), mirror_config()).unwrap();
 
         let path = VaultPath::parse("/test.txt").unwrap();
         provider.upload(&path, vec![1, 2, 3]).await.unwrap();
@@ -561,8 +556,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mirror_create_dir_and_list() {
-        let provider =
-            CompositeStorageProvider::new(make_backends(2), mirror_config()).unwrap();
+        let provider = CompositeStorageProvider::new(make_backends(2), mirror_config()).unwrap();
 
         let dir = VaultPath::parse("/mydir").unwrap();
         let meta = provider.create_dir(&dir).await.unwrap();
@@ -580,8 +574,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mirror_rename() {
-        let provider =
-            CompositeStorageProvider::new(make_backends(2), mirror_config()).unwrap();
+        let provider = CompositeStorageProvider::new(make_backends(2), mirror_config()).unwrap();
 
         let from = VaultPath::parse("/old.txt").unwrap();
         let to = VaultPath::parse("/new.txt").unwrap();
@@ -595,8 +588,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mirror_copy() {
-        let provider =
-            CompositeStorageProvider::new(make_backends(2), mirror_config()).unwrap();
+        let provider = CompositeStorageProvider::new(make_backends(2), mirror_config()).unwrap();
 
         let from = VaultPath::parse("/original.txt").unwrap();
         let to = VaultPath::parse("/copy.txt").unwrap();
@@ -611,8 +603,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mirror_metadata() {
-        let provider =
-            CompositeStorageProvider::new(make_backends(2), mirror_config()).unwrap();
+        let provider = CompositeStorageProvider::new(make_backends(2), mirror_config()).unwrap();
 
         let path = VaultPath::parse("/test.txt").unwrap();
         provider.upload(&path, vec![1, 2, 3]).await.unwrap();
@@ -625,8 +616,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mirror_delete_dir() {
-        let provider =
-            CompositeStorageProvider::new(make_backends(2), mirror_config()).unwrap();
+        let provider = CompositeStorageProvider::new(make_backends(2), mirror_config()).unwrap();
 
         let dir = VaultPath::parse("/mydir").unwrap();
         provider.create_dir(&dir).await.unwrap();
@@ -637,14 +627,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_mirror_upload_stream() {
-        let provider =
-            CompositeStorageProvider::new(make_backends(2), mirror_config()).unwrap();
+        let provider = CompositeStorageProvider::new(make_backends(2), mirror_config()).unwrap();
 
         let path = VaultPath::parse("/stream.txt").unwrap();
         let data = vec![10, 20, 30];
         let data_clone = data.clone();
-        let stream: ByteStream =
-            Box::pin(futures::stream::once(async move { Ok(data_clone) }));
+        let stream: ByteStream = Box::pin(futures::stream::once(async move { Ok(data_clone) }));
 
         provider.upload_stream(&path, stream).await.unwrap();
         assert_eq!(provider.download(&path).await.unwrap(), data);
@@ -652,8 +640,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mirror_download_stream() {
-        let provider =
-            CompositeStorageProvider::new(make_backends(2), mirror_config()).unwrap();
+        let provider = CompositeStorageProvider::new(make_backends(2), mirror_config()).unwrap();
 
         let path = VaultPath::parse("/stream.txt").unwrap();
         let data = vec![10, 20, 30];
@@ -672,10 +659,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_mirror_upload_succeeds_with_one_failing_backend() {
-        let backends: Vec<Arc<dyn StorageProvider>> = vec![
-            Arc::new(FailingProvider),
-            Arc::new(MemoryProvider::new()),
-        ];
+        let backends: Vec<Arc<dyn StorageProvider>> =
+            vec![Arc::new(FailingProvider), Arc::new(MemoryProvider::new())];
         let provider = CompositeStorageProvider::new(backends, mirror_config()).unwrap();
 
         let path = VaultPath::parse("/test.txt").unwrap();
@@ -686,10 +671,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_mirror_upload_fails_when_all_backends_fail() {
-        let backends: Vec<Arc<dyn StorageProvider>> = vec![
-            Arc::new(FailingProvider),
-            Arc::new(FailingProvider),
-        ];
+        let backends: Vec<Arc<dyn StorageProvider>> =
+            vec![Arc::new(FailingProvider), Arc::new(FailingProvider)];
         let provider = CompositeStorageProvider::new(backends, mirror_config()).unwrap();
 
         let path = VaultPath::parse("/test.txt").unwrap();
@@ -702,8 +685,7 @@ mod tests {
         let path = VaultPath::parse("/test.txt").unwrap();
         healthy.upload(&path, vec![42]).await.unwrap();
 
-        let backends: Vec<Arc<dyn StorageProvider>> =
-            vec![Arc::new(FailingProvider), healthy];
+        let backends: Vec<Arc<dyn StorageProvider>> = vec![Arc::new(FailingProvider), healthy];
         let provider = CompositeStorageProvider::new(backends, mirror_config()).unwrap();
 
         // First backend fails, second succeeds
