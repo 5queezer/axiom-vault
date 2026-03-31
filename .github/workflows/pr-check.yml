@@ -202,28 +202,38 @@ jobs:
           echo "## PR Check Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          if [[ "${{ needs.quick-check.result }}" == "success" ]]; then
+          QC="${{ needs.quick-check.result }}"
+          PM="${{ needs.pr-metadata.result }}"
+          TC="${{ needs.test-coverage.result }}"
+
+          if [[ "$QC" == "success" ]]; then
             echo "- :white_check_mark: Quick Check passed" >> $GITHUB_STEP_SUMMARY
+          elif [[ "$QC" == "skipped" ]]; then
+            echo "- :next_track_button: Quick Check skipped (draft PR)" >> $GITHUB_STEP_SUMMARY
           else
             echo "- :x: Quick Check failed" >> $GITHUB_STEP_SUMMARY
           fi
 
-          if [[ "${{ needs.pr-metadata.result }}" == "success" ]]; then
+          if [[ "$PM" == "success" ]]; then
             echo "- :white_check_mark: PR Metadata valid" >> $GITHUB_STEP_SUMMARY
           else
             echo "- :x: PR Metadata issues" >> $GITHUB_STEP_SUMMARY
           fi
 
-          if [[ "${{ needs.test-coverage.result }}" == "success" ]]; then
+          if [[ "$TC" == "success" ]]; then
             echo "- :white_check_mark: Tests passed" >> $GITHUB_STEP_SUMMARY
+          elif [[ "$TC" == "skipped" ]]; then
+            echo "- :next_track_button: Tests skipped (draft PR)" >> $GITHUB_STEP_SUMMARY
           else
             echo "- :x: Tests failed" >> $GITHUB_STEP_SUMMARY
           fi
 
       - name: Check overall status
         run: |
-          if [[ "${{ needs.quick-check.result }}" != "success" ]] || \
-             [[ "${{ needs.test-coverage.result }}" != "success" ]]; then
+          QC="${{ needs.quick-check.result }}"
+          TC="${{ needs.test-coverage.result }}"
+          if [[ "$QC" != "success" && "$QC" != "skipped" ]] || \
+             [[ "$TC" != "success" && "$TC" != "skipped" ]]; then
             echo "Some checks failed. Please fix the issues before merging."
             exit 1
           fi
