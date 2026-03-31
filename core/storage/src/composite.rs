@@ -137,7 +137,6 @@ impl CompositeStorageProvider {
 
     /// Persist the current shard map to all backends.
     pub async fn save_shard_map(&self) -> Result<()> {
-        self.ensure_shard_map_loaded().await?;
         let map = self.shard_map.read().await;
         map.save_to_all(&self.backends).await
     }
@@ -646,6 +645,7 @@ impl StorageProvider for CompositeStorageProvider {
     }
 
     async fn upload(&self, path: &VaultPath, data: Vec<u8>) -> Result<Metadata> {
+        self.ensure_shard_map_loaded().await?;
         match self.config.mode {
             RaidMode::Mirror => {
                 let original_size = data.len() as u64;
@@ -731,6 +731,7 @@ impl StorageProvider for CompositeStorageProvider {
     }
 
     async fn delete(&self, path: &VaultPath) -> Result<()> {
+        self.ensure_shard_map_loaded().await?;
         match self.config.mode {
             RaidMode::Mirror => {
                 let path = path.clone();
@@ -877,11 +878,12 @@ impl StorageProvider for CompositeStorageProvider {
     }
 
     async fn rename(&self, from: &VaultPath, to: &VaultPath) -> Result<Metadata> {
+        self.ensure_shard_map_loaded().await?;
         match self.config.mode {
             RaidMode::Mirror => {
                 let from = from.clone();
                 let to = to.clone();
-                let (meta, _) = self
+                let (meta, succeeded) = self
                     .fan_out("rename", |backend| {
                         let from = from.clone();
                         let to = to.clone();
@@ -889,11 +891,15 @@ impl StorageProvider for CompositeStorageProvider {
                     })
                     .await?;
 
-                // Update shard map
+                // Update shard map: rename entry, then remove shards for failed backends
                 let from_str = from.to_string_path();
                 let to_str = to.to_string_path();
                 {
-                    self.shard_map.write().await.rename(&from_str, &to_str);
+                    let mut map = self.shard_map.write().await;
+                    map.rename(&from_str, &to_str);
+                    if let Some(entry) = map.entries.get_mut(&to_str) {
+                        entry.shards.retain(|idx, _| succeeded.contains(idx));
+                    }
                 }
                 self.save_shard_map().await?;
 
@@ -926,11 +932,12 @@ impl StorageProvider for CompositeStorageProvider {
     }
 
     async fn copy(&self, from: &VaultPath, to: &VaultPath) -> Result<Metadata> {
+        self.ensure_shard_map_loaded().await?;
         match self.config.mode {
             RaidMode::Mirror => {
                 let from = from.clone();
                 let to = to.clone();
-                let (meta, _) = self
+                let (meta, succeeded) = self
                     .fan_out("copy", |backend| {
                         let from = from.clone();
                         let to = to.clone();
@@ -938,7 +945,7 @@ impl StorageProvider for CompositeStorageProvider {
                     })
                     .await?;
 
-                // Copy shard map entry for the new path
+                // Copy shard map entry for the new path, retaining only succeeded backends
                 let from_str = from.to_string_path();
                 let to_str = to.to_string_path();
                 {
@@ -948,6 +955,7 @@ impl StorageProvider for CompositeStorageProvider {
                         for shard in new_entry.shards.values_mut() {
                             shard.backend_path = to_str.clone();
                         }
+                        new_entry.shards.retain(|idx, _| succeeded.contains(idx));
                         new_entry.updated_at = chrono::Utc::now();
                         map.insert(&to_str, new_entry);
                     }
