@@ -6,6 +6,7 @@
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::stream;
+use reed_solomon_erasure::galois_8::ReedSolomon;
 use serde::{Deserialize, Serialize};
 use std::future::Future;
 use std::sync::Arc;
@@ -38,11 +39,13 @@ pub struct CompositeConfig {
 /// A storage provider that distributes operations across multiple backends.
 ///
 /// In mirror mode, writes fan out to all backends and reads return the first
-/// successful result. In erasure mode (future), chunks are sharded via
-/// Reed-Solomon coding.
+/// successful result. In erasure mode, chunks are sharded via Reed-Solomon
+/// coding across backends.
 pub struct CompositeStorageProvider {
     backends: Vec<Arc<dyn StorageProvider>>,
     config: CompositeConfig,
+    /// Cached Reed-Solomon encoder, created once for erasure mode.
+    reed_solomon: Option<ReedSolomon>,
 }
 
 impl CompositeStorageProvider {
@@ -83,7 +86,24 @@ impl CompositeStorageProvider {
             }
         }
 
-        Ok(Self { backends, config })
+        let reed_solomon = if let RaidMode::Erasure {
+            data_shards,
+            parity_shards,
+        } = config.mode
+        {
+            Some(
+                ReedSolomon::new(data_shards, parity_shards)
+                    .map_err(|e| Error::Storage(format!("Reed-Solomon init failed: {}", e)))?,
+            )
+        } else {
+            None
+        };
+
+        Ok(Self {
+            backends,
+            config,
+            reed_solomon,
+        })
     }
 
     /// Get the current RAID mode.
@@ -228,13 +248,277 @@ impl CompositeStorageProvider {
         Err(last_error.unwrap_or_else(|| Error::Storage(format!("All backends failed for {}", op))))
     }
 
-    fn require_mirror(&self, op: &str) -> Result<()> {
+    /// Get erasure mode parameters, or error if in mirror mode.
+    fn erasure_params(&self) -> Result<(usize, usize)> {
         match self.config.mode {
-            RaidMode::Mirror => Ok(()),
-            RaidMode::Erasure { .. } => Err(Error::Storage(format!(
-                "Erasure mode not yet implemented for {}",
-                op
-            ))),
+            RaidMode::Erasure {
+                data_shards,
+                parity_shards,
+            } => Ok((data_shards, parity_shards)),
+            RaidMode::Mirror => Err(Error::Storage("Not in erasure mode".to_string())),
+        }
+    }
+
+    /// Get the cached Reed-Solomon encoder (only valid in erasure mode).
+    fn reed_solomon(&self) -> &ReedSolomon {
+        self.reed_solomon
+            .as_ref()
+            .expect("reed_solomon() called in mirror mode")
+    }
+
+    /// Encode data into N shards (k data + m parity) using Reed-Solomon.
+    fn erasure_encode(&self, data: &[u8]) -> Result<Vec<Vec<u8>>> {
+        let (data_shards, parity_shards) = self.erasure_params()?;
+        let total_shards = data_shards + parity_shards;
+
+        // Reed-Solomon requires equal-length shards; use ceil division for shard size.
+        // Empty data gets minimum 1-byte shards since RS cannot operate on zero-length shards.
+        let shard_size = if data.is_empty() {
+            1
+        } else {
+            data.len().div_ceil(data_shards)
+        };
+
+        let mut shards: Vec<Vec<u8>> = Vec::with_capacity(total_shards);
+        for i in 0..data_shards {
+            let start = i * shard_size;
+            let end = std::cmp::min(start + shard_size, data.len());
+            let mut shard = if start < data.len() {
+                data[start..end].to_vec()
+            } else {
+                Vec::new()
+            };
+            shard.resize(shard_size, 0);
+            shards.push(shard);
+        }
+        for _ in 0..parity_shards {
+            shards.push(vec![0u8; shard_size]);
+        }
+
+        self.reed_solomon()
+            .encode(&mut shards)
+            .map_err(|e| Error::Storage(format!("Reed-Solomon encode failed: {}", e)))?;
+
+        Ok(shards)
+    }
+
+    /// Decode data from shards using Reed-Solomon.
+    /// `shard_opts` has N entries; missing shards are `None`.
+    fn erasure_decode(
+        &self,
+        mut shard_opts: Vec<Option<Vec<u8>>>,
+        original_size: usize,
+    ) -> Result<Vec<u8>> {
+        let (data_shards, _) = self.erasure_params()?;
+
+        self.reed_solomon()
+            .reconstruct(&mut shard_opts)
+            .map_err(|e| Error::Storage(format!("Reed-Solomon reconstruct failed: {}", e)))?;
+
+        let mut data = Vec::with_capacity(original_size);
+        for s in shard_opts.iter().take(data_shards).flatten() {
+            data.extend_from_slice(s);
+        }
+        data.truncate(original_size);
+        Ok(data)
+    }
+
+    /// Run a `Metadata`-returning operation per shard (one future per backend),
+    /// collect results, and return the first success with the given `name`.
+    async fn erasure_per_shard(
+        &self,
+        op: &str,
+        name: String,
+        futures: Vec<impl Future<Output = Result<Metadata>>>,
+    ) -> Result<Metadata> {
+        let results = futures::future::join_all(futures).await;
+        let mut first_meta: Option<Metadata> = None;
+        let mut last_error: Option<Error> = None;
+        for (i, result) in results.into_iter().enumerate() {
+            match result {
+                Ok(meta) => {
+                    if first_meta.is_none() {
+                        first_meta = Some(Metadata {
+                            name: name.clone(),
+                            ..meta
+                        });
+                    }
+                }
+                Err(e) => {
+                    warn!(backend = self.backends[i].name(), shard = i, error = %e, operation = op, "Erasure shard operation failed");
+                    last_error = Some(e);
+                }
+            }
+        }
+        first_meta.ok_or_else(|| {
+            last_error.unwrap_or_else(|| {
+                Error::Storage(format!("All backends failed for erasure {}", op))
+            })
+        })
+    }
+
+    /// Build the shard path for a given file path and shard index.
+    fn shard_path(path: &VaultPath, shard_index: usize) -> Result<VaultPath> {
+        let path_str = path.to_string_path();
+        VaultPath::parse(&format!("{}.shard{}", path_str, shard_index))
+    }
+
+    /// Upload data in erasure mode: encode into shards, write each to its backend.
+    async fn erasure_upload(&self, path: &VaultPath, data: Vec<u8>) -> Result<Metadata> {
+        let original_size = data.len();
+        let shards = self.erasure_encode(&data)?;
+
+        let mut futures = Vec::with_capacity(shards.len());
+        for (i, shard) in shards.into_iter().enumerate() {
+            let backend = Arc::clone(&self.backends[i]);
+            let shard_path = Self::shard_path(path, i)?;
+            // 8-byte LE size header so we can strip padding on reconstruct
+            let mut payload = Vec::with_capacity(8 + shard.len());
+            payload.extend_from_slice(&(original_size as u64).to_le_bytes());
+            payload.extend_from_slice(&shard);
+            futures.push(async move { backend.upload(&shard_path, payload).await });
+        }
+
+        let results = futures::future::join_all(futures).await;
+
+        let mut first_meta: Option<Metadata> = None;
+        let mut failure_count = 0usize;
+        let mut last_error: Option<Error> = None;
+
+        for (i, result) in results.into_iter().enumerate() {
+            match result {
+                Ok(meta) => {
+                    if first_meta.is_none() {
+                        // Return metadata reflecting the original file, not the shard
+                        first_meta = Some(Metadata {
+                            name: path.name().unwrap_or("/").to_string(),
+                            size: Some(original_size as u64),
+                            ..meta
+                        });
+                    }
+                }
+                Err(e) => {
+                    failure_count += 1;
+                    warn!(
+                        backend = self.backends[i].name(),
+                        shard = i,
+                        error = %e,
+                        "Erasure upload: shard write failed"
+                    );
+                    last_error = Some(e);
+                }
+            }
+        }
+
+        let (_, parity_shards) = self.erasure_params()?;
+        if failure_count > parity_shards {
+            return Err(last_error
+                .unwrap_or_else(|| Error::Storage("Too many shard write failures".to_string())));
+        }
+
+        if failure_count > 0 {
+            warn!(
+                operation = "erasure_upload",
+                failed = failure_count,
+                total = self.backends.len(),
+                "Partial erasure write: {}/{} shards failed",
+                failure_count,
+                self.backends.len()
+            );
+        }
+
+        first_meta.ok_or_else(|| {
+            last_error
+                .unwrap_or_else(|| Error::Storage("All backends failed for erasure upload".into()))
+        })
+    }
+
+    /// Download data in erasure mode: fetch shards, reconstruct original data.
+    async fn erasure_download(&self, path: &VaultPath) -> Result<Vec<u8>> {
+        let RaidMode::Erasure {
+            data_shards,
+            parity_shards,
+        } = self.config.mode
+        else {
+            return Err(Error::Storage("Not in erasure mode".to_string()));
+        };
+
+        let total = data_shards + parity_shards;
+        let mut futures = Vec::with_capacity(total);
+        for i in 0..total {
+            let backend = Arc::clone(&self.backends[i]);
+            let shard_path = Self::shard_path(path, i)?;
+            futures.push(async move { (i, backend.download(&shard_path).await) });
+        }
+
+        let results = futures::future::join_all(futures).await;
+
+        let mut shard_opts: Vec<Option<Vec<u8>>> = vec![None; total];
+        let mut original_size: Option<usize> = None;
+        let mut available = 0usize;
+
+        for (i, result) in results {
+            if let Ok(payload) = result {
+                if payload.len() < 8 {
+                    warn!(shard = i, "Erasure download: shard too short, skipping");
+                    continue;
+                }
+                let size = u64::from_le_bytes(payload[..8].try_into().unwrap()) as usize;
+                if original_size.is_none() {
+                    original_size = Some(size);
+                }
+                shard_opts[i] = Some(payload[8..].to_vec());
+                available += 1;
+            }
+        }
+
+        if available < data_shards {
+            return Err(Error::Storage(format!(
+                "Erasure download: only {}/{} shards available, need {}",
+                available, total, data_shards
+            )));
+        }
+
+        let original_size = original_size
+            .ok_or_else(|| Error::Storage("Erasure download: no shards available".to_string()))?;
+
+        self.erasure_decode(shard_opts, original_size)
+    }
+
+    /// Delete shards across all backends in erasure mode.
+    async fn erasure_delete(&self, path: &VaultPath) -> Result<()> {
+        let total = self.backends.len();
+        let mut futures = Vec::with_capacity(total);
+        for i in 0..total {
+            let backend = Arc::clone(&self.backends[i]);
+            let shard_path = Self::shard_path(path, i)?;
+            futures.push(async move { backend.delete(&shard_path).await });
+        }
+
+        let results = futures::future::join_all(futures).await;
+        let mut any_success = false;
+        let mut last_error: Option<Error> = None;
+
+        for (i, result) in results.into_iter().enumerate() {
+            match result {
+                Ok(()) => any_success = true,
+                Err(e) => {
+                    warn!(
+                        backend = self.backends[i].name(),
+                        shard = i,
+                        error = %e,
+                        "Erasure delete: shard delete failed"
+                    );
+                    last_error = Some(e);
+                }
+            }
+        }
+
+        if any_success {
+            Ok(())
+        } else {
+            Err(last_error
+                .unwrap_or_else(|| Error::Storage("All backends failed for erasure delete".into())))
         }
     }
 }
@@ -246,15 +530,19 @@ impl StorageProvider for CompositeStorageProvider {
     }
 
     async fn upload(&self, path: &VaultPath, data: Vec<u8>) -> Result<Metadata> {
-        self.require_mirror("upload")?;
-        let path = path.clone();
-        let data: Bytes = data.into();
-        self.fan_out("upload", |backend| {
-            let path = path.clone();
-            let data = data.clone();
-            async move { backend.upload(&path, data.to_vec()).await }
-        })
-        .await
+        match self.config.mode {
+            RaidMode::Mirror => {
+                let path = path.clone();
+                let data: Bytes = data.into();
+                self.fan_out("upload", |backend| {
+                    let path = path.clone();
+                    let data = data.clone();
+                    async move { backend.upload(&path, data.to_vec()).await }
+                })
+                .await
+            }
+            RaidMode::Erasure { .. } => self.erasure_upload(path, data).await,
+        }
     }
 
     async fn upload_stream(&self, path: &VaultPath, stream: ByteStream) -> Result<Metadata> {
@@ -268,13 +556,17 @@ impl StorageProvider for CompositeStorageProvider {
     }
 
     async fn download(&self, path: &VaultPath) -> Result<Vec<u8>> {
-        self.require_mirror("download")?;
-        let path = path.clone();
-        self.try_first("download", |backend| {
-            let path = path.clone();
-            async move { backend.download(&path).await }
-        })
-        .await
+        match self.config.mode {
+            RaidMode::Mirror => {
+                let path = path.clone();
+                self.try_first("download", |backend| {
+                    let path = path.clone();
+                    async move { backend.download(&path).await }
+                })
+                .await
+            }
+            RaidMode::Erasure { .. } => self.erasure_download(path).await,
+        }
     }
 
     async fn download_stream(&self, path: &VaultPath) -> Result<ByteStream> {
@@ -283,26 +575,42 @@ impl StorageProvider for CompositeStorageProvider {
     }
 
     async fn exists(&self, path: &VaultPath) -> Result<bool> {
-        let path = path.clone();
-        self.try_first("exists", |backend| {
-            let path = path.clone();
-            async move { backend.exists(&path).await }
-        })
-        .await
+        match self.config.mode {
+            RaidMode::Mirror => {
+                let path = path.clone();
+                self.try_first("exists", |backend| {
+                    let path = path.clone();
+                    async move { backend.exists(&path).await }
+                })
+                .await
+            }
+            RaidMode::Erasure { .. } => {
+                // Try shard 0 across backends in order until one responds
+                let shard_path = Self::shard_path(path, 0)?;
+                self.try_first("exists", |backend| {
+                    let sp = shard_path.clone();
+                    async move { backend.exists(&sp).await }
+                })
+                .await
+            }
+        }
     }
 
     async fn delete(&self, path: &VaultPath) -> Result<()> {
-        self.require_mirror("delete")?;
-        let path = path.clone();
-        self.fan_out_void("delete", |backend| {
-            let path = path.clone();
-            async move { backend.delete(&path).await }
-        })
-        .await
+        match self.config.mode {
+            RaidMode::Mirror => {
+                let path = path.clone();
+                self.fan_out_void("delete", |backend| {
+                    let path = path.clone();
+                    async move { backend.delete(&path).await }
+                })
+                .await
+            }
+            RaidMode::Erasure { .. } => self.erasure_delete(path).await,
+        }
     }
 
     async fn list(&self, path: &VaultPath) -> Result<Vec<Metadata>> {
-        self.require_mirror("list")?;
         let path = path.clone();
 
         // Query all backends concurrently and merge results.
@@ -359,16 +667,36 @@ impl StorageProvider for CompositeStorageProvider {
     }
 
     async fn metadata(&self, path: &VaultPath) -> Result<Metadata> {
-        let path = path.clone();
-        self.try_first("metadata", |backend| {
-            let path = path.clone();
-            async move { backend.metadata(&path).await }
-        })
-        .await
+        match self.config.mode {
+            RaidMode::Mirror => {
+                let path = path.clone();
+                self.try_first("metadata", |backend| {
+                    let path = path.clone();
+                    async move { backend.metadata(&path).await }
+                })
+                .await
+            }
+            RaidMode::Erasure { .. } => {
+                // Try shard 0 across backends for resilience; return metadata
+                // reflecting the logical file rather than the shard
+                let shard_path = Self::shard_path(path, 0)?;
+                let file_name = path.name().unwrap_or("/").to_string();
+                let shard_meta = self
+                    .try_first("metadata", |backend| {
+                        let sp = shard_path.clone();
+                        async move { backend.metadata(&sp).await }
+                    })
+                    .await?;
+                Ok(Metadata {
+                    name: file_name,
+                    is_directory: false,
+                    ..shard_meta
+                })
+            }
+        }
     }
 
     async fn create_dir(&self, path: &VaultPath) -> Result<Metadata> {
-        self.require_mirror("create_dir")?;
         let path = path.clone();
         self.fan_out("create_dir", |backend| {
             let path = path.clone();
@@ -378,7 +706,6 @@ impl StorageProvider for CompositeStorageProvider {
     }
 
     async fn delete_dir(&self, path: &VaultPath) -> Result<()> {
-        self.require_mirror("delete_dir")?;
         let path = path.clone();
         self.fan_out_void("delete_dir", |backend| {
             let path = path.clone();
@@ -388,27 +715,57 @@ impl StorageProvider for CompositeStorageProvider {
     }
 
     async fn rename(&self, from: &VaultPath, to: &VaultPath) -> Result<Metadata> {
-        self.require_mirror("rename")?;
-        let from = from.clone();
-        let to = to.clone();
-        self.fan_out("rename", |backend| {
-            let from = from.clone();
-            let to = to.clone();
-            async move { backend.rename(&from, &to).await }
-        })
-        .await
+        match self.config.mode {
+            RaidMode::Mirror => {
+                let from = from.clone();
+                let to = to.clone();
+                self.fan_out("rename", |backend| {
+                    let from = from.clone();
+                    let to = to.clone();
+                    async move { backend.rename(&from, &to).await }
+                })
+                .await
+            }
+            RaidMode::Erasure { .. } => {
+                let total = self.backends.len();
+                let mut futures = Vec::with_capacity(total);
+                for i in 0..total {
+                    let backend = Arc::clone(&self.backends[i]);
+                    let from_shard = Self::shard_path(from, i)?;
+                    let to_shard = Self::shard_path(to, i)?;
+                    futures.push(async move { backend.rename(&from_shard, &to_shard).await });
+                }
+                self.erasure_per_shard("rename", to.name().unwrap_or("/").to_string(), futures)
+                    .await
+            }
+        }
     }
 
     async fn copy(&self, from: &VaultPath, to: &VaultPath) -> Result<Metadata> {
-        self.require_mirror("copy")?;
-        let from = from.clone();
-        let to = to.clone();
-        self.fan_out("copy", |backend| {
-            let from = from.clone();
-            let to = to.clone();
-            async move { backend.copy(&from, &to).await }
-        })
-        .await
+        match self.config.mode {
+            RaidMode::Mirror => {
+                let from = from.clone();
+                let to = to.clone();
+                self.fan_out("copy", |backend| {
+                    let from = from.clone();
+                    let to = to.clone();
+                    async move { backend.copy(&from, &to).await }
+                })
+                .await
+            }
+            RaidMode::Erasure { .. } => {
+                let total = self.backends.len();
+                let mut futures = Vec::with_capacity(total);
+                for i in 0..total {
+                    let backend = Arc::clone(&self.backends[i]);
+                    let from_shard = Self::shard_path(from, i)?;
+                    let to_shard = Self::shard_path(to, i)?;
+                    futures.push(async move { backend.copy(&from_shard, &to_shard).await });
+                }
+                self.erasure_per_shard("copy", to.name().unwrap_or("/").to_string(), futures)
+                    .await
+            }
+        }
     }
 }
 
@@ -831,5 +1188,285 @@ mod tests {
         let listing = provider.list(&dir).await.unwrap();
         assert_eq!(listing.len(), 1);
         assert_eq!(listing[0].name, "file.txt");
+    }
+
+    // -- Erasure coding tests -------------------------------------------------
+
+    fn erasure_config(data_shards: usize, parity_shards: usize) -> CompositeConfig {
+        CompositeConfig {
+            mode: RaidMode::Erasure {
+                data_shards,
+                parity_shards,
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn test_erasure_upload_download_basic() {
+        let backends = make_backends(5);
+        let provider =
+            CompositeStorageProvider::new(backends.clone(), erasure_config(3, 2)).unwrap();
+
+        let path = VaultPath::parse("/test.txt").unwrap();
+        let data = b"hello world erasure coding test data".to_vec();
+
+        let meta = provider.upload(&path, data.clone()).await.unwrap();
+        assert_eq!(meta.name, "test.txt");
+        assert_eq!(meta.size, Some(data.len() as u64));
+
+        let downloaded = provider.download(&path).await.unwrap();
+        assert_eq!(downloaded, data);
+    }
+
+    #[tokio::test]
+    async fn test_erasure_upload_download_empty_data() {
+        let backends = make_backends(3);
+        let provider =
+            CompositeStorageProvider::new(backends.clone(), erasure_config(2, 1)).unwrap();
+
+        let path = VaultPath::parse("/empty.bin").unwrap();
+        let data = vec![];
+
+        provider.upload(&path, data.clone()).await.unwrap();
+        let downloaded = provider.download(&path).await.unwrap();
+        assert_eq!(downloaded, data);
+    }
+
+    #[tokio::test]
+    async fn test_erasure_upload_download_single_byte() {
+        let backends = make_backends(3);
+        let provider =
+            CompositeStorageProvider::new(backends.clone(), erasure_config(2, 1)).unwrap();
+
+        let path = VaultPath::parse("/one.bin").unwrap();
+        let data = vec![42];
+
+        provider.upload(&path, data.clone()).await.unwrap();
+        let downloaded = provider.download(&path).await.unwrap();
+        assert_eq!(downloaded, data);
+    }
+
+    #[tokio::test]
+    async fn test_erasure_upload_download_large_data() {
+        let backends = make_backends(5);
+        let provider =
+            CompositeStorageProvider::new(backends.clone(), erasure_config(3, 2)).unwrap();
+
+        let path = VaultPath::parse("/large.bin").unwrap();
+        let data: Vec<u8> = (0..10000).map(|i| (i % 256) as u8).collect();
+
+        provider.upload(&path, data.clone()).await.unwrap();
+        let downloaded = provider.download(&path).await.unwrap();
+        assert_eq!(downloaded, data);
+    }
+
+    #[tokio::test]
+    async fn test_erasure_reconstruct_with_exactly_k_shards() {
+        // 3 data + 2 parity = 5 backends. Remove 2 (parity count) shards.
+        let backends = make_backends(5);
+        let provider =
+            CompositeStorageProvider::new(backends.clone(), erasure_config(3, 2)).unwrap();
+
+        let path = VaultPath::parse("/recover.txt").unwrap();
+        let data = b"data that must survive two backend failures".to_vec();
+
+        provider.upload(&path, data.clone()).await.unwrap();
+
+        // Delete shards from backends 0 and 1 (simulating 2 backend failures)
+        let shard0 = VaultPath::parse("/recover.txt.shard0").unwrap();
+        let shard1 = VaultPath::parse("/recover.txt.shard1").unwrap();
+        backends[0].delete(&shard0).await.unwrap();
+        backends[1].delete(&shard1).await.unwrap();
+
+        // Should still reconstruct from remaining 3 shards
+        let downloaded = provider.download(&path).await.unwrap();
+        assert_eq!(downloaded, data);
+    }
+
+    #[tokio::test]
+    async fn test_erasure_fails_with_too_few_shards() {
+        // 3 data + 2 parity = 5 backends. Remove 3 shards (more than parity).
+        let backends = make_backends(5);
+        let provider =
+            CompositeStorageProvider::new(backends.clone(), erasure_config(3, 2)).unwrap();
+
+        let path = VaultPath::parse("/fail.txt").unwrap();
+        let data = b"this will be unrecoverable".to_vec();
+
+        provider.upload(&path, data).await.unwrap();
+
+        // Delete 3 shards — only 2 remain, need 3
+        backends[0]
+            .delete(&VaultPath::parse("/fail.txt.shard0").unwrap())
+            .await
+            .unwrap();
+        backends[1]
+            .delete(&VaultPath::parse("/fail.txt.shard1").unwrap())
+            .await
+            .unwrap();
+        backends[2]
+            .delete(&VaultPath::parse("/fail.txt.shard2").unwrap())
+            .await
+            .unwrap();
+
+        let result = provider.download(&path).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("shards available"));
+    }
+
+    #[tokio::test]
+    async fn test_erasure_exists() {
+        let backends = make_backends(3);
+        let provider =
+            CompositeStorageProvider::new(backends.clone(), erasure_config(2, 1)).unwrap();
+
+        let path = VaultPath::parse("/check.bin").unwrap();
+        assert!(!provider.exists(&path).await.unwrap());
+
+        provider.upload(&path, vec![1, 2, 3]).await.unwrap();
+        assert!(provider.exists(&path).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_erasure_delete() {
+        let backends = make_backends(3);
+        let provider =
+            CompositeStorageProvider::new(backends.clone(), erasure_config(2, 1)).unwrap();
+
+        let path = VaultPath::parse("/del.bin").unwrap();
+        provider.upload(&path, vec![1, 2, 3]).await.unwrap();
+
+        provider.delete(&path).await.unwrap();
+
+        // All shard files should be gone
+        for i in 0..3 {
+            let shard_path = VaultPath::parse(&format!("/del.bin.shard{}", i)).unwrap();
+            assert!(!backends[i].exists(&shard_path).await.unwrap());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_erasure_rename() {
+        let backends = make_backends(3);
+        let provider =
+            CompositeStorageProvider::new(backends.clone(), erasure_config(2, 1)).unwrap();
+
+        let from = VaultPath::parse("/old.bin").unwrap();
+        let to = VaultPath::parse("/new.bin").unwrap();
+        let data = vec![10, 20, 30];
+
+        provider.upload(&from, data.clone()).await.unwrap();
+        provider.rename(&from, &to).await.unwrap();
+
+        assert!(!provider.exists(&from).await.unwrap());
+        assert!(provider.exists(&to).await.unwrap());
+        assert_eq!(provider.download(&to).await.unwrap(), data);
+    }
+
+    #[tokio::test]
+    async fn test_erasure_copy() {
+        let backends = make_backends(3);
+        let provider =
+            CompositeStorageProvider::new(backends.clone(), erasure_config(2, 1)).unwrap();
+
+        let from = VaultPath::parse("/src.bin").unwrap();
+        let to = VaultPath::parse("/dst.bin").unwrap();
+        let data = vec![5, 10, 15, 20];
+
+        provider.upload(&from, data.clone()).await.unwrap();
+        provider.copy(&from, &to).await.unwrap();
+
+        assert!(provider.exists(&from).await.unwrap());
+        assert_eq!(provider.download(&from).await.unwrap(), data);
+        assert_eq!(provider.download(&to).await.unwrap(), data);
+    }
+
+    #[tokio::test]
+    async fn test_erasure_metadata() {
+        let backends = make_backends(3);
+        let provider =
+            CompositeStorageProvider::new(backends.clone(), erasure_config(2, 1)).unwrap();
+
+        let path = VaultPath::parse("/meta.bin").unwrap();
+        provider.upload(&path, vec![1, 2, 3]).await.unwrap();
+
+        let meta = provider.metadata(&path).await.unwrap();
+        assert_eq!(meta.name, "meta.bin");
+        assert!(!meta.is_directory);
+    }
+
+    #[tokio::test]
+    async fn test_erasure_stream_upload_download() {
+        let backends = make_backends(3);
+        let provider =
+            CompositeStorageProvider::new(backends.clone(), erasure_config(2, 1)).unwrap();
+
+        let path = VaultPath::parse("/stream.bin").unwrap();
+        let data = vec![100, 200, 255, 0, 1];
+        let data_clone = data.clone();
+        let stream: ByteStream = Box::pin(futures::stream::once(async move { Ok(data_clone) }));
+
+        provider.upload_stream(&path, stream).await.unwrap();
+
+        use futures::StreamExt;
+        let mut download_stream = provider.download_stream(&path).await.unwrap();
+        let mut result = Vec::new();
+        while let Some(chunk) = download_stream.next().await {
+            result.extend_from_slice(&chunk.unwrap());
+        }
+        assert_eq!(result, data);
+    }
+
+    #[tokio::test]
+    async fn test_erasure_5_backends_3_of_5_knock_out_2() {
+        // Integration test per issue #145: 5 MemoryProvider backends, 3-of-5, knock out 2
+        let backends = make_backends(5);
+        let provider =
+            CompositeStorageProvider::new(backends.clone(), erasure_config(3, 2)).unwrap();
+
+        // Upload multiple files
+        let files: Vec<(VaultPath, Vec<u8>)> = (0..5)
+            .map(|i| {
+                let path = VaultPath::parse(&format!("/file{}.dat", i)).unwrap();
+                let data: Vec<u8> = (0..=255).cycle().take(100 + i * 50).collect();
+                (path, data)
+            })
+            .collect();
+
+        for (path, data) in &files {
+            provider.upload(path, data.clone()).await.unwrap();
+        }
+
+        // Knock out backends 3 and 4 by deleting their shards
+        for (path, _) in &files {
+            let path_str = path.to_string_path();
+            for shard_idx in [3, 4] {
+                let shard_path =
+                    VaultPath::parse(&format!("{}.shard{}", path_str, shard_idx)).unwrap();
+                backends[shard_idx].delete(&shard_path).await.unwrap();
+            }
+        }
+
+        // All files should still be readable (3 of 5 shards available)
+        for (path, expected_data) in &files {
+            let downloaded = provider.download(path).await.unwrap();
+            assert_eq!(&downloaded, expected_data, "Data mismatch for {}", path);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_erasure_data_not_divisible_by_k() {
+        // Data length not evenly divisible by data_shards — tests padding
+        let backends = make_backends(4);
+        let provider =
+            CompositeStorageProvider::new(backends.clone(), erasure_config(3, 1)).unwrap();
+
+        let path = VaultPath::parse("/odd.bin").unwrap();
+        // 7 bytes / 3 shards = 2 remainder 1 → tests padding correctness
+        let data = vec![1, 2, 3, 4, 5, 6, 7];
+
+        provider.upload(&path, data.clone()).await.unwrap();
+        let downloaded = provider.download(&path).await.unwrap();
+        assert_eq!(downloaded, data);
     }
 }
