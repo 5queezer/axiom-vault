@@ -9,6 +9,7 @@ use futures::stream;
 use reed_solomon_erasure::galois_8::ReedSolomon;
 use serde::{Deserialize, Serialize};
 use std::future::Future;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::warn;
@@ -50,6 +51,8 @@ pub struct CompositeStorageProvider {
     reed_solomon: Option<ReedSolomon>,
     /// Persistent shard map tracking chunk-to-backend mappings.
     shard_map: Arc<RwLock<ShardMap>>,
+    /// Whether the shard map has been hydrated from persistent storage.
+    shard_map_loaded: AtomicBool,
 }
 
 impl CompositeStorageProvider {
@@ -108,6 +111,7 @@ impl CompositeStorageProvider {
             config,
             reed_solomon,
             shard_map: Arc::new(RwLock::new(ShardMap::new())),
+            shard_map_loaded: AtomicBool::new(false),
         })
     }
 
@@ -118,11 +122,22 @@ impl CompositeStorageProvider {
     pub async fn load_shard_map(&self) -> Result<()> {
         let loaded = ShardMap::load_from_all(&self.backends).await?;
         *self.shard_map.write().await = loaded;
+        self.shard_map_loaded.store(true, Ordering::Release);
+        Ok(())
+    }
+
+    /// Ensure the shard map has been hydrated from persistent storage.
+    /// Called lazily before the first save to prevent overwriting existing data.
+    async fn ensure_shard_map_loaded(&self) -> Result<()> {
+        if !self.shard_map_loaded.load(Ordering::Acquire) {
+            self.load_shard_map().await?;
+        }
         Ok(())
     }
 
     /// Persist the current shard map to all backends.
     pub async fn save_shard_map(&self) -> Result<()> {
+        self.ensure_shard_map_loaded().await?;
         let map = self.shard_map.read().await;
         map.save_to_all(&self.backends).await
     }
@@ -148,8 +163,9 @@ impl CompositeStorageProvider {
     }
 
     /// Fan out a `Result<Metadata>` operation to all backends concurrently.
-    /// Returns the first successful result; fails only if ALL backends fail.
-    async fn fan_out<F, Fut>(&self, op: &str, f: F) -> Result<Metadata>
+    /// Returns the first successful result and the indices of backends that
+    /// succeeded; fails only if ALL backends fail.
+    async fn fan_out<F, Fut>(&self, op: &str, f: F) -> Result<(Metadata, Vec<usize>)>
     where
         F: Fn(Arc<dyn StorageProvider>) -> Fut,
         Fut: Future<Output = Result<Metadata>>,
@@ -158,12 +174,14 @@ impl CompositeStorageProvider {
         let results = futures::future::join_all(futures).await;
 
         let mut first_success: Option<Metadata> = None;
+        let mut succeeded: Vec<usize> = Vec::new();
         let mut last_error: Option<Error> = None;
         let mut failure_count = 0usize;
 
         for (i, result) in results.into_iter().enumerate() {
             match result {
                 Ok(meta) => {
+                    succeeded.push(i);
                     if first_success.is_none() {
                         first_success = Some(meta);
                     }
@@ -192,7 +210,7 @@ impl CompositeStorageProvider {
             );
         }
 
-        first_success.ok_or_else(|| {
+        first_success.map(|meta| (meta, succeeded)).ok_or_else(|| {
             last_error.unwrap_or_else(|| Error::Storage(format!("All backends failed for {}", op)))
         })
     }
@@ -410,12 +428,14 @@ impl CompositeStorageProvider {
         let results = futures::future::join_all(futures).await;
 
         let mut first_meta: Option<Metadata> = None;
+        let mut succeeded: Vec<usize> = Vec::new();
         let mut failure_count = 0usize;
         let mut last_error: Option<Error> = None;
 
         for (i, result) in results.into_iter().enumerate() {
             match result {
                 Ok(meta) => {
+                    succeeded.push(i);
                     if first_meta.is_none() {
                         // Return metadata reflecting the original file, not the shard
                         first_meta = Some(Metadata {
@@ -460,14 +480,17 @@ impl CompositeStorageProvider {
                 .unwrap_or_else(|| Error::Storage("All backends failed for erasure upload".into()))
         })?;
 
-        // TODO: Records all backends in shard map, not just those that succeeded.
-        // After partial write failure, some ShardLocations may reference stale data.
-
-        // Record the shard mapping
+        // Record the shard mapping with only successful backends
         let (ds, ps) = self.erasure_params()?;
         let path_str = path.to_string_path();
-        let entry =
-            ShardMap::erasure_entry(&path_str, original_size as u64, ds, ps, &self.backends);
+        let entry = ShardMap::erasure_entry(
+            &path_str,
+            original_size as u64,
+            ds,
+            ps,
+            &self.backends,
+            Some(&succeeded),
+        );
         {
             let mut map = self.shard_map.write().await;
             map.insert(&path_str, entry);
@@ -628,7 +651,7 @@ impl StorageProvider for CompositeStorageProvider {
                 let original_size = data.len() as u64;
                 let path = path.clone();
                 let data: Bytes = data.into();
-                let meta = self
+                let (meta, succeeded) = self
                     .fan_out("upload", |backend| {
                         let path = path.clone();
                         let data = data.clone();
@@ -636,12 +659,14 @@ impl StorageProvider for CompositeStorageProvider {
                     })
                     .await?;
 
-                // TODO: Records all backends in shard map, not just those that succeeded.
-                // After partial write failure, some ShardLocations may reference stale data.
-
-                // Record mirror entry in shard map
+                // Record mirror entry with only the backends that succeeded
                 let path_str = path.to_string_path();
-                let entry = ShardMap::mirror_entry(&path_str, original_size, &self.backends);
+                let entry = ShardMap::mirror_entry(
+                    &path_str,
+                    original_size,
+                    &self.backends,
+                    Some(&succeeded),
+                );
                 {
                     let mut map = self.shard_map.write().await;
                     map.insert(&path_str, entry);
@@ -833,11 +858,13 @@ impl StorageProvider for CompositeStorageProvider {
 
     async fn create_dir(&self, path: &VaultPath) -> Result<Metadata> {
         let path = path.clone();
-        self.fan_out("create_dir", |backend| {
-            let path = path.clone();
-            async move { backend.create_dir(&path).await }
-        })
-        .await
+        let (meta, _) = self
+            .fan_out("create_dir", |backend| {
+                let path = path.clone();
+                async move { backend.create_dir(&path).await }
+            })
+            .await?;
+        Ok(meta)
     }
 
     async fn delete_dir(&self, path: &VaultPath) -> Result<()> {
@@ -854,7 +881,7 @@ impl StorageProvider for CompositeStorageProvider {
             RaidMode::Mirror => {
                 let from = from.clone();
                 let to = to.clone();
-                let meta = self
+                let (meta, _) = self
                     .fan_out("rename", |backend| {
                         let from = from.clone();
                         let to = to.clone();
@@ -903,7 +930,7 @@ impl StorageProvider for CompositeStorageProvider {
             RaidMode::Mirror => {
                 let from = from.clone();
                 let to = to.clone();
-                let meta = self
+                let (meta, _) = self
                     .fan_out("copy", |backend| {
                         let from = from.clone();
                         let to = to.clone();
