@@ -127,9 +127,12 @@ impl ShardMap {
                     shard.backend_path = format!("{}{}", to, suffix);
                 }
             }
-            entry.updated_at = Utc::now();
+            let now = Utc::now();
+            entry.updated_at = now;
             self.version += 1;
-            self.updated_at = Utc::now();
+            self.updated_at = now;
+            // Tombstone the old path to prevent resurrection from stale backends.
+            self.tombstones.insert(from.to_string(), now);
             self.entries.insert(to.to_string(), entry.clone());
             Some(entry)
         } else {
@@ -220,13 +223,16 @@ impl ShardMap {
         }
         backend.upload(&tmp_path, data).await?;
 
-        // Remove existing final file so rename can succeed atomically
-        if backend.exists(&final_path).await.unwrap_or(false) {
-            let _ = backend.delete(&final_path).await;
+        // Try rename; if it fails (e.g. destination exists), delete final and retry.
+        // This avoids deleting the canonical file before the rename succeeds,
+        // which would leave the backend without a shard map on rename failure.
+        match backend.rename(&tmp_path, &final_path).await {
+            Ok(_) => {}
+            Err(_) => {
+                let _ = backend.delete(&final_path).await;
+                backend.rename(&tmp_path, &final_path).await?;
+            }
         }
-
-        // Atomic rename
-        backend.rename(&tmp_path, &final_path).await?;
 
         Ok(())
     }
