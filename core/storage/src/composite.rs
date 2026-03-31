@@ -10,11 +10,13 @@ use reed_solomon_erasure::galois_8::ReedSolomon;
 use serde::{Deserialize, Serialize};
 use std::future::Future;
 use std::sync::Arc;
+use tokio::sync::RwLock;
 use tracing::warn;
 
 use std::collections::HashMap;
 
 use crate::provider::{ByteStream, Metadata, StorageProvider};
+use crate::shard_map::ShardMap;
 use axiomvault_common::{Error, Result, VaultPath};
 
 /// RAID mode for the composite provider.
@@ -46,6 +48,8 @@ pub struct CompositeStorageProvider {
     config: CompositeConfig,
     /// Cached Reed-Solomon encoder, created once for erasure mode.
     reed_solomon: Option<ReedSolomon>,
+    /// Persistent shard map tracking chunk-to-backend mappings.
+    shard_map: Arc<RwLock<ShardMap>>,
 }
 
 impl CompositeStorageProvider {
@@ -103,7 +107,29 @@ impl CompositeStorageProvider {
             backends,
             config,
             reed_solomon,
+            shard_map: Arc::new(RwLock::new(ShardMap::new())),
         })
+    }
+
+    /// Load the shard map from all backends, merging any diverged copies.
+    ///
+    /// Call this after construction to hydrate the shard map from persistent
+    /// storage. If no backends have a shard map yet, this is a no-op.
+    pub async fn load_shard_map(&self) -> Result<()> {
+        let loaded = ShardMap::load_from_all(&self.backends).await?;
+        *self.shard_map.write().await = loaded;
+        Ok(())
+    }
+
+    /// Persist the current shard map to all backends.
+    pub async fn save_shard_map(&self) -> Result<()> {
+        let map = self.shard_map.read().await;
+        map.save_to_all(&self.backends).await
+    }
+
+    /// Get a clone of the current shard map (for inspection/testing).
+    pub async fn get_shard_map(&self) -> ShardMap {
+        self.shard_map.read().await.clone()
     }
 
     /// Get the current RAID mode.
@@ -429,10 +455,22 @@ impl CompositeStorageProvider {
             );
         }
 
-        first_meta.ok_or_else(|| {
+        let meta = first_meta.ok_or_else(|| {
             last_error
                 .unwrap_or_else(|| Error::Storage("All backends failed for erasure upload".into()))
-        })
+        })?;
+
+        // Record the shard mapping
+        let (ds, ps) = self.erasure_params()?;
+        let path_str = path.to_string_path();
+        let entry =
+            ShardMap::erasure_entry(&path_str, original_size as u64, ds, ps, &self.backends);
+        {
+            let mut map = self.shard_map.write().await;
+            map.insert(&path_str, entry);
+        }
+
+        Ok(meta)
     }
 
     /// Download data in erasure mode: fetch shards, reconstruct original data.
@@ -550,6 +588,9 @@ impl CompositeStorageProvider {
         }
 
         if any_success {
+            // Remove from shard map
+            let path_str = path.to_string_path();
+            self.shard_map.write().await.remove(&path_str);
             Ok(())
         } else {
             Err(last_error
@@ -577,14 +618,23 @@ impl StorageProvider for CompositeStorageProvider {
     async fn upload(&self, path: &VaultPath, data: Vec<u8>) -> Result<Metadata> {
         match self.config.mode {
             RaidMode::Mirror => {
+                let original_size = data.len() as u64;
                 let path = path.clone();
                 let data: Bytes = data.into();
-                self.fan_out("upload", |backend| {
-                    let path = path.clone();
-                    let data = data.clone();
-                    async move { backend.upload(&path, data.to_vec()).await }
-                })
-                .await
+                let meta = self
+                    .fan_out("upload", |backend| {
+                        let path = path.clone();
+                        let data = data.clone();
+                        async move { backend.upload(&path, data.to_vec()).await }
+                    })
+                    .await?;
+
+                // Record mirror entry in shard map
+                let path_str = path.to_string_path();
+                let entry = ShardMap::mirror_entry(&path_str, original_size, &self.backends);
+                self.shard_map.write().await.insert(&path_str, entry);
+
+                Ok(meta)
             }
             RaidMode::Erasure { .. } => self.erasure_upload(path, data).await,
         }
@@ -649,7 +699,12 @@ impl StorageProvider for CompositeStorageProvider {
                     let path = path.clone();
                     async move { backend.delete(&path).await }
                 })
-                .await
+                .await?;
+
+                // Remove from shard map
+                self.shard_map.write().await.remove(&path.to_string_path());
+
+                Ok(())
             }
             RaidMode::Erasure { .. } => self.erasure_delete(path).await,
         }
@@ -782,12 +837,20 @@ impl StorageProvider for CompositeStorageProvider {
             RaidMode::Mirror => {
                 let from = from.clone();
                 let to = to.clone();
-                self.fan_out("rename", |backend| {
-                    let from = from.clone();
-                    let to = to.clone();
-                    async move { backend.rename(&from, &to).await }
-                })
-                .await
+                let meta = self
+                    .fan_out("rename", |backend| {
+                        let from = from.clone();
+                        let to = to.clone();
+                        async move { backend.rename(&from, &to).await }
+                    })
+                    .await?;
+
+                // Update shard map
+                let from_str = from.to_string_path();
+                let to_str = to.to_string_path();
+                self.shard_map.write().await.rename(&from_str, &to_str);
+
+                Ok(meta)
             }
             RaidMode::Erasure { .. } => {
                 let total = self.backends.len();
@@ -798,8 +861,16 @@ impl StorageProvider for CompositeStorageProvider {
                     let to_shard = Self::shard_path(to, i)?;
                     futures.push(async move { backend.rename(&from_shard, &to_shard).await });
                 }
-                self.erasure_per_shard("rename", to.name().unwrap_or("/").to_string(), futures)
-                    .await
+                let meta = self
+                    .erasure_per_shard("rename", to.name().unwrap_or("/").to_string(), futures)
+                    .await?;
+
+                // Update shard map
+                let from_str = from.to_string_path();
+                let to_str = to.to_string_path();
+                self.shard_map.write().await.rename(&from_str, &to_str);
+
+                Ok(meta)
             }
         }
     }
