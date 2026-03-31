@@ -163,7 +163,7 @@ impl ShardMap {
         // Merge tombstones: keep the newest deletion timestamp per path.
         for (path, &other_ts) in &other.tombstones {
             let self_ts = self.tombstones.get(path).copied();
-            if self_ts.map_or(true, |t| other_ts > t) {
+            if self_ts.is_none_or(|t| other_ts > t) {
                 self.tombstones.insert(path.clone(), other_ts);
             }
         }
