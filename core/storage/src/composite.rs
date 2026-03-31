@@ -260,10 +260,10 @@ impl CompositeStorageProvider {
     }
 
     /// Get the cached Reed-Solomon encoder (only valid in erasure mode).
-    fn reed_solomon(&self) -> &ReedSolomon {
+    fn reed_solomon(&self) -> Result<&ReedSolomon> {
         self.reed_solomon
             .as_ref()
-            .expect("reed_solomon() called in mirror mode")
+            .ok_or_else(|| Error::Storage("Reed-Solomon not available in mirror mode".to_string()))
     }
 
     /// Encode data into N shards (k data + m parity) using Reed-Solomon.
@@ -295,7 +295,7 @@ impl CompositeStorageProvider {
             shards.push(vec![0u8; shard_size]);
         }
 
-        self.reed_solomon()
+        self.reed_solomon()?
             .encode(&mut shards)
             .map_err(|e| Error::Storage(format!("Reed-Solomon encode failed: {}", e)))?;
 
@@ -311,7 +311,7 @@ impl CompositeStorageProvider {
     ) -> Result<Vec<u8>> {
         let (data_shards, _) = self.erasure_params()?;
 
-        self.reed_solomon()
+        self.reed_solomon()?
             .reconstruct(&mut shard_opts)
             .map_err(|e| Error::Storage(format!("Reed-Solomon reconstruct failed: {}", e)))?;
 
@@ -372,8 +372,10 @@ impl CompositeStorageProvider {
         for (i, shard) in shards.into_iter().enumerate() {
             let backend = Arc::clone(&self.backends[i]);
             let shard_path = Self::shard_path(path, i)?;
-            // 8-byte LE size header so we can strip padding on reconstruct
-            let mut payload = Vec::with_capacity(8 + shard.len());
+            // Header: [4-byte LE CRC-32 of shard_data] [8-byte LE original_size] [shard_data]
+            let crc = crc32fast::hash(&shard);
+            let mut payload = Vec::with_capacity(4 + 8 + shard.len());
+            payload.extend_from_slice(&crc.to_le_bytes());
             payload.extend_from_slice(&(original_size as u64).to_le_bytes());
             payload.extend_from_slice(&shard);
             futures.push(async move { backend.upload(&shard_path, payload).await });
@@ -411,7 +413,7 @@ impl CompositeStorageProvider {
         }
 
         let (_, parity_shards) = self.erasure_params()?;
-        if failure_count > parity_shards {
+        if failure_count >= parity_shards {
             return Err(last_error
                 .unwrap_or_else(|| Error::Storage("Too many shard write failures".to_string())));
         }
@@ -454,20 +456,34 @@ impl CompositeStorageProvider {
         let results = futures::future::join_all(futures).await;
 
         let mut shard_opts: Vec<Option<Vec<u8>>> = vec![None; total];
-        let mut original_size: Option<usize> = None;
+        let mut size_votes: HashMap<usize, usize> = HashMap::new();
         let mut available = 0usize;
 
         for (i, result) in results {
             if let Ok(payload) = result {
-                if payload.len() < 8 {
+                // Header: [4-byte CRC-32] [8-byte LE original_size] [shard_data]
+                if payload.len() < 12 {
                     warn!(shard = i, "Erasure download: shard too short, skipping");
                     continue;
                 }
-                let size = u64::from_le_bytes(payload[..8].try_into().unwrap()) as usize;
-                if original_size.is_none() {
-                    original_size = Some(size);
+                let stored_crc = u32::from_le_bytes(payload[..4].try_into().unwrap());
+                let size = u64::from_le_bytes(payload[4..12].try_into().unwrap()) as usize;
+                let shard_data = &payload[12..];
+
+                // Verify CRC-32 integrity
+                let computed_crc = crc32fast::hash(shard_data);
+                if stored_crc != computed_crc {
+                    warn!(
+                        shard = i,
+                        stored_crc,
+                        computed_crc,
+                        "Erasure download: CRC mismatch, treating shard as missing"
+                    );
+                    continue;
                 }
-                shard_opts[i] = Some(payload[8..].to_vec());
+
+                *size_votes.entry(size).or_insert(0) += 1;
+                shard_opts[i] = Some(shard_data.to_vec());
                 available += 1;
             }
         }
@@ -479,8 +495,27 @@ impl CompositeStorageProvider {
             )));
         }
 
-        let original_size = original_size
+        // Cross-validate original_size: use majority vote
+        let original_size = size_votes
+            .into_iter()
+            .max_by_key(|&(_, count)| count)
+            .map(|(size, _)| size)
             .ok_or_else(|| Error::Storage("Erasure download: no shards available".to_string()))?;
+
+        // Bound check: original_size must be <= data_shards * shard_data_len
+        let shard_data_len = shard_opts
+            .iter()
+            .flatten()
+            .next()
+            .map(|s| s.len())
+            .unwrap_or(0);
+        let max_original_size = data_shards * shard_data_len;
+        if original_size > max_original_size {
+            return Err(Error::Storage(format!(
+                "Erasure download: original_size {} exceeds maximum {} (data_shards * shard_len)",
+                original_size, max_original_size
+            )));
+        }
 
         self.erasure_decode(shard_opts, original_size)
     }
@@ -520,6 +555,16 @@ impl CompositeStorageProvider {
             Err(last_error
                 .unwrap_or_else(|| Error::Storage("All backends failed for erasure delete".into())))
         }
+    }
+}
+
+/// Check whether a name matches the internal `.shardN` pattern.
+fn is_shard_file(name: &str) -> bool {
+    if let Some(pos) = name.rfind(".shard") {
+        let suffix = &name[pos + 6..];
+        !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit())
+    } else {
+        false
     }
 }
 
@@ -658,6 +703,10 @@ impl StorageProvider for CompositeStorageProvider {
 
         if any_success {
             let mut entries: Vec<Metadata> = merged.into_values().collect();
+            // In erasure mode, filter out internal shard files
+            if matches!(self.config.mode, RaidMode::Erasure { .. }) {
+                entries.retain(|e| !is_shard_file(&e.name));
+            }
             entries.sort_by(|a, b| a.name.cmp(&b.name));
             Ok(entries)
         } else {
@@ -677,10 +726,23 @@ impl StorageProvider for CompositeStorageProvider {
                 .await
             }
             RaidMode::Erasure { .. } => {
-                // Try shard 0 across backends for resilience; return metadata
-                // reflecting the logical file rather than the shard
                 let shard_path = Self::shard_path(path, 0)?;
                 let file_name = path.name().unwrap_or("/").to_string();
+                // Download shard 0 to read the original size from the header
+                let shard_data = self
+                    .try_first("metadata_download", |backend| {
+                        let sp = shard_path.clone();
+                        async move { backend.download(&sp).await }
+                    })
+                    .await?;
+                // Header: [4-byte CRC-32] [8-byte LE original_size] [shard_data]
+                if shard_data.len() < 12 {
+                    return Err(Error::Storage(
+                        "Shard too short to read metadata".to_string(),
+                    ));
+                }
+                let original_size = u64::from_le_bytes(shard_data[4..12].try_into().unwrap());
+                // Get filesystem metadata (timestamps etc) from the backend
                 let shard_meta = self
                     .try_first("metadata", |backend| {
                         let sp = shard_path.clone();
@@ -689,6 +751,7 @@ impl StorageProvider for CompositeStorageProvider {
                     .await?;
                 Ok(Metadata {
                     name: file_name,
+                    size: Some(original_size),
                     is_directory: false,
                     ..shard_meta
                 })
@@ -1468,5 +1531,91 @@ mod tests {
         provider.upload(&path, data.clone()).await.unwrap();
         let downloaded = provider.download(&path).await.unwrap();
         assert_eq!(downloaded, data);
+    }
+
+    #[tokio::test]
+    async fn test_erasure_corrupted_shard_detected() {
+        // 3 data + 2 parity = 5 backends. Corrupt one shard payload.
+        let backends = make_backends(5);
+        let provider =
+            CompositeStorageProvider::new(backends.clone(), erasure_config(3, 2)).unwrap();
+
+        let path = VaultPath::parse("/corrupt.bin").unwrap();
+        let data = b"data that must survive a corrupted shard".to_vec();
+
+        provider.upload(&path, data.clone()).await.unwrap();
+
+        // Corrupt shard 0 by overwriting with garbage
+        let shard0_path = VaultPath::parse("/corrupt.bin.shard0").unwrap();
+        backends[0]
+            .upload(
+                &shard0_path,
+                vec![
+                    0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF,
+                    0xFF,
+                ],
+            )
+            .await
+            .unwrap();
+
+        // Download should still succeed — corrupt shard detected via CRC, RS reconstructs
+        let downloaded = provider.download(&path).await.unwrap();
+        assert_eq!(downloaded, data);
+    }
+
+    #[tokio::test]
+    async fn test_erasure_list_filters_shard_files() {
+        let backends = make_backends(3);
+        let provider =
+            CompositeStorageProvider::new(backends.clone(), erasure_config(2, 1)).unwrap();
+
+        let dir = VaultPath::parse("/data").unwrap();
+        // Create dir on all backends so list works
+        for backend in &backends {
+            backend.create_dir(&dir).await.unwrap();
+        }
+
+        let path = VaultPath::parse("/data/file.txt").unwrap();
+        provider.upload(&path, vec![1, 2, 3]).await.unwrap();
+
+        let listing = provider.list(&dir).await.unwrap();
+        // No .shardN entries should be visible
+        for entry in &listing {
+            assert!(
+                !is_shard_file(&entry.name),
+                "Shard file leaked into list: {}",
+                entry.name
+            );
+        }
+        // The listing should be empty since the logical file name "file.txt" is
+        // not stored — only shard files exist on disk in erasure mode.
+        assert!(listing.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_erasure_metadata_returns_original_size() {
+        let backends = make_backends(3);
+        let provider =
+            CompositeStorageProvider::new(backends.clone(), erasure_config(2, 1)).unwrap();
+
+        let path = VaultPath::parse("/sized.bin").unwrap();
+        let data = vec![10, 20, 30, 40, 50];
+
+        provider.upload(&path, data.clone()).await.unwrap();
+
+        let meta = provider.metadata(&path).await.unwrap();
+        assert_eq!(meta.name, "sized.bin");
+        assert_eq!(meta.size, Some(data.len() as u64));
+        assert!(!meta.is_directory);
+    }
+
+    #[test]
+    fn test_is_shard_file() {
+        assert!(is_shard_file("file.txt.shard0"));
+        assert!(is_shard_file("file.txt.shard12"));
+        assert!(!is_shard_file("file.txt"));
+        assert!(!is_shard_file("file.shard"));
+        assert!(!is_shard_file("file.shardX"));
+        assert!(!is_shard_file("noshard"));
     }
 }
