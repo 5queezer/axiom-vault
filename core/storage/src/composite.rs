@@ -39,11 +39,13 @@ pub struct CompositeConfig {
 /// A storage provider that distributes operations across multiple backends.
 ///
 /// In mirror mode, writes fan out to all backends and reads return the first
-/// successful result. In erasure mode (future), chunks are sharded via
-/// Reed-Solomon coding.
+/// successful result. In erasure mode, chunks are sharded via Reed-Solomon
+/// coding across backends.
 pub struct CompositeStorageProvider {
     backends: Vec<Arc<dyn StorageProvider>>,
     config: CompositeConfig,
+    /// Cached Reed-Solomon encoder, created once for erasure mode.
+    reed_solomon: Option<ReedSolomon>,
 }
 
 impl CompositeStorageProvider {
@@ -84,7 +86,24 @@ impl CompositeStorageProvider {
             }
         }
 
-        Ok(Self { backends, config })
+        let reed_solomon = if let RaidMode::Erasure {
+            data_shards,
+            parity_shards,
+        } = config.mode
+        {
+            Some(
+                ReedSolomon::new(data_shards, parity_shards)
+                    .map_err(|e| Error::Storage(format!("Reed-Solomon init failed: {}", e)))?,
+            )
+        } else {
+            None
+        };
+
+        Ok(Self {
+            backends,
+            config,
+            reed_solomon,
+        })
     }
 
     /// Get the current RAID mode.
@@ -229,41 +248,37 @@ impl CompositeStorageProvider {
         Err(last_error.unwrap_or_else(|| Error::Storage(format!("All backends failed for {}", op))))
     }
 
-    /// Get the Reed-Solomon encoder for erasure mode.
-    fn reed_solomon(&self) -> Result<ReedSolomon> {
+    /// Get erasure mode parameters, or error if in mirror mode.
+    fn erasure_params(&self) -> Result<(usize, usize)> {
         match self.config.mode {
             RaidMode::Erasure {
                 data_shards,
                 parity_shards,
-            } => ReedSolomon::new(data_shards, parity_shards)
-                .map_err(|e| Error::Storage(format!("Reed-Solomon init failed: {}", e))),
-            RaidMode::Mirror => Err(Error::Storage(
-                "reed_solomon() called in mirror mode".to_string(),
-            )),
+            } => Ok((data_shards, parity_shards)),
+            RaidMode::Mirror => Err(Error::Storage("Not in erasure mode".to_string())),
         }
+    }
+
+    /// Get the cached Reed-Solomon encoder (only valid in erasure mode).
+    fn reed_solomon(&self) -> &ReedSolomon {
+        self.reed_solomon
+            .as_ref()
+            .expect("reed_solomon() called in mirror mode")
     }
 
     /// Encode data into N shards (k data + m parity) using Reed-Solomon.
     fn erasure_encode(&self, data: &[u8]) -> Result<Vec<Vec<u8>>> {
-        let RaidMode::Erasure {
-            data_shards,
-            parity_shards,
-        } = self.config.mode
-        else {
-            return Err(Error::Storage("Not in erasure mode".to_string()));
-        };
-
-        let rs = self.reed_solomon()?;
+        let (data_shards, parity_shards) = self.erasure_params()?;
         let total_shards = data_shards + parity_shards;
 
-        // Compute shard size: ceil(data_len / data_shards)
+        // Reed-Solomon requires equal-length shards; use ceil division for shard size.
+        // Empty data gets minimum 1-byte shards since RS cannot operate on zero-length shards.
         let shard_size = if data.is_empty() {
-            1 // Minimum shard size of 1 byte for empty data
+            1
         } else {
             (data.len() + data_shards - 1) / data_shards
         };
 
-        // Build data shards with padding
         let mut shards: Vec<Vec<u8>> = Vec::with_capacity(total_shards);
         for i in 0..data_shards {
             let start = i * shard_size;
@@ -273,18 +288,15 @@ impl CompositeStorageProvider {
             } else {
                 Vec::new()
             };
-            // Pad to shard_size
             shard.resize(shard_size, 0);
             shards.push(shard);
         }
-
-        // Add empty parity shards
         for _ in 0..parity_shards {
             shards.push(vec![0u8; shard_size]);
         }
 
-        // Encode parity
-        rs.encode(&mut shards)
+        self.reed_solomon()
+            .encode(&mut shards)
             .map_err(|e| Error::Storage(format!("Reed-Solomon encode failed: {}", e)))?;
 
         Ok(shards)
@@ -297,16 +309,12 @@ impl CompositeStorageProvider {
         mut shard_opts: Vec<Option<Vec<u8>>>,
         original_size: usize,
     ) -> Result<Vec<u8>> {
-        let rs = self.reed_solomon()?;
+        let (data_shards, _) = self.erasure_params()?;
 
-        rs.reconstruct(&mut shard_opts)
+        self.reed_solomon()
+            .reconstruct(&mut shard_opts)
             .map_err(|e| Error::Storage(format!("Reed-Solomon reconstruct failed: {}", e)))?;
 
-        let RaidMode::Erasure { data_shards, .. } = self.config.mode else {
-            return Err(Error::Storage("Not in erasure mode".to_string()));
-        };
-
-        // Reassemble original data from data shards
         let mut data = Vec::with_capacity(original_size);
         for shard in shard_opts.iter().take(data_shards) {
             if let Some(s) = shard {
@@ -315,6 +323,40 @@ impl CompositeStorageProvider {
         }
         data.truncate(original_size);
         Ok(data)
+    }
+
+    /// Run a `Metadata`-returning operation per shard (one future per backend),
+    /// collect results, and return the first success with the given `name`.
+    async fn erasure_per_shard(
+        &self,
+        op: &str,
+        name: String,
+        futures: Vec<impl Future<Output = Result<Metadata>>>,
+    ) -> Result<Metadata> {
+        let results = futures::future::join_all(futures).await;
+        let mut first_meta: Option<Metadata> = None;
+        let mut last_error: Option<Error> = None;
+        for (i, result) in results.into_iter().enumerate() {
+            match result {
+                Ok(meta) => {
+                    if first_meta.is_none() {
+                        first_meta = Some(Metadata {
+                            name: name.clone(),
+                            ..meta
+                        });
+                    }
+                }
+                Err(e) => {
+                    warn!(backend = self.backends[i].name(), shard = i, error = %e, operation = op, "Erasure shard operation failed");
+                    last_error = Some(e);
+                }
+            }
+        }
+        first_meta.ok_or_else(|| {
+            last_error.unwrap_or_else(|| {
+                Error::Storage(format!("All backends failed for erasure {}", op))
+            })
+        })
     }
 
     /// Build the shard path for a given file path and shard index.
@@ -332,8 +374,9 @@ impl CompositeStorageProvider {
         for (i, shard) in shards.into_iter().enumerate() {
             let backend = Arc::clone(&self.backends[i]);
             let shard_path = Self::shard_path(path, i)?;
-            // Prepend original size as 8-byte LE header so we can reconstruct correctly
-            let mut payload = (original_size as u64).to_le_bytes().to_vec();
+            // 8-byte LE size header so we can strip padding on reconstruct
+            let mut payload = Vec::with_capacity(8 + shard.len());
+            payload.extend_from_slice(&(original_size as u64).to_le_bytes());
             payload.extend_from_slice(&shard);
             futures.push(async move { backend.upload(&shard_path, payload).await });
         }
@@ -369,10 +412,7 @@ impl CompositeStorageProvider {
             }
         }
 
-        let RaidMode::Erasure { parity_shards, .. } = self.config.mode else {
-            unreachable!()
-        };
-
+        let (_, parity_shards) = self.erasure_params()?;
         if failure_count > parity_shards {
             return Err(last_error
                 .unwrap_or_else(|| Error::Storage("Too many shard write failures".to_string())));
@@ -547,9 +587,13 @@ impl StorageProvider for CompositeStorageProvider {
                 .await
             }
             RaidMode::Erasure { .. } => {
-                // Check if shard 0 exists on the first backend
+                // Try shard 0 across backends in order until one responds
                 let shard_path = Self::shard_path(path, 0)?;
-                self.backends[0].exists(&shard_path).await
+                self.try_first("exists", |backend| {
+                    let sp = shard_path.clone();
+                    async move { backend.exists(&sp).await }
+                })
+                .await
             }
         }
     }
@@ -635,13 +679,18 @@ impl StorageProvider for CompositeStorageProvider {
                 .await
             }
             RaidMode::Erasure { .. } => {
-                // Get metadata from shard 0 and reconstruct original file metadata
+                // Try shard 0 across backends for resilience; return metadata
+                // reflecting the logical file rather than the shard
                 let shard_path = Self::shard_path(path, 0)?;
-                let shard_meta = self.backends[0].metadata(&shard_path).await?;
-                // Subtract 8-byte header from shard size, multiply by data_shards for approximate size
-                // For accurate size we'd need to read the header, but metadata should be lightweight
+                let file_name = path.name().unwrap_or("/").to_string();
+                let shard_meta = self
+                    .try_first("metadata", |backend| {
+                        let sp = shard_path.clone();
+                        async move { backend.metadata(&sp).await }
+                    })
+                    .await?;
                 Ok(Metadata {
-                    name: path.name().unwrap_or("/").to_string(),
+                    name: file_name,
                     is_directory: false,
                     ..shard_meta
                 })
@@ -680,7 +729,6 @@ impl StorageProvider for CompositeStorageProvider {
                 .await
             }
             RaidMode::Erasure { .. } => {
-                // Rename each shard on its respective backend
                 let total = self.backends.len();
                 let mut futures = Vec::with_capacity(total);
                 for i in 0..total {
@@ -689,31 +737,8 @@ impl StorageProvider for CompositeStorageProvider {
                     let to_shard = Self::shard_path(to, i)?;
                     futures.push(async move { backend.rename(&from_shard, &to_shard).await });
                 }
-                let results = futures::future::join_all(futures).await;
-
-                let mut first_meta: Option<Metadata> = None;
-                let mut last_error: Option<Error> = None;
-                for (i, result) in results.into_iter().enumerate() {
-                    match result {
-                        Ok(meta) => {
-                            if first_meta.is_none() {
-                                first_meta = Some(Metadata {
-                                    name: to.name().unwrap_or("/").to_string(),
-                                    ..meta
-                                });
-                            }
-                        }
-                        Err(e) => {
-                            warn!(backend = self.backends[i].name(), shard = i, error = %e, "Erasure rename: shard rename failed");
-                            last_error = Some(e);
-                        }
-                    }
-                }
-                first_meta.ok_or_else(|| {
-                    last_error.unwrap_or_else(|| {
-                        Error::Storage("All backends failed for erasure rename".into())
-                    })
-                })
+                self.erasure_per_shard("rename", to.name().unwrap_or("/").to_string(), futures)
+                    .await
             }
         }
     }
@@ -731,7 +756,6 @@ impl StorageProvider for CompositeStorageProvider {
                 .await
             }
             RaidMode::Erasure { .. } => {
-                // Copy each shard on its respective backend
                 let total = self.backends.len();
                 let mut futures = Vec::with_capacity(total);
                 for i in 0..total {
@@ -740,31 +764,8 @@ impl StorageProvider for CompositeStorageProvider {
                     let to_shard = Self::shard_path(to, i)?;
                     futures.push(async move { backend.copy(&from_shard, &to_shard).await });
                 }
-                let results = futures::future::join_all(futures).await;
-
-                let mut first_meta: Option<Metadata> = None;
-                let mut last_error: Option<Error> = None;
-                for (i, result) in results.into_iter().enumerate() {
-                    match result {
-                        Ok(meta) => {
-                            if first_meta.is_none() {
-                                first_meta = Some(Metadata {
-                                    name: to.name().unwrap_or("/").to_string(),
-                                    ..meta
-                                });
-                            }
-                        }
-                        Err(e) => {
-                            warn!(backend = self.backends[i].name(), shard = i, error = %e, "Erasure copy: shard copy failed");
-                            last_error = Some(e);
-                        }
-                    }
-                }
-                first_meta.ok_or_else(|| {
-                    last_error.unwrap_or_else(|| {
-                        Error::Storage("All backends failed for erasure copy".into())
-                    })
-                })
+                self.erasure_per_shard("copy", to.name().unwrap_or("/").to_string(), futures)
+                    .await
             }
         }
     }
