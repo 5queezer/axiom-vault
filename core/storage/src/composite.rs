@@ -460,6 +460,9 @@ impl CompositeStorageProvider {
                 .unwrap_or_else(|| Error::Storage("All backends failed for erasure upload".into()))
         })?;
 
+        // TODO: Records all backends in shard map, not just those that succeeded.
+        // After partial write failure, some ShardLocations may reference stale data.
+
         // Record the shard mapping
         let (ds, ps) = self.erasure_params()?;
         let path_str = path.to_string_path();
@@ -469,6 +472,7 @@ impl CompositeStorageProvider {
             let mut map = self.shard_map.write().await;
             map.insert(&path_str, entry);
         }
+        self.save_shard_map().await?;
 
         Ok(meta)
     }
@@ -590,7 +594,10 @@ impl CompositeStorageProvider {
         if any_success {
             // Remove from shard map
             let path_str = path.to_string_path();
-            self.shard_map.write().await.remove(&path_str);
+            {
+                self.shard_map.write().await.remove(&path_str);
+            }
+            self.save_shard_map().await?;
             Ok(())
         } else {
             Err(last_error
@@ -629,10 +636,17 @@ impl StorageProvider for CompositeStorageProvider {
                     })
                     .await?;
 
+                // TODO: Records all backends in shard map, not just those that succeeded.
+                // After partial write failure, some ShardLocations may reference stale data.
+
                 // Record mirror entry in shard map
                 let path_str = path.to_string_path();
                 let entry = ShardMap::mirror_entry(&path_str, original_size, &self.backends);
-                self.shard_map.write().await.insert(&path_str, entry);
+                {
+                    let mut map = self.shard_map.write().await;
+                    map.insert(&path_str, entry);
+                }
+                self.save_shard_map().await?;
 
                 Ok(meta)
             }
@@ -702,7 +716,10 @@ impl StorageProvider for CompositeStorageProvider {
                 .await?;
 
                 // Remove from shard map
-                self.shard_map.write().await.remove(&path.to_string_path());
+                {
+                    self.shard_map.write().await.remove(&path.to_string_path());
+                }
+                self.save_shard_map().await?;
 
                 Ok(())
             }
@@ -848,7 +865,10 @@ impl StorageProvider for CompositeStorageProvider {
                 // Update shard map
                 let from_str = from.to_string_path();
                 let to_str = to.to_string_path();
-                self.shard_map.write().await.rename(&from_str, &to_str);
+                {
+                    self.shard_map.write().await.rename(&from_str, &to_str);
+                }
+                self.save_shard_map().await?;
 
                 Ok(meta)
             }
@@ -868,7 +888,10 @@ impl StorageProvider for CompositeStorageProvider {
                 // Update shard map
                 let from_str = from.to_string_path();
                 let to_str = to.to_string_path();
-                self.shard_map.write().await.rename(&from_str, &to_str);
+                {
+                    self.shard_map.write().await.rename(&from_str, &to_str);
+                }
+                self.save_shard_map().await?;
 
                 Ok(meta)
             }
@@ -902,6 +925,7 @@ impl StorageProvider for CompositeStorageProvider {
                         map.insert(&to_str, new_entry);
                     }
                 }
+                self.save_shard_map().await?;
 
                 Ok(meta)
             }
@@ -934,6 +958,7 @@ impl StorageProvider for CompositeStorageProvider {
                         map.insert(&to_str, new_entry);
                     }
                 }
+                self.save_shard_map().await?;
 
                 Ok(meta)
             }

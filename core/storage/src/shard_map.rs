@@ -73,6 +73,11 @@ pub struct ShardMap {
     pub entries: HashMap<String, ChunkEntry>,
     /// Timestamp of the last modification to this shard map.
     pub updated_at: DateTime<Utc>,
+    /// Tombstones for deleted entries, keyed by path with deletion timestamp.
+    ///
+    /// Prevents deleted entries from being resurrected when merging with stale backends.
+    #[serde(default)]
+    pub tombstones: HashMap<String, DateTime<Utc>>,
 }
 
 impl ShardMap {
@@ -82,6 +87,7 @@ impl ShardMap {
             version: 0,
             entries: HashMap::new(),
             updated_at: Utc::now(),
+            tombstones: HashMap::new(),
         }
     }
 
@@ -96,12 +102,15 @@ impl ShardMap {
 
     /// Remove a chunk entry. Returns the removed entry if it existed.
     ///
-    /// Bumps the version counter and updates the timestamp.
+    /// Bumps the version counter, updates the timestamp, and records a tombstone
+    /// to prevent the entry from being resurrected when merging with stale backends.
     pub fn remove(&mut self, path: &str) -> Option<ChunkEntry> {
         let removed = self.entries.remove(path);
         if removed.is_some() {
             self.version += 1;
-            self.updated_at = Utc::now();
+            let now = Utc::now();
+            self.updated_at = now;
+            self.tombstones.insert(path.to_string(), now);
         }
         removed
     }
@@ -148,9 +157,27 @@ impl ShardMap {
     /// Merge another shard map into this one.
     ///
     /// For each chunk entry, the entry with the newer `updated_at` timestamp wins.
-    /// The resulting version is the maximum of both versions plus one.
+    /// Tombstones are merged (newest per path wins) and suppress resurrection of
+    /// deleted entries. The resulting version is the maximum of both versions plus one.
     pub fn merge(&mut self, other: &ShardMap) {
+        // Merge tombstones: keep the newest deletion timestamp per path.
+        for (path, &other_ts) in &other.tombstones {
+            let self_ts = self.tombstones.get(path).copied();
+            if self_ts.map_or(true, |t| other_ts > t) {
+                self.tombstones.insert(path.clone(), other_ts);
+            }
+        }
+
+        // Merge entries: tombstones take precedence over older entries.
         for (path, other_entry) in &other.entries {
+            // If self has a tombstone newer than this entry, skip it (keep deleted).
+            if let Some(&tomb_ts) = self.tombstones.get(path) {
+                if tomb_ts >= other_entry.updated_at {
+                    continue;
+                }
+                // other_entry is newer than the tombstone — resurrect and clear tombstone.
+                self.tombstones.remove(path);
+            }
             match self.entries.get(path) {
                 Some(existing) if existing.updated_at >= other_entry.updated_at => {
                     // Keep existing (same or newer)
@@ -160,6 +187,16 @@ impl ShardMap {
                 }
             }
         }
+
+        // Remove self's entries that other has a newer tombstone for.
+        for (path, &other_ts) in &other.tombstones {
+            if let Some(existing) = self.entries.get(path) {
+                if other_ts >= existing.updated_at {
+                    self.entries.remove(path);
+                }
+            }
+        }
+
         self.version = self.version.max(other.version) + 1;
         self.updated_at = Utc::now();
     }
@@ -177,8 +214,16 @@ impl ShardMap {
 
         let data = self.to_json()?;
 
-        // Write to temp path first
+        // Write to temp path first (overwrite any leftover tmp from a previous attempt)
+        if backend.exists(&tmp_path).await.unwrap_or(false) {
+            let _ = backend.delete(&tmp_path).await;
+        }
         backend.upload(&tmp_path, data).await?;
+
+        // Remove existing final file so rename can succeed atomically
+        if backend.exists(&final_path).await.unwrap_or(false) {
+            let _ = backend.delete(&final_path).await;
+        }
 
         // Atomic rename
         backend.rename(&tmp_path, &final_path).await?;
@@ -186,20 +231,38 @@ impl ShardMap {
         Ok(())
     }
 
-    /// Save the shard map redundantly to all provided backends.
+    /// Save the shard map redundantly to all provided backends concurrently.
     ///
     /// Tolerates partial failures — warns but continues if some backends fail.
     /// Returns error only if ALL backends fail.
     pub async fn save_to_all(&self, backends: &[Arc<dyn StorageProvider>]) -> Result<()> {
+        let futures: Vec<_> = backends
+            .iter()
+            .enumerate()
+            .map(|(i, backend)| {
+                let backend = Arc::clone(backend);
+                let map = self.clone();
+                async move {
+                    (
+                        i,
+                        backend.name().to_string(),
+                        map.save_to_backend(backend.as_ref()).await,
+                    )
+                }
+            })
+            .collect();
+
+        let results = futures::future::join_all(futures).await;
+
         let mut any_success = false;
         let mut last_error: Option<Error> = None;
 
-        for (i, backend) in backends.iter().enumerate() {
-            match self.save_to_backend(backend.as_ref()).await {
+        for (i, backend_name, result) in results {
+            match result {
                 Ok(()) => any_success = true,
                 Err(e) => {
                     warn!(
-                        backend = backend.name(),
+                        backend = backend_name,
                         index = i,
                         error = %e,
                         "Failed to save shard map to backend"
@@ -239,9 +302,12 @@ impl ShardMap {
     /// maximum found across all backends plus one.
     ///
     /// Returns a new empty shard map if no backend has a stored map.
+    /// Returns an error if every backend returned an error (as opposed to NotFound).
     pub async fn load_from_all(backends: &[Arc<dyn StorageProvider>]) -> Result<ShardMap> {
         let mut merged = ShardMap::new();
         let mut found_any = false;
+        let mut had_error = false;
+        let mut last_error: Option<Error> = None;
 
         for (i, backend) in backends.iter().enumerate() {
             match Self::load_from_backend(backend.as_ref()).await {
@@ -257,14 +323,22 @@ impl ShardMap {
                     // No shard map on this backend yet — skip
                 }
                 Err(e) => {
+                    had_error = true;
                     warn!(
                         backend = backend.name(),
                         index = i,
                         error = %e,
                         "Failed to load shard map from backend, skipping"
                     );
+                    last_error = Some(e);
                 }
             }
+        }
+
+        if !found_any && had_error {
+            return Err(last_error.unwrap_or_else(|| {
+                Error::Storage("Failed to load shard map from any backend".into())
+            }));
         }
 
         Ok(merged)
@@ -753,5 +827,88 @@ mod tests {
         let map = ShardMap::default();
         assert_eq!(map.version, 0);
         assert!(map.entries.is_empty());
+    }
+
+    // -- Tombstone / error-handling tests ------------------------------------
+
+    #[tokio::test]
+    async fn test_load_from_all_errors_when_all_fail() {
+        // Store corrupted JSON at the shard map path so from_json fails.
+        let backend: Arc<dyn StorageProvider> = Arc::new(MemoryProvider::new());
+        let path = VaultPath::parse(SHARD_MAP_PATH).unwrap();
+        let dir_path = VaultPath::parse(SHARD_MAP_DIR).unwrap();
+        backend.create_dir(&dir_path).await.unwrap();
+        backend
+            .upload(&path, b"not valid json at all".to_vec())
+            .await
+            .unwrap();
+
+        let backends: Vec<Arc<dyn StorageProvider>> = vec![backend];
+        let result = ShardMap::load_from_all(&backends).await;
+        assert!(
+            result.is_err(),
+            "Expected error when all backends return corrupt data"
+        );
+    }
+
+    #[test]
+    fn test_tombstone_prevents_resurrection() {
+        // Map A removes entry X — tombstone is recorded.
+        // Map B still has X (older timestamp). Merge B into A → X stays deleted.
+        let backends = make_backends(2);
+        let mut map_a = ShardMap::new();
+        map_a.insert("/x", ShardMap::mirror_entry("/x", 100, &backends));
+        map_a.remove("/x");
+        assert!(map_a.get("/x").is_none());
+        assert!(map_a.tombstones.contains_key("/x"));
+
+        let mut map_b = ShardMap::new();
+        // Give map_b's entry an older timestamp than A's tombstone.
+        let old_ts = Utc::now() - chrono::Duration::seconds(60);
+        let old_entry = ChunkEntry {
+            original_size: 100,
+            erasure_params: None,
+            shards: HashMap::new(),
+            updated_at: old_ts,
+        };
+        map_b.entries.insert("/x".to_string(), old_entry);
+
+        map_a.merge(&map_b);
+
+        assert!(
+            map_a.get("/x").is_none(),
+            "Deleted entry should not be resurrected by stale backend"
+        );
+    }
+
+    #[test]
+    fn test_tombstone_cleared_by_newer_entry() {
+        // Map A tombstones X at T1.
+        // Map B has X updated at T2 > T1.
+        // Merge B into A → X is present (newer entry wins over tombstone).
+        let backends = make_backends(2);
+        let mut map_a = ShardMap::new();
+        map_a.insert("/x", ShardMap::mirror_entry("/x", 100, &backends));
+        map_a.remove("/x");
+        assert!(map_a.tombstones.contains_key("/x"));
+
+        let mut map_b = ShardMap::new();
+        // Give map_b's entry a timestamp *after* A's tombstone.
+        let future_ts = Utc::now() + chrono::Duration::seconds(60);
+        let new_entry = ChunkEntry {
+            original_size: 200,
+            erasure_params: None,
+            shards: HashMap::new(),
+            updated_at: future_ts,
+        };
+        map_b.entries.insert("/x".to_string(), new_entry);
+
+        map_a.merge(&map_b);
+
+        assert!(
+            map_a.get("/x").is_some(),
+            "Entry newer than tombstone should be resurrected"
+        );
+        assert_eq!(map_a.get("/x").unwrap().original_size, 200);
     }
 }
