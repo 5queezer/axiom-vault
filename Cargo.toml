@@ -82,6 +82,7 @@ bip39 = "2.1"
 
 # Erasure coding
 reed-solomon-erasure = "6.0"
+crc32fast = "1.4"
 
 # Filesystem paths
 dirs = "6.0"
