@@ -111,9 +111,12 @@ impl ShardMap {
     /// Moves the entry from `from` to `to`, updating shard backend paths.
     pub fn rename(&mut self, from: &str, to: &str) -> Option<ChunkEntry> {
         if let Some(mut entry) = self.entries.remove(from) {
-            // Update backend_path in each shard to reflect the new path
+            // Update backend_path in each shard: replace only the leading
+            // `from` prefix to avoid accidental substring replacements.
             for shard in entry.shards.values_mut() {
-                shard.backend_path = shard.backend_path.replace(from, to);
+                if let Some(suffix) = shard.backend_path.strip_prefix(from) {
+                    shard.backend_path = format!("{}{}", to, suffix);
+                }
             }
             entry.updated_at = Utc::now();
             self.version += 1;

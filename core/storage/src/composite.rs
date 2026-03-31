@@ -880,12 +880,30 @@ impl StorageProvider for CompositeStorageProvider {
             RaidMode::Mirror => {
                 let from = from.clone();
                 let to = to.clone();
-                self.fan_out("copy", |backend| {
-                    let from = from.clone();
-                    let to = to.clone();
-                    async move { backend.copy(&from, &to).await }
-                })
-                .await
+                let meta = self
+                    .fan_out("copy", |backend| {
+                        let from = from.clone();
+                        let to = to.clone();
+                        async move { backend.copy(&from, &to).await }
+                    })
+                    .await?;
+
+                // Copy shard map entry for the new path
+                let from_str = from.to_string_path();
+                let to_str = to.to_string_path();
+                {
+                    let mut map = self.shard_map.write().await;
+                    if let Some(entry) = map.get(&from_str).cloned() {
+                        let mut new_entry = entry;
+                        for shard in new_entry.shards.values_mut() {
+                            shard.backend_path = to_str.clone();
+                        }
+                        new_entry.updated_at = chrono::Utc::now();
+                        map.insert(&to_str, new_entry);
+                    }
+                }
+
+                Ok(meta)
             }
             RaidMode::Erasure { .. } => {
                 let total = self.backends.len();
@@ -896,8 +914,28 @@ impl StorageProvider for CompositeStorageProvider {
                     let to_shard = Self::shard_path(to, i)?;
                     futures.push(async move { backend.copy(&from_shard, &to_shard).await });
                 }
-                self.erasure_per_shard("copy", to.name().unwrap_or("/").to_string(), futures)
-                    .await
+                let meta = self
+                    .erasure_per_shard("copy", to.name().unwrap_or("/").to_string(), futures)
+                    .await?;
+
+                // Copy shard map entry for the new path
+                let from_str = from.to_string_path();
+                let to_str = to.to_string_path();
+                {
+                    let mut map = self.shard_map.write().await;
+                    if let Some(entry) = map.get(&from_str).cloned() {
+                        let mut new_entry = entry;
+                        for shard in new_entry.shards.values_mut() {
+                            if let Some(suffix) = shard.backend_path.strip_prefix(&from_str) {
+                                shard.backend_path = format!("{}{}", to_str, suffix);
+                            }
+                        }
+                        new_entry.updated_at = chrono::Utc::now();
+                        map.insert(&to_str, new_entry);
+                    }
+                }
+
+                Ok(meta)
             }
         }
     }
