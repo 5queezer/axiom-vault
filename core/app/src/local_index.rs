@@ -31,7 +31,7 @@ pub struct IndexEntry {
     pub path: String,
     pub encrypted_name: String,
     pub is_directory: bool,
-    pub size: Option<u64>,
+    pub size: Option<i64>,
     pub modified_at: i64,
     pub etag: Option<String>,
 }
@@ -95,7 +95,7 @@ impl LocalIndex {
 
     /// Insert or update an entry in the index.
     pub fn upsert_entry(&self, entry: &IndexEntry) -> AppResult<()> {
-        debug!("Upserting entry: {}", entry.path);
+        debug!("Upserting index entry");
         let conn = self.conn.lock().map_err(|_| lock_err())?;
         conn.execute(
             r#"
@@ -107,7 +107,7 @@ impl LocalIndex {
                 entry.path,
                 entry.encrypted_name,
                 entry.is_directory as i32,
-                entry.size.map(|s| s as i64),
+                entry.size,
                 entry.modified_at,
                 entry.etag,
             ],
@@ -133,7 +133,7 @@ impl LocalIndex {
                 path: row.get(0)?,
                 encrypted_name: row.get(1)?,
                 is_directory: row.get::<_, i32>(2)? != 0,
-                size: row.get::<_, Option<i64>>(3)?.map(|v| v as u64),
+                size: row.get::<_, Option<i64>>(3)?,
                 modified_at: row.get(4)?,
                 etag: row.get(5)?,
             })
@@ -173,7 +173,7 @@ impl LocalIndex {
                     path,
                     encrypted_name: row.get(1)?,
                     is_directory: row.get::<_, i32>(2)? != 0,
-                    size: row.get::<_, Option<i64>>(3)?.map(|v| v as u64),
+                    size: row.get::<_, Option<i64>>(3)?,
                     modified_at: row.get(4)?,
                     etag: row.get(5)?,
                 }))
@@ -193,7 +193,7 @@ impl LocalIndex {
 
     /// Delete an entry by path.
     pub fn delete_entry(&self, path: &str) -> AppResult<()> {
-        debug!("Deleting entry: {}", path);
+        debug!("Deleting index entry");
         let conn = self.conn.lock().map_err(|_| lock_err())?;
         conn.execute("DELETE FROM vault_entries WHERE path = ?1", params![path])
             .map_err(sqlite_err)?;
@@ -202,7 +202,7 @@ impl LocalIndex {
 
     /// Delete all entries under a path (recursively).
     pub fn delete_tree(&self, path: &str) -> AppResult<()> {
-        debug!("Deleting tree: {}", path);
+        debug!("Deleting index subtree");
         let conn = self.conn.lock().map_err(|_| lock_err())?;
         conn.execute(
             "DELETE FROM vault_entries WHERE path = ?1 OR path LIKE ?2",

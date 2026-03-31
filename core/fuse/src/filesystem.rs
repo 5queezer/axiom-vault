@@ -21,12 +21,12 @@ use axiomvault_common::VaultPath;
 use axiomvault_vault::{VaultOperations, VaultSession};
 
 /// Helper function to create FileAttr with common defaults.
-fn create_file_attr(ino: u64, is_dir: bool, size: u64) -> FileAttr {
+fn create_file_attr(ino: INodeNo, is_dir: bool, size: u64) -> FileAttr {
     let now = SystemTime::now();
     FileAttr {
-        ino: INodeNo(ino),
+        ino,
         size,
-        blocks: (size + 511) / 512,
+        blocks: size.div_ceil(512),
         atime: now,
         mtime: now,
         ctime: now,
@@ -48,14 +48,14 @@ fn create_file_attr(ino: u64, is_dir: bool, size: u64) -> FileAttr {
 
 /// Inode number mapping to vault paths.
 struct InodeMap {
-    path_to_inode: HashMap<String, u64>,
-    inode_to_path: HashMap<u64, String>,
+    path_to_inode: HashMap<String, INodeNo>,
+    inode_to_path: HashMap<INodeNo, String>,
     next_inode: u64,
 }
 
 impl InodeMap {
     /// Return the inode for a path, if it has been assigned.
-    fn get_inode_for_path(&self, path: &str) -> Option<u64> {
+    fn get_inode_for_path(&self, path: &str) -> Option<INodeNo> {
         self.path_to_inode.get(path).copied()
     }
 }
@@ -68,16 +68,16 @@ impl InodeMap {
             next_inode: 2, // 1 is reserved for root
         };
         // Root inode
-        map.path_to_inode.insert("/".to_string(), 1);
-        map.inode_to_path.insert(1, "/".to_string());
+        map.path_to_inode.insert("/".to_string(), INodeNo::ROOT);
+        map.inode_to_path.insert(INodeNo::ROOT, "/".to_string());
         map
     }
 
-    fn get_or_create_inode(&mut self, path: &str) -> u64 {
+    fn get_or_create_inode(&mut self, path: &str) -> INodeNo {
         if let Some(&ino) = self.path_to_inode.get(path) {
             ino
         } else {
-            let ino = self.next_inode;
+            let ino = INodeNo(self.next_inode);
             self.next_inode += 1;
             self.path_to_inode.insert(path.to_string(), ino);
             self.inode_to_path.insert(ino, path.to_string());
@@ -85,7 +85,7 @@ impl InodeMap {
         }
     }
 
-    fn get_path(&self, inode: u64) -> Option<&str> {
+    fn get_path(&self, inode: INodeNo) -> Option<&str> {
         self.inode_to_path.get(&inode).map(|s| s.as_str())
     }
 
@@ -111,7 +111,7 @@ pub struct VaultFilesystem {
     session: Arc<VaultSession>,
     runtime: Handle,
     inodes: Arc<RwLock<InodeMap>>,
-    open_files: Arc<RwLock<HashMap<u64, OpenFile>>>,
+    open_files: Arc<RwLock<HashMap<FileHandle, OpenFile>>>,
     next_fh: Arc<RwLock<u64>>,
     ttl: Duration,
 }
@@ -147,7 +147,6 @@ impl VaultFilesystem {
 
 impl Filesystem for VaultFilesystem {
     fn lookup(&self, _req: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEntry) {
-        let parent: u64 = parent.into();
         let name_str = match name.to_str() {
             Some(s) => s,
             None => {
@@ -156,7 +155,7 @@ impl Filesystem for VaultFilesystem {
             }
         };
 
-        debug!("lookup: parent={}, name={}", parent, name_str);
+        debug!("lookup: parent={}", parent);
 
         let session = self.session.clone();
         let inodes = self.inodes.clone();
@@ -217,7 +216,6 @@ impl Filesystem for VaultFilesystem {
     }
 
     fn getattr(&self, _req: &Request, ino: INodeNo, _fh: Option<FileHandle>, reply: ReplyAttr) {
-        let ino: u64 = ino.into();
         debug!("getattr: ino={}", ino);
 
         let session = self.session.clone();
@@ -238,7 +236,7 @@ impl Filesystem for VaultFilesystem {
 
             if path_str == "/" {
                 // Root directory
-                let attr = create_file_attr(1, true, 0);
+                let attr = create_file_attr(INodeNo::ROOT, true, 0);
                 reply.attr(&ttl, &attr);
                 return;
             }
@@ -280,8 +278,7 @@ impl Filesystem for VaultFilesystem {
         offset: u64,
         mut reply: ReplyDirectory,
     ) {
-        let ino: u64 = ino.into();
-        debug!("readdir: ino={}, offset={}", ino, offset);
+        debug!("readdir: ino={}, offset={}", u64::from(ino), offset);
 
         let session = self.session.clone();
         let inodes = self.inodes.clone();
@@ -327,7 +324,7 @@ impl Filesystem for VaultFilesystem {
 
             // . and .. entries
             if i == 0 {
-                if reply.add(INodeNo(ino), 1, FileType::Directory, ".") {
+                if reply.add(ino, 1, FileType::Directory, ".") {
                     reply.ok();
                     return;
                 }
@@ -339,7 +336,7 @@ impl Filesystem for VaultFilesystem {
                     let map = inodes.read().await;
                     if path_str == "/" {
                         // Root's parent is itself (POSIX convention).
-                        1u64
+                        INodeNo::ROOT
                     } else {
                         // Walk up one component to find the parent path string.
                         let parent_path = path_str
@@ -353,10 +350,10 @@ impl Filesystem for VaultFilesystem {
                                 }
                             })
                             .unwrap_or("/");
-                        map.get_inode_for_path(parent_path).unwrap_or(1)
+                        map.get_inode_for_path(parent_path).unwrap_or(INodeNo::ROOT)
                     }
                 };
-                if reply.add(INodeNo(parent_ino), 2, FileType::Directory, "..") {
+                if reply.add(parent_ino, 2, FileType::Directory, "..") {
                     reply.ok();
                     return;
                 }
@@ -382,7 +379,7 @@ impl Filesystem for VaultFilesystem {
                     FileType::RegularFile
                 };
 
-                if reply.add(INodeNo(child_ino), (idx + 3) as u64, file_type, name) {
+                if reply.add(child_ino, (idx + 3) as u64, file_type, name) {
                     break;
                 }
             }
@@ -392,7 +389,6 @@ impl Filesystem for VaultFilesystem {
     }
 
     fn open(&self, _req: &Request, ino: INodeNo, flags: OpenFlags, reply: ReplyOpen) {
-        let ino: u64 = ino.into();
         debug!("open: ino={}, flags={:?}", ino, flags);
 
         let session = self.session.clone();
@@ -440,7 +436,7 @@ impl Filesystem for VaultFilesystem {
 
             let fh = {
                 let mut fh_guard = next_fh.write().await;
-                let handle = *fh_guard;
+                let handle = FileHandle(*fh_guard);
                 *fh_guard += 1;
                 handle
             };
@@ -457,7 +453,7 @@ impl Filesystem for VaultFilesystem {
                 );
             }
 
-            reply.opened(FileHandle(fh), FopenFlags::empty());
+            reply.opened(fh, FopenFlags::empty());
         });
     }
 
@@ -469,11 +465,15 @@ impl Filesystem for VaultFilesystem {
         offset: u64,
         size: u32,
         _flags: OpenFlags,
-        _lock: Option<LockOwner>,
+        _lock_owner: Option<LockOwner>,
         reply: ReplyData,
     ) {
-        let fh: u64 = fh.into();
-        debug!("read: fh={}, offset={}, size={}", fh, offset, size);
+        debug!(
+            "read: fh={}, offset={}, size={}",
+            u64::from(fh),
+            offset,
+            size
+        );
 
         let open_files = self.open_files.clone();
 
@@ -505,11 +505,15 @@ impl Filesystem for VaultFilesystem {
         data: &[u8],
         _write_flags: WriteFlags,
         _flags: OpenFlags,
-        _lock: Option<LockOwner>,
+        _lock_owner: Option<LockOwner>,
         reply: ReplyWrite,
     ) {
-        let fh: u64 = fh.into();
-        debug!("write: fh={}, offset={}, size={}", fh, offset, data.len());
+        debug!(
+            "write: fh={}, offset={}, size={}",
+            u64::from(fh),
+            offset,
+            data.len()
+        );
 
         let open_files = self.open_files.clone();
 
@@ -547,8 +551,7 @@ impl Filesystem for VaultFilesystem {
         _flush: bool,
         reply: ReplyEmpty,
     ) {
-        let fh: u64 = fh.into();
-        debug!("release: fh={}", fh);
+        debug!("release: fh={}", u64::from(fh));
 
         let session = self.session.clone();
         let open_files = self.open_files.clone();
@@ -585,7 +588,7 @@ impl Filesystem for VaultFilesystem {
                         return;
                     }
 
-                    info!("File saved: {}", file.path);
+                    info!("File saved");
                 }
             }
 
@@ -603,7 +606,6 @@ impl Filesystem for VaultFilesystem {
         _flags: i32,
         reply: ReplyCreate,
     ) {
-        let parent: u64 = parent.into();
         let name_str = match name.to_str() {
             Some(s) => s,
             None => {
@@ -612,7 +614,7 @@ impl Filesystem for VaultFilesystem {
             }
         };
 
-        debug!("create: parent={}, name={}", parent, name_str);
+        debug!("create: parent={}", u64::from(parent));
 
         let session = self.session.clone();
         let inodes = self.inodes.clone();
@@ -668,7 +670,7 @@ impl Filesystem for VaultFilesystem {
 
             let fh = {
                 let mut fh_guard = next_fh.write().await;
-                let handle = *fh_guard;
+                let handle = FileHandle(*fh_guard);
                 *fh_guard += 1;
                 handle
             };
@@ -687,13 +689,7 @@ impl Filesystem for VaultFilesystem {
 
             let attr = create_file_attr(ino, false, 0);
 
-            reply.created(
-                &ttl,
-                &attr,
-                Generation(0),
-                FileHandle(fh),
-                FopenFlags::empty(),
-            );
+            reply.created(&ttl, &attr, Generation(0), fh, FopenFlags::empty());
         });
     }
 
@@ -706,7 +702,6 @@ impl Filesystem for VaultFilesystem {
         _umask: u32,
         reply: ReplyEntry,
     ) {
-        let parent: u64 = parent.into();
         let name_str = match name.to_str() {
             Some(s) => s,
             None => {
@@ -715,7 +710,7 @@ impl Filesystem for VaultFilesystem {
             }
         };
 
-        debug!("mkdir: parent={}, name={}", parent, name_str);
+        debug!("mkdir: parent={}", u64::from(parent));
 
         let session = self.session.clone();
         let inodes = self.inodes.clone();
@@ -773,7 +768,6 @@ impl Filesystem for VaultFilesystem {
     }
 
     fn unlink(&self, _req: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEmpty) {
-        let parent: u64 = parent.into();
         let name_str = match name.to_str() {
             Some(s) => s,
             None => {
@@ -782,7 +776,7 @@ impl Filesystem for VaultFilesystem {
             }
         };
 
-        debug!("unlink: parent={}, name={}", parent, name_str);
+        debug!("unlink: parent={}", parent);
 
         let session = self.session.clone();
         let inodes = self.inodes.clone();
@@ -837,7 +831,6 @@ impl Filesystem for VaultFilesystem {
     }
 
     fn rmdir(&self, _req: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEmpty) {
-        let parent: u64 = parent.into();
         let name_str = match name.to_str() {
             Some(s) => s,
             None => {
@@ -846,7 +839,7 @@ impl Filesystem for VaultFilesystem {
             }
         };
 
-        debug!("rmdir: parent={}, name={}", parent, name_str);
+        debug!("rmdir: parent={}", parent);
 
         let session = self.session.clone();
         let inodes = self.inodes.clone();
@@ -911,7 +904,7 @@ impl Filesystem for VaultFilesystem {
         _atime: Option<TimeOrNow>,
         _mtime: Option<TimeOrNow>,
         _ctime: Option<SystemTime>,
-        _fh: Option<FileHandle>,
+        fh: Option<FileHandle>,
         _crtime: Option<SystemTime>,
         _chgtime: Option<SystemTime>,
         _bkuptime: Option<SystemTime>,
@@ -922,6 +915,6 @@ impl Filesystem for VaultFilesystem {
 
         // For now, just return current attributes
         // TODO: Implement truncation if size is set
-        self.getattr(_req, ino, None, reply);
+        self.getattr(_req, ino, fh, reply);
     }
 }

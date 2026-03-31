@@ -310,7 +310,7 @@ impl AppService {
                 path: path.to_string(),
                 encrypted_name: String::new(),
                 is_directory: false,
-                size: Some(content.len() as u64),
+                size: Some(i64::try_from(content.len()).unwrap_or(i64::MAX)),
                 modified_at: now_timestamp(),
                 etag: None,
             });
@@ -351,7 +351,7 @@ impl AppService {
                 path: path.to_string(),
                 encrypted_name: String::new(),
                 is_directory: false,
-                size: Some(content.len() as u64),
+                size: Some(i64::try_from(content.len()).unwrap_or(i64::MAX)),
                 modified_at: now_timestamp(),
                 etag: None,
             });

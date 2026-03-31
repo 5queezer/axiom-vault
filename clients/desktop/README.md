@@ -1,6 +1,8 @@
 # AxiomVault Desktop Client
 
-Desktop client for AxiomVault with FUSE filesystem mounting support.
+Legacy Tauri desktop client for AxiomVault with FUSE filesystem mounting support.
+
+> Status: retained as a migration path while the Linux native GTK4/libadwaita client reaches feature parity. New Linux desktop work should target `clients/linux`.
 
 ## Features
 
@@ -8,11 +10,11 @@ Desktop client for AxiomVault with FUSE filesystem mounting support.
 - FUSE filesystem mounting (Linux and macOS)
 - SQLite-based local index for fast metadata caching
 - Google Drive integration (via storage provider)
-- Modern GUI built with Tauri
+- Modern GUI built with Tauri (legacy path)
 
 ## System Requirements
 
-### Linux
+### Linux (legacy Tauri client)
 
 ```bash
 # Debian/Ubuntu

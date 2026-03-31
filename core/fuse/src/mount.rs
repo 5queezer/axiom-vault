@@ -121,32 +121,30 @@ pub fn mount(
     let fs = VaultFilesystem::new(session, runtime);
 
     // Configure mount options
-    let mut mount_options = vec![
+    let mut config = Config::default();
+
+    config.mount_options = vec![
         MountOption::FSName("axiomvault".to_string()),
         MountOption::Subtype("axiomvault".to_string()),
     ];
 
-    let acl = if options.allow_other {
+    config.acl = if options.allow_other {
         SessionACL::All
     } else {
         SessionACL::Owner
     };
 
     if options.auto_unmount {
-        mount_options.push(MountOption::AutoUnmount);
+        config.mount_options.push(MountOption::AutoUnmount);
     }
 
     if options.read_only {
-        mount_options.push(MountOption::RO);
+        config.mount_options.push(MountOption::RO);
     }
 
     if options.default_permissions {
-        mount_options.push(MountOption::DefaultPermissions);
+        config.mount_options.push(MountOption::DefaultPermissions);
     }
-
-    let mut config = Config::default();
-    config.mount_options = mount_options;
-    config.acl = acl;
 
     // Spawn the FUSE request-servicing thread via fuser::spawn_mount2.
     // The BackgroundSession returned here:

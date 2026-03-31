@@ -1,5 +1,6 @@
 # Build artifacts
 /target/
+/target.root-owned/
 **/*.rs.bk
 *.pdb
 

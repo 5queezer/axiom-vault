@@ -129,6 +129,8 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.axiomvault.macos
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_STYLE: Manual
         INFOPLIST_FILE: AxiomVault-macOS/Resources/Info.plist
         SWIFT_OBJC_BRIDGING_HEADER: Shared/Sources/Core/AxiomVault-Bridging-Header.h
         LD_RUNPATH_SEARCH_PATHS:
@@ -210,6 +212,8 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.axiomvault.macos.fileprovider
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_STYLE: Manual
         INFOPLIST_FILE: FileProvider/Resources/Info.plist
         SWIFT_OBJC_BRIDGING_HEADER: Shared/Sources/Core/AxiomVault-Bridging-Header.h
         LD_RUNPATH_SEARCH_PATHS:

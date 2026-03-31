@@ -210,16 +210,18 @@ impl VaultConfig {
     /// - `Err(_)` if verification failed for other reasons
     pub fn verify_password(&self, password: &[u8]) -> Result<Option<MasterKey>> {
         use axiomvault_crypto::{decrypt, derive_key};
+        use zeroize::Zeroize;
 
         let password_kek = derive_key(password, &self.salt, &self.kdf_params)?;
 
         // First, verify the password by decrypting the verification constant.
         match decrypt(password_kek.as_bytes(), &self.key_verification) {
-            Ok(plaintext) => {
+            Ok(mut plaintext) => {
                 let expected = b"AXIOMVAULT_KEY_VERIFICATION_V1";
-                if plaintext.len() != expected.len()
-                    || !bool::from(plaintext.as_slice().ct_eq(expected))
-                {
+                let valid = plaintext.len() == expected.len()
+                    && bool::from(plaintext.as_slice().ct_eq(expected));
+                plaintext.zeroize();
+                if !valid {
                     return Ok(None);
                 }
             }
@@ -315,16 +317,22 @@ impl VaultConfig {
             Error::Vault("No encrypted recovery key stored in this vault".to_string())
         })?;
 
-        let plaintext = decrypt(master_key.as_bytes(), encrypted)?;
+        use zeroize::{Zeroize, Zeroizing};
+
+        let mut plaintext = decrypt(master_key.as_bytes(), encrypted)?;
         if plaintext.len() != 32 {
             return Err(Error::Crypto(format!(
                 "Decrypted recovery key has wrong length: expected 32, got {}",
                 plaintext.len()
             )));
         }
-        let mut bytes = [0u8; 32];
+        let mut bytes = Zeroizing::new([0u8; 32]);
         bytes.copy_from_slice(&plaintext);
-        Ok(RecoveryKey::from_bytes(bytes))
+
+        // Best-effort: wipe plaintext buffer containing key material.
+        plaintext.zeroize();
+
+        Ok(RecoveryKey::from_bytes(*bytes))
     }
 
     /// Migrate a legacy v1.0 vault to the v1.1 key-wrapping format.

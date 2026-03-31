@@ -7,12 +7,15 @@ BINDIR = $(DESTDIR)$(PREFIX)/bin
 DATADIR = $(DESTDIR)$(PREFIX)/share
 DESKTOPDIR = $(DATADIR)/applications
 ICONDIR = $(DATADIR)/icons/hicolor
+CARGO ?= $(HOME)/.cargo/bin/cargo
 
 # Application info
 APP_NAME = axiomvault-desktop
 APP_BINARY = target/release/$(APP_NAME)
 APP_DESKTOP = clients/desktop/axiomvault.desktop
 APP_ICON = clients/desktop/axiomvault.svg
+LINUX_APP_NAME = axiomvault-gtk
+LINUX_APP_BINARY = target/release/$(LINUX_APP_NAME)
 
 .PHONY: all desktop desktop-release check-desktop-deps cli core install install-desktop uninstall uninstall-desktop clean-install help
 .PHONY: linux linux-release check-linux-deps install-linux uninstall-linux
@@ -36,9 +39,11 @@ help:
 	@echo "  make core            - Build core libraries"
 	@echo ""
 	@echo "Install Targets:"
+	@echo "  make install         - Build and install Linux GTK4 client"
 	@echo "  make install-linux   - Build and install Linux GTK4 client"
-	@echo "  make install         - Build and install Tauri desktop app (legacy)"
-	@echo "  make uninstall       - Remove installed desktop app"
+	@echo "  make install-desktop - Build and install Tauri desktop app (legacy)"
+	@echo "  make uninstall       - Remove installed Linux GTK4 client"
+	@echo "  make uninstall-desktop - Remove installed Tauri desktop app (legacy)"
 	@echo ""
 	@echo "Advanced Install:"
 	@echo "  PREFIX=/opt/axiom make install  - Install to /opt/axiom"
@@ -79,39 +84,43 @@ endif
 
 # Native Linux GTK4 client
 linux: check-linux-deps
-	cargo build --package axiomvault-linux
+	$(CARGO) build --package axiomvault-linux
 
 linux-release: check-linux-deps
-	cargo build --package axiomvault-linux --release
+	$(CARGO) build --package axiomvault-linux --release
 
 # Tauri desktop client (legacy)
 desktop: check-desktop-deps
-	cargo build --package axiomvault-desktop $(FUSE_FEATURE)
+	$(CARGO) build --package axiomvault-desktop $(FUSE_FEATURE)
 
 desktop-release: check-desktop-deps
-	cargo build --package axiomvault-desktop --release $(FUSE_FEATURE)
+	$(CARGO) build --package axiomvault-desktop --release $(FUSE_FEATURE)
 
 # CLI tool
 cli:
-	cargo build --package axiomvault-cli
+	$(CARGO) build --package axiomvault-cli
 
 # Core libraries
 core:
-	cargo build --workspace --exclude axiomvault-desktop --exclude axiomvault-cli
+	$(CARGO) build --workspace --exclude axiomvault-desktop --exclude axiomvault-cli
 
 # Install targets
-install: desktop-release install-desktop
+install: install-linux
 	@echo ""
 	@echo "✅ AxiomVault installed successfully!"
-	@echo "Launch with: axiomvault-desktop"
-	@echo "Or find in your application menu"
+	@echo "Launch with: axiomvault"
+	@echo "Or run the Linux GTK binary directly: axiomvault-gtk"
 
-install-desktop: $(APP_BINARY) | create-launcher create-desktop-entry create-icon update-cache
-	@echo "Installing binary to $(BINDIR)..."
+install-desktop: desktop-release install-desktop-legacy
+	@echo ""
+	@echo "✅ Legacy Tauri desktop client installed"
+	@echo "Launch with: axiomvault-desktop"
+
+install-desktop-legacy: $(APP_BINARY) | create-launcher create-desktop-entry create-icon update-cache
+	@echo "Installing legacy Tauri binary to $(BINDIR)..."
 	@mkdir -p $(BINDIR)
 	@install -m 755 $(APP_BINARY) $(BINDIR)/$(APP_NAME)
-	@ln -sf $(BINDIR)/$(APP_NAME) $(BINDIR)/axiomvault 2>/dev/null || true
-	@echo "✓ Binary installed"
+	@echo "✓ Legacy Tauri binary installed"
 
 create-launcher:
 	@echo "Installing launcher wrapper..."
@@ -146,17 +155,16 @@ update-cache:
 		echo "✓ Desktop database updated"; \
 	fi
 
-uninstall: uninstall-desktop
+uninstall: uninstall-linux
 	@echo "✅ AxiomVault uninstalled"
 
 uninstall-desktop:
-	@echo "Removing installed files..."
+	@echo "Removing installed legacy Tauri desktop files..."
 	@rm -f $(BINDIR)/$(APP_NAME)
-	@rm -f $(BINDIR)/axiomvault
 	@rm -f $(BINDIR)/axiomvault-launcher.sh
 	@rm -f $(DESKTOPDIR)/axiomvault.desktop
 	@rm -f $(ICONDIR)/scalable/apps/axiomvault.svg
-	@echo "✓ Files removed"
+	@echo "✓ Legacy Tauri files removed"
 	@echo "Updating application cache..."
 	@if command -v kbuildsycoca5 >/dev/null 2>&1; then \
 		kbuildsycoca5 2>/dev/null || true; \
@@ -172,12 +180,15 @@ clean-install: uninstall
 install-linux: linux-release
 	@echo "Installing Linux GTK4 client..."
 	@mkdir -p $(BINDIR)
-	@install -m 755 target/release/axiomvault-gtk $(BINDIR)/axiomvault-gtk
-	@echo "✓ Binary installed to $(BINDIR)/axiomvault-gtk"
+	@install -m 755 $(LINUX_APP_BINARY) $(BINDIR)/$(LINUX_APP_NAME)
+	@ln -sf $(BINDIR)/$(LINUX_APP_NAME) $(BINDIR)/axiomvault
+	@echo "✓ Binary installed to $(BINDIR)/$(LINUX_APP_NAME)"
+	@echo "✓ Symlinked $(BINDIR)/axiomvault -> $(LINUX_APP_NAME)"
 
 uninstall-linux:
 	@echo "Removing Linux GTK4 client..."
-	@rm -f $(BINDIR)/axiomvault-gtk
+	@rm -f $(BINDIR)/$(LINUX_APP_NAME)
+	@rm -f $(BINDIR)/axiomvault
 	@echo "✓ Removed"
 
 # Check native Linux GTK4 dependencies

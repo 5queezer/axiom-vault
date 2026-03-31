@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use zeroize::{Zeroize, ZeroizeOnDrop};
+use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 /// Length of encryption keys in bytes (256-bit).
 pub const KEY_LENGTH: usize = 32;
@@ -55,9 +55,9 @@ impl MasterKey {
         hasher.update(b"filekey");
 
         let result = hasher.finalize();
-        let mut derived = [0u8; KEY_LENGTH];
-        derived.copy_from_slice(&result);
-        FileKey::from_bytes(derived)
+        let mut derived = Zeroizing::new([0u8; KEY_LENGTH]);
+        derived[..].copy_from_slice(&result);
+        FileKey::from_bytes(*derived)
     }
 
     /// Derive a directory key from this master key.
@@ -71,9 +71,9 @@ impl MasterKey {
         hasher.update(b"dirkey");
 
         let result = hasher.finalize();
-        let mut derived = [0u8; KEY_LENGTH];
-        derived.copy_from_slice(&result);
-        DirectoryKey::from_bytes(derived)
+        let mut derived = Zeroizing::new([0u8; KEY_LENGTH]);
+        derived[..].copy_from_slice(&result);
+        DirectoryKey::from_bytes(*derived)
     }
 }
 

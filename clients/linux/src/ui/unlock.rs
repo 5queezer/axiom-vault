@@ -4,7 +4,6 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use adw::prelude::*;
-use gtk::glib;
 
 use axiomvault_app::OpenVaultParams;
 

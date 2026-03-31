@@ -8,17 +8,9 @@ use gtk::glib;
 
 use std::sync::Arc;
 
-use axiomvault_app::{AppService, DirectoryEntryDto};
+use axiomvault_app::DirectoryEntryDto;
 
 use crate::app::AppState;
-
-/// Column indices for the file list model.
-mod col {
-    pub const NAME: u32 = 0;
-    pub const IS_DIR: u32 = 1;
-    pub const SIZE: u32 = 2;
-    pub const PATH: u32 = 3;
-}
 
 /// The vault browser view. Shows directory listings and supports navigation.
 pub struct BrowserView {
@@ -113,9 +105,10 @@ async fn load_directory(
     }
 
     let path_owned = path.to_string();
-    let st = state.borrow();
-    let service = Arc::clone(&st.service);
-    let rt = Arc::clone(&st.runtime);
+    let (service, rt) = {
+        let st = state.borrow();
+        (Arc::clone(&st.service), Arc::clone(&st.runtime))
+    };
 
     let result = rt
         .spawn(async move { service.list_directory(&path_owned).await })
@@ -137,7 +130,7 @@ async fn load_directory(
         }
         Ok(Err(e)) => {
             let error_row = adw::ActionRow::builder()
-                .title(&format!("Error: {}", e))
+                .title(format!("Error: {}", e))
                 .css_classes(["error"])
                 .build();
             list_box.append(&error_row);
@@ -153,7 +146,7 @@ fn entry_row(entry: &DirectoryEntryDto) -> adw::ActionRow {
     let subtitle = if entry.is_directory {
         "Folder".to_string()
     } else {
-        entry.size.map(|s| format_size(s)).unwrap_or_default()
+        entry.size.map(format_size).unwrap_or_default()
     };
 
     adw::ActionRow::builder()

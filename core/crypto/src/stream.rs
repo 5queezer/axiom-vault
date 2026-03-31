@@ -5,6 +5,8 @@
 
 use std::io::{Read, Write};
 
+use zeroize::Zeroize;
+
 use crate::aead::{decrypt, encrypt, NONCE_SIZE, TAG_SIZE};
 use crate::keys::KEY_LENGTH;
 use axiomvault_common::{Error, Result};
@@ -181,20 +183,23 @@ impl<'a> DecryptingStream<'a> {
                 return Err(Error::Crypto("Unexpected end of stream".to_string()));
             }
 
-            let decrypted = decrypt(self.key, &encrypted_buffer[..bytes_read])?;
+            let mut decrypted = decrypt(self.key, &encrypted_buffer[..bytes_read])?;
 
             // Verify chunk index
             if decrypted.len() < 8 {
+                decrypted.zeroize();
                 return Err(Error::Crypto("Invalid chunk format".to_string()));
             }
             let chunk_index = u64::from_le_bytes(decrypted[..8].try_into().unwrap());
             if chunk_index != i {
+                decrypted.zeroize();
                 return Err(Error::Crypto("Chunk order mismatch".to_string()));
             }
 
             let plaintext = &decrypted[8..];
             writer.write_all(plaintext)?;
             total_bytes += plaintext.len() as u64;
+            decrypted.zeroize();
         }
 
         Ok(total_bytes)

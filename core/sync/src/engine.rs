@@ -223,7 +223,7 @@ impl<P: StorageProvider + ?Sized + 'static> SyncEngine<P> {
             let path = match VaultPath::parse(&path_str) {
                 Ok(p) => p,
                 Err(e) => {
-                    warn!("Invalid path {}: {}", path_str, e);
+                    warn!("Invalid path: {}", e);
                     files_failed += 1;
                     continue;
                 }
@@ -238,7 +238,7 @@ impl<P: StorageProvider + ?Sized + 'static> SyncEngine<P> {
                     }
                 }
                 Err(e) => {
-                    error!("Failed to sync {}: {}", path_str, e);
+                    error!("Failed to sync path: {}", e);
                     files_failed += 1;
                 }
             }
@@ -288,10 +288,7 @@ impl<P: StorageProvider + ?Sized + 'static> SyncEngine<P> {
                 continue;
             };
 
-            debug!(
-                "Processing staged change: {} for {}",
-                change_id, change.vault_path
-            );
+            debug!("Processing staged change: {}", change_id);
 
             match change.change_type {
                 ChangeType::Create | ChangeType::Update => {
@@ -312,7 +309,7 @@ impl<P: StorageProvider + ?Sized + 'static> SyncEngine<P> {
                             }
                         }
                         Err(e) => {
-                            error!("Failed to upload {}: {}", change.vault_path, e);
+                            error!("Failed to upload staged file: {}", e);
                             failed += 1;
                         }
                     }
@@ -325,7 +322,7 @@ impl<P: StorageProvider + ?Sized + 'static> SyncEngine<P> {
                         }
                     }
                     Err(e) => {
-                        error!("Failed to delete {}: {}", change.vault_path, e);
+                        error!("Failed to delete remote file: {}", e);
                         failed += 1;
                     }
                 },
@@ -544,7 +541,7 @@ impl<P: StorageProvider + ?Sized + 'static> SyncEngine<P> {
                     synced += 1;
                 }
                 Err(e) => {
-                    error!("Failed to download {}: {}", path_str, e);
+                    error!("Failed to download remote file: {}", e);
                     failed += 1;
                 }
             }

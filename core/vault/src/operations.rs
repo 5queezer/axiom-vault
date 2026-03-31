@@ -53,7 +53,7 @@ impl<'a> VaultOperations<'a> {
             .name()
             .ok_or_else(|| Error::InvalidInput("Invalid file path".to_string()))?;
 
-        debug!(path = %path, "Creating encrypted file");
+        debug!("Creating encrypted file");
 
         let encrypted_name = self.encrypt_name(name)?;
 
@@ -74,7 +74,7 @@ impl<'a> VaultOperations<'a> {
 
         self.session.save_tree().await?;
 
-        info!(path = %path, size = content.len(), "File created");
+        info!(size = content.len(), "File created");
         Ok(())
     }
 
@@ -92,7 +92,7 @@ impl<'a> VaultOperations<'a> {
     /// - Decryption failure
     /// - Storage failure
     pub async fn read_file(&self, path: &VaultPath) -> Result<Vec<u8>> {
-        debug!(path = %path, "Reading encrypted file");
+        debug!("Reading encrypted file");
 
         let encrypted_name = {
             let tree = self.session.tree().read().await;
@@ -110,7 +110,7 @@ impl<'a> VaultOperations<'a> {
         let file_key = master_key.derive_file_key(encrypted_name.as_bytes());
         let content = decrypt(file_key.as_bytes(), &encrypted_content)?;
 
-        debug!(path = %path, size = content.len(), "File read");
+        debug!(size = content.len(), "File read");
         Ok(content)
     }
 
@@ -129,7 +129,7 @@ impl<'a> VaultOperations<'a> {
     /// - Encryption failure
     /// - Storage failure
     pub async fn update_file(&self, path: &VaultPath, content: &[u8]) -> Result<()> {
-        debug!(path = %path, "Updating encrypted file");
+        debug!("Updating encrypted file");
 
         let encrypted_name = {
             let tree = self.session.tree().read().await;
@@ -159,7 +159,7 @@ impl<'a> VaultOperations<'a> {
 
         self.session.save_tree().await?;
 
-        info!(path = %path, size = content.len(), "File updated");
+        info!(size = content.len(), "File updated");
         Ok(())
     }
 
@@ -176,7 +176,7 @@ impl<'a> VaultOperations<'a> {
     /// - File not found
     /// - Storage failure
     pub async fn delete_file(&self, path: &VaultPath) -> Result<()> {
-        debug!(path = %path, "Deleting file");
+        debug!("Deleting file");
 
         let encrypted_name = {
             let mut tree = self.session.tree().write().await;
@@ -194,7 +194,7 @@ impl<'a> VaultOperations<'a> {
 
         self.session.save_tree().await?;
 
-        info!(path = %path, "File deleted");
+        info!("File deleted");
         Ok(())
     }
 
@@ -216,7 +216,7 @@ impl<'a> VaultOperations<'a> {
             .name()
             .ok_or_else(|| Error::InvalidInput("Invalid directory path".to_string()))?;
 
-        debug!(path = %path, "Creating directory");
+        debug!("Creating directory");
 
         let encrypted_name = self.encrypt_name(name)?;
 
@@ -227,7 +227,7 @@ impl<'a> VaultOperations<'a> {
 
         self.session.save_tree().await?;
 
-        info!(path = %path, "Directory created");
+        info!("Directory created");
         Ok(())
     }
 
@@ -267,7 +267,7 @@ impl<'a> VaultOperations<'a> {
     /// - Not a directory
     /// - Directory not empty
     pub async fn delete_directory(&self, path: &VaultPath) -> Result<()> {
-        debug!(path = %path, "Deleting directory");
+        debug!("Deleting directory");
 
         {
             let mut tree = self.session.tree().write().await;
@@ -286,7 +286,7 @@ impl<'a> VaultOperations<'a> {
 
         self.session.save_tree().await?;
 
-        info!(path = %path, "Directory deleted");
+        info!("Directory deleted");
         Ok(())
     }
 

@@ -20,7 +20,8 @@ struct ContentView: View {
                     )
                 }
             }
-            .navigationTitle(vaultManager.isVaultOpen ? "Vault" : "AxiomVault")
+            .navigationTitle(vaultManager.isVaultOpen ? "Vault" : "")
+            .navigationBarTitleDisplayMode(vaultManager.isVaultOpen ? .large : .inline)
             .toolbar {
                 if vaultManager.isVaultOpen {
                     ToolbarItem(placement: .navigationBarTrailing) {
@@ -64,6 +65,10 @@ struct VaultSelectionView: View {
     var body: some View {
         VStack(spacing: 24) {
             Spacer()
+
+            Text("AxiomVault")
+                .font(.largeTitle)
+                .fontWeight(.bold)
 
             Image(systemName: "lock.shield.fill")
                 .font(.system(size: 72))

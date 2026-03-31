@@ -15,6 +15,7 @@ axiomvault-vault = { path = "../../core/vault" }
 axiomvault-sync = { path = "../../core/sync" }
 
 clap.workspace = true
+clap_complete.workspace = true
 tokio.workspace = true
 serde_json.workspace = true
 tracing.workspace = true

@@ -70,7 +70,7 @@ struct SyncSettingsView: View {
             ForEach(SyncProvider.allCases) { provider in
                 HStack {
                     Image(systemName: provider.iconName)
-                        .foregroundStyle(provider == .none ? .secondary : .blue)
+                        .foregroundStyle(provider == .none ? Color.secondary : Color.blue)
                         .frame(width: 24)
 
                     VStack(alignment: .leading, spacing: 2) {

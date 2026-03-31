@@ -207,7 +207,7 @@ impl MigrationRegistry {
         if config_path.exists() {
             std::fs::copy(&config_path, &backup_path)
                 .map_err(|e| Error::Vault(format!("Failed to backup config: {}", e)))?;
-            info!("Config backed up to {}", backup_path.display());
+            info!("Config backed up successfully");
         }
 
         Ok(())

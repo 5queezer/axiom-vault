@@ -126,15 +126,17 @@ extension AppleSignIn: ASAuthorizationControllerDelegate {
     ) {
         let mappedError: AppleSignInError
         if let authError = error as? ASAuthorizationError {
-            switch authError.code {
-            case .canceled: mappedError = .userCancelled
-            case .failed: mappedError = .authorizationFailed(authError.localizedDescription)
-            case .invalidResponse: mappedError = .invalidCredential
-            case .notHandled: mappedError = .authorizationFailed("Request not handled")
-            case .unknown: mappedError = .unknown
-            case .notInteractive: mappedError = .authorizationFailed("Not interactive")
-            case .matchedExcludedCredential: mappedError = .authorizationFailed("Matched excluded credential")
-            @unknown default: mappedError = .unknown
+            let code = authError.code
+            if code == .canceled {
+                mappedError = .userCancelled
+            } else if code == .invalidResponse {
+                mappedError = .invalidCredential
+            } else if code == .failed {
+                mappedError = .authorizationFailed(authError.localizedDescription)
+            } else if code == .notHandled {
+                mappedError = .authorizationFailed("Request not handled")
+            } else {
+                mappedError = .unknown
             }
         } else {
             mappedError = .authorizationFailed(error.localizedDescription)
