@@ -1339,9 +1339,9 @@ mod tests {
         provider.delete(&path).await.unwrap();
 
         // All shard files should be gone
-        for i in 0..3 {
+        for (i, backend) in backends.iter().enumerate() {
             let shard_path = VaultPath::parse(&format!("/del.bin.shard{}", i)).unwrap();
-            assert!(!backends[i].exists(&shard_path).await.unwrap());
+            assert!(!backend.exists(&shard_path).await.unwrap());
         }
     }
 
