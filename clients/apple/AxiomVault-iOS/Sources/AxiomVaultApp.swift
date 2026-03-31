@@ -7,12 +7,28 @@ struct AxiomVaultApp: App {
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
+        #if DEBUG
+        if CommandLine.arguments.contains("--reset-state") {
+            Self.resetTestState()
+        }
+        #endif
+
         do {
             try VaultCore.shared.initialize()
         } catch {
             print("Failed to initialize VaultCore: \(error)")
         }
     }
+
+    #if DEBUG
+    /// Remove test vaults so each UI test run starts from a clean state.
+    private static func resetTestState() {
+        let fm = FileManager.default
+        guard let docs = fm.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
+        let vaultsDir = docs.appendingPathComponent("Vaults")
+        try? fm.removeItem(at: vaultsDir)
+    }
+    #endif
 
     var body: some Scene {
         WindowGroup {

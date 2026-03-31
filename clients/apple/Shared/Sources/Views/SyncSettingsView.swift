@@ -88,6 +88,7 @@ struct SyncSettingsView: View {
                     }
                 }
                 .contentShape(Rectangle())
+                .accessibilityIdentifier("syncProvider_\(provider.rawValue)")
                 .onTapGesture {
                     syncManager.syncProvider = provider
                 }
