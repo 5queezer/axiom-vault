@@ -11,6 +11,8 @@ use std::future::Future;
 use std::sync::Arc;
 use tracing::warn;
 
+use std::collections::HashMap;
+
 use crate::provider::{ByteStream, Metadata, StorageProvider};
 use axiomvault_common::{Error, Result, VaultPath};
 
@@ -302,11 +304,58 @@ impl StorageProvider for CompositeStorageProvider {
     async fn list(&self, path: &VaultPath) -> Result<Vec<Metadata>> {
         self.require_mirror("list")?;
         let path = path.clone();
-        self.try_first("list", |backend| {
-            let path = path.clone();
-            async move { backend.list(&path).await }
-        })
-        .await
+
+        // Query all backends concurrently and merge results.
+        let futures: Vec<_> = self
+            .backends
+            .iter()
+            .map(|b| {
+                let p = path.clone();
+                let backend = Arc::clone(b);
+                async move { backend.list(&p).await }
+            })
+            .collect();
+        let results = futures::future::join_all(futures).await;
+
+        let mut merged: HashMap<String, Metadata> = HashMap::new();
+        let mut any_success = false;
+        let mut last_error: Option<Error> = None;
+
+        for (i, result) in results.into_iter().enumerate() {
+            match result {
+                Ok(entries) => {
+                    any_success = true;
+                    for entry in entries {
+                        merged
+                            .entry(entry.name.clone())
+                            .and_modify(|existing| {
+                                if entry.modified > existing.modified {
+                                    *existing = entry.clone();
+                                }
+                            })
+                            .or_insert(entry);
+                    }
+                }
+                Err(e) => {
+                    warn!(
+                        backend = self.backends[i].name(),
+                        operation = "list",
+                        error = %e,
+                        "Backend list failed, continuing with other backends"
+                    );
+                    last_error = Some(e);
+                }
+            }
+        }
+
+        if any_success {
+            let mut entries: Vec<Metadata> = merged.into_values().collect();
+            entries.sort_by(|a, b| a.name.cmp(&b.name));
+            Ok(entries)
+        } else {
+            Err(last_error
+                .unwrap_or_else(|| Error::Storage("All backends failed for list".to_string())))
+        }
     }
 
     async fn metadata(&self, path: &VaultPath) -> Result<Metadata> {
@@ -704,5 +753,83 @@ mod tests {
 
         provider.delete(&path).await.unwrap();
         assert!(!healthy.exists(&path).await.unwrap());
+    }
+
+    // -- Mirror list merge tests ----------------------------------------------
+
+    #[tokio::test]
+    async fn test_mirror_list_returns_union_of_diverged_backends() {
+        let backend_a = Arc::new(MemoryProvider::new());
+        let backend_b = Arc::new(MemoryProvider::new());
+
+        let dir = VaultPath::parse("/data").unwrap();
+        backend_a.create_dir(&dir).await.unwrap();
+        backend_b.create_dir(&dir).await.unwrap();
+
+        // backend_a has file1 only
+        let file1 = VaultPath::parse("/data/file1.txt").unwrap();
+        backend_a.upload(&file1, vec![1]).await.unwrap();
+
+        // backend_b has file1 and file2
+        backend_b.upload(&file1, vec![1]).await.unwrap();
+        let file2 = VaultPath::parse("/data/file2.txt").unwrap();
+        backend_b.upload(&file2, vec![2]).await.unwrap();
+
+        let backends: Vec<Arc<dyn StorageProvider>> = vec![backend_a, backend_b];
+        let provider = CompositeStorageProvider::new(backends, mirror_config()).unwrap();
+
+        let listing = provider.list(&dir).await.unwrap();
+        let names: Vec<&str> = listing.iter().map(|m| m.name.as_str()).collect();
+        assert_eq!(names, vec!["file1.txt", "file2.txt"]);
+    }
+
+    #[tokio::test]
+    async fn test_mirror_list_deduplicates_by_name_keeping_newest() {
+        let backend_a = Arc::new(MemoryProvider::new());
+        let backend_b = Arc::new(MemoryProvider::new());
+
+        let dir = VaultPath::parse("/data").unwrap();
+        backend_a.create_dir(&dir).await.unwrap();
+        backend_b.create_dir(&dir).await.unwrap();
+
+        // Upload to backend_a first (older timestamp)
+        let file = VaultPath::parse("/data/file.txt").unwrap();
+        backend_a.upload(&file, vec![1]).await.unwrap();
+        let meta_a = backend_a.metadata(&file).await.unwrap();
+
+        // Small delay to ensure different timestamps
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+
+        // Upload to backend_b second (newer timestamp)
+        backend_b.upload(&file, vec![1, 2]).await.unwrap();
+        let meta_b = backend_b.metadata(&file).await.unwrap();
+
+        // Verify backend_b's timestamp is newer
+        assert!(meta_b.modified >= meta_a.modified);
+
+        let backends: Vec<Arc<dyn StorageProvider>> = vec![backend_a, backend_b];
+        let provider = CompositeStorageProvider::new(backends, mirror_config()).unwrap();
+
+        let listing = provider.list(&dir).await.unwrap();
+        assert_eq!(listing.len(), 1);
+        assert_eq!(listing[0].name, "file.txt");
+        // Should keep backend_b's entry (newer), which has size 2
+        assert_eq!(listing[0].size, Some(2));
+    }
+
+    #[tokio::test]
+    async fn test_mirror_list_succeeds_with_one_failing_backend() {
+        let healthy = Arc::new(MemoryProvider::new());
+        let dir = VaultPath::parse("/data").unwrap();
+        healthy.create_dir(&dir).await.unwrap();
+        let file = VaultPath::parse("/data/file.txt").unwrap();
+        healthy.upload(&file, vec![1]).await.unwrap();
+
+        let backends: Vec<Arc<dyn StorageProvider>> = vec![Arc::new(FailingProvider), healthy];
+        let provider = CompositeStorageProvider::new(backends, mirror_config()).unwrap();
+
+        let listing = provider.list(&dir).await.unwrap();
+        assert_eq!(listing.len(), 1);
+        assert_eq!(listing[0].name, "file.txt");
     }
 }
