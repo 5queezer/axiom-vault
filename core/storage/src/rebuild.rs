@@ -185,7 +185,7 @@ impl<'a> RaidRebuilder<'a> {
         let target_index = self.target_index;
 
         // Build a list of (path, source_backend_index) for chunks that are missing on target.
-        let mut work_items: Vec<(String, usize)> = Vec::new();
+        let mut work_items: Vec<(String, Vec<usize>)> = Vec::new();
         let mut skipped = 0usize;
 
         for (path, _) in &entries {
@@ -195,8 +195,8 @@ impl<'a> RaidRebuilder<'a> {
                     skipped += 1;
                 }
                 _ => {
-                    // Probe all candidate backends until one responds.
-                    let mut found_source = false;
+                    // Collect all candidate backends that have this chunk.
+                    let mut candidates = Vec::new();
                     if let Some(entry) = shard_map.get(path) {
                         for shard in entry.shards.values() {
                             if shard.shard_index == target_index {
@@ -206,19 +206,19 @@ impl<'a> RaidRebuilder<'a> {
                             if src < backends.len()
                                 && backends[src].exists(&vault_path).await.unwrap_or(false)
                             {
-                                work_items.push((path.clone(), src));
-                                found_source = true;
-                                break;
+                                candidates.push(src);
                             }
                         }
                     }
-                    if !found_source {
+                    if candidates.is_empty() {
                         let mut p = progress.write().await;
                         p.failed += 1;
                         warn!(
                             path = path.as_str(),
                             "Mirror rebuild: no source backend available"
                         );
+                    } else {
+                        work_items.push((path.clone(), candidates));
                     }
                 }
             }
@@ -232,11 +232,11 @@ impl<'a> RaidRebuilder<'a> {
         // Process work items with bounded concurrency.
         let composite = self.composite;
         let results: Vec<bool> = stream::iter(work_items)
-            .map(|(path, source_index)| {
+            .map(|(path, candidates)| {
                 let progress = Arc::clone(&progress);
                 async move {
                     let result =
-                        Self::copy_chunk(composite.backends(), source_index, target_index, &path)
+                        Self::copy_chunk(composite.backends(), &candidates, target_index, &path)
                             .await;
                     let mut p = progress.write().await;
                     match result {
@@ -259,15 +259,18 @@ impl<'a> RaidRebuilder<'a> {
         let rebuilt = results.iter().filter(|&&ok| ok).count();
 
         // Update shard map to include target backend in rebuilt entries.
-        // Track whether the map was modified (handles stale maps from prior interrupted runs).
-        let mut map = self.composite.shard_map_ref().write().await;
-        let paths_to_check: Vec<String> = map
-            .entries
-            .iter()
-            .filter(|(_, e)| !e.shards.contains_key(&target_index))
-            .map(|(p, _)| p.clone())
-            .collect();
-        let mut map_dirty = false;
+        // Separate lock acquisition from backend I/O to avoid holding the lock during async calls.
+        let paths_to_check: Vec<String> = {
+            let map = self.composite.shard_map_ref().read().await;
+            map.entries
+                .iter()
+                .filter(|(_, e)| !e.shards.contains_key(&target_index))
+                .map(|(p, _)| p.clone())
+                .collect()
+        };
+
+        // Probe without holding the shard map lock.
+        let mut confirmed_paths: Vec<String> = Vec::new();
         for path in paths_to_check {
             let vault_path = match VaultPath::parse(&path) {
                 Ok(vp) => vp,
@@ -278,27 +281,36 @@ impl<'a> RaidRebuilder<'a> {
                 .await
                 .unwrap_or(false)
             {
-                if let Some(entry) = map.entries.get_mut(&path) {
-                    let backend_id = format!("{}:{}", backends[target_index].name(), target_index);
-                    entry.shards.insert(
-                        target_index,
-                        crate::shard_map::ShardLocation {
+                confirmed_paths.push(path);
+            }
+        }
+
+        // Acquire write lock only to mutate the map.
+        let mut map_dirty = false;
+        if !confirmed_paths.is_empty() {
+            let mut map = self.composite.shard_map_ref().write().await;
+            for path in &confirmed_paths {
+                if let Some(entry) = map.entries.get_mut(path) {
+                    use std::collections::hash_map::Entry;
+                    if let Entry::Vacant(slot) = entry.shards.entry(target_index) {
+                        let backend_id =
+                            format!("{}:{}", backends[target_index].name(), target_index);
+                        slot.insert(crate::shard_map::ShardLocation {
                             shard_index: target_index,
                             backend_id,
                             backend_path: path.clone(),
                             is_parity: false,
-                        },
-                    );
-                    entry.updated_at = chrono::Utc::now();
-                    map_dirty = true;
+                        });
+                        entry.updated_at = chrono::Utc::now();
+                        map_dirty = true;
+                    }
                 }
             }
+            if map_dirty {
+                map.version += 1;
+                map.updated_at = chrono::Utc::now();
+            }
         }
-        if map_dirty {
-            map.version += 1;
-            map.updated_at = chrono::Utc::now();
-        }
-        drop(map);
 
         if map_dirty {
             self.composite.save_shard_map().await?;
@@ -313,17 +325,31 @@ impl<'a> RaidRebuilder<'a> {
         })
     }
 
-    /// Copy a single chunk from source to target backend.
+    /// Copy a single chunk from one of the source backends to the target.
+    /// Tries each candidate in order; returns Ok on first successful copy.
     async fn copy_chunk(
         backends: &[Arc<dyn StorageProvider>],
-        source_index: usize,
+        source_indexes: &[usize],
         target_index: usize,
         path: &str,
     ) -> Result<()> {
         let vault_path = VaultPath::parse(path)?;
-        let data = backends[source_index].download(&vault_path).await?;
-        backends[target_index].upload(&vault_path, data).await?;
-        Ok(())
+        let mut last_err = None;
+        for &src in source_indexes {
+            match backends[src].download(&vault_path).await {
+                Ok(data) => {
+                    backends[target_index].upload(&vault_path, data).await?;
+                    return Ok(());
+                }
+                Err(e) => {
+                    warn!(source = src, path, error = %e, "Mirror rebuild: download failed, trying next candidate");
+                    last_err = Some(e);
+                }
+            }
+        }
+        Err(last_err.unwrap_or_else(|| {
+            Error::Storage(format!("Mirror rebuild: no readable source for '{}'", path))
+        }))
     }
 
     /// Erasure-mode rebuild: reconstruct missing shards from available peers.
@@ -417,15 +443,18 @@ impl<'a> RaidRebuilder<'a> {
         let rebuilt = results.iter().filter(|&&ok| ok).count();
 
         // Update shard map entries for rebuilt shards.
-        // Track whether the map was modified (handles stale maps from prior interrupted runs).
-        let mut map = self.composite.shard_map_ref().write().await;
-        let paths_to_check: Vec<String> = map
-            .entries
-            .iter()
-            .filter(|(_, e)| !e.shards.contains_key(&target_index))
-            .map(|(p, _)| p.clone())
-            .collect();
-        let mut map_dirty = false;
+        // Separate lock acquisition from backend I/O to avoid holding the lock during async calls.
+        let paths_to_check: Vec<String> = {
+            let map = self.composite.shard_map_ref().read().await;
+            map.entries
+                .iter()
+                .filter(|(_, e)| !e.shards.contains_key(&target_index))
+                .map(|(p, _)| p.clone())
+                .collect()
+        };
+
+        // Probe without holding the shard map lock.
+        let mut confirmed: Vec<(String, String)> = Vec::new(); // (path, shard_path_str)
         for path in paths_to_check {
             let vault_path = match VaultPath::parse(&path) {
                 Ok(vp) => vp,
@@ -440,27 +469,36 @@ impl<'a> RaidRebuilder<'a> {
                 .await
                 .unwrap_or(false)
             {
-                if let Some(entry) = map.entries.get_mut(&path) {
-                    let backend_id = format!("{}:{}", backends[target_index].name(), target_index);
-                    entry.shards.insert(
-                        target_index,
-                        crate::shard_map::ShardLocation {
-                            shard_index: target_index,
-                            backend_id,
-                            backend_path: format!("{}.shard{}", path, target_index),
-                            is_parity: target_index >= data_shards,
-                        },
-                    );
-                    entry.updated_at = chrono::Utc::now();
-                    map_dirty = true;
-                }
+                confirmed.push((path, shard_path.to_string_path()));
             }
         }
-        if map_dirty {
-            map.version += 1;
-            map.updated_at = chrono::Utc::now();
+
+        // Acquire write lock only to mutate the map.
+        let mut map_dirty = false;
+        if !confirmed.is_empty() {
+            let mut map = self.composite.shard_map_ref().write().await;
+            for (path, shard_path_str) in &confirmed {
+                if let Some(entry) = map.entries.get_mut(path) {
+                    use std::collections::hash_map::Entry;
+                    if let Entry::Vacant(slot) = entry.shards.entry(target_index) {
+                        let backend_id =
+                            format!("{}:{}", backends[target_index].name(), target_index);
+                        slot.insert(crate::shard_map::ShardLocation {
+                            shard_index: target_index,
+                            backend_id,
+                            backend_path: shard_path_str.clone(),
+                            is_parity: target_index >= data_shards,
+                        });
+                        entry.updated_at = chrono::Utc::now();
+                        map_dirty = true;
+                    }
+                }
+            }
+            if map_dirty {
+                map.version += 1;
+                map.updated_at = chrono::Utc::now();
+            }
         }
-        drop(map);
 
         if map_dirty {
             self.composite.save_shard_map().await?;
