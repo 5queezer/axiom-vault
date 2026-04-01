@@ -73,6 +73,11 @@ impl CompositeStorageProvider {
             ));
         }
 
+        config
+            .health
+            .validate()
+            .map_err(Error::InvalidInput)?;
+
         if let RaidMode::Erasure {
             data_shards,
             parity_shards,
@@ -217,13 +222,22 @@ impl CompositeStorageProvider {
     /// Attempt a lightweight recovery probe on backends that are due for one.
     async fn probe_if_due(&self) {
         for (i, hs) in self.health_states.iter().enumerate() {
-            let should = hs.read().await.should_probe(&self.config.health);
+            // Claim the probe window under write lock *before* the network call
+            // to prevent concurrent reads from firing duplicate probes.
+            let should = {
+                let mut state = hs.write().await;
+                if state.should_probe(&self.config.health) {
+                    state.last_probe = Some(chrono::Utc::now());
+                    true
+                } else {
+                    false
+                }
+            };
             if should {
                 let start = tokio::time::Instant::now();
                 let result = self.backends[i].exists(&VaultPath::root()).await;
                 let latency = start.elapsed();
                 let mut state = hs.write().await;
-                state.last_probe = Some(chrono::Utc::now());
                 match result {
                     Ok(_) => {
                         tracing::info!(
@@ -234,7 +248,7 @@ impl CompositeStorageProvider {
                         state.record_success(latency);
                     }
                     Err(_) => {
-                        // Still down — last_probe was already updated above
+                        // Still down — last_probe was already claimed above
                     }
                 }
             }
@@ -283,17 +297,27 @@ impl CompositeStorageProvider {
         F: Fn(Arc<dyn StorageProvider>) -> Fut,
         Fut: Future<Output = Result<Metadata>>,
     {
-        let start = tokio::time::Instant::now();
-        let futures: Vec<_> = self.backends.iter().map(|b| f(Arc::clone(b))).collect();
+        // Wrap each future to measure per-backend latency.
+        let futures: Vec<_> = self
+            .backends
+            .iter()
+            .map(|b| {
+                let fut = f(Arc::clone(b));
+                async move {
+                    let start = tokio::time::Instant::now();
+                    let result = fut.await;
+                    (result, start.elapsed())
+                }
+            })
+            .collect();
         let results = futures::future::join_all(futures).await;
-        let latency = start.elapsed();
 
         let mut first_success: Option<Metadata> = None;
         let mut succeeded: Vec<usize> = Vec::new();
         let mut last_error: Option<Error> = None;
         let mut failure_count = 0usize;
 
-        for (i, result) in results.into_iter().enumerate() {
+        for (i, (result, latency)) in results.into_iter().enumerate() {
             match result {
                 Ok(meta) => {
                     self.record_health_success(i, latency).await;
@@ -339,16 +363,25 @@ impl CompositeStorageProvider {
         F: Fn(Arc<dyn StorageProvider>) -> Fut,
         Fut: Future<Output = Result<()>>,
     {
-        let start = tokio::time::Instant::now();
-        let futures: Vec<_> = self.backends.iter().map(|b| f(Arc::clone(b))).collect();
+        let futures: Vec<_> = self
+            .backends
+            .iter()
+            .map(|b| {
+                let fut = f(Arc::clone(b));
+                async move {
+                    let start = tokio::time::Instant::now();
+                    let result = fut.await;
+                    (result, start.elapsed())
+                }
+            })
+            .collect();
         let results = futures::future::join_all(futures).await;
-        let latency = start.elapsed();
 
         let mut any_success = false;
         let mut last_error: Option<Error> = None;
         let mut failure_count = 0usize;
 
-        for (i, result) in results.into_iter().enumerate() {
+        for (i, (result, latency)) in results.into_iter().enumerate() {
             match result {
                 Ok(()) => {
                     self.record_health_success(i, latency).await;
@@ -575,7 +608,6 @@ impl CompositeStorageProvider {
         let original_size = data.len();
         let shards = self.erasure_encode(&data)?;
 
-        let start = tokio::time::Instant::now();
         let mut futures = Vec::with_capacity(shards.len());
         for (i, shard) in shards.into_iter().enumerate() {
             let backend = Arc::clone(&self.backends[i]);
@@ -586,7 +618,11 @@ impl CompositeStorageProvider {
             payload.extend_from_slice(&crc.to_le_bytes());
             payload.extend_from_slice(&(original_size as u64).to_le_bytes());
             payload.extend_from_slice(&shard);
-            futures.push(async move { backend.upload(&shard_path, payload).await });
+            futures.push(async move {
+                let start = tokio::time::Instant::now();
+                let result = backend.upload(&shard_path, payload).await;
+                (result, start.elapsed())
+            });
         }
 
         let results = futures::future::join_all(futures).await;
@@ -596,11 +632,10 @@ impl CompositeStorageProvider {
         let mut failure_count = 0usize;
         let mut last_error: Option<Error> = None;
 
-        let upload_latency = start.elapsed();
-        for (i, result) in results.into_iter().enumerate() {
+        for (i, (result, latency)) in results.into_iter().enumerate() {
             match result {
                 Ok(meta) => {
-                    self.record_health_success(i, upload_latency).await;
+                    self.record_health_success(i, latency).await;
                     succeeded.push(i);
                     if first_meta.is_none() {
                         // Return metadata reflecting the original file, not the shard
@@ -626,7 +661,7 @@ impl CompositeStorageProvider {
         }
 
         let (_, parity_shards) = self.erasure_params()?;
-        if failure_count >= parity_shards {
+        if failure_count > parity_shards {
             return Err(last_error
                 .unwrap_or_else(|| Error::Storage("Too many shard write failures".to_string())));
         }
@@ -681,27 +716,29 @@ impl CompositeStorageProvider {
         };
 
         let total = data_shards + parity_shards;
-        let start = tokio::time::Instant::now();
         let mut futures = Vec::with_capacity(total);
         for i in 0..total {
             let backend = Arc::clone(&self.backends[i]);
             let shard_path = Self::shard_path(path, i)?;
-            futures.push(async move { (i, backend.download(&shard_path).await) });
+            futures.push(async move {
+                let start = tokio::time::Instant::now();
+                let result = backend.download(&shard_path).await;
+                (i, result, start.elapsed())
+            });
         }
 
         let results = futures::future::join_all(futures).await;
-        let download_latency = start.elapsed();
 
         let mut shard_opts: Vec<Option<Vec<u8>>> = vec![None; total];
         let mut size_votes: HashMap<usize, usize> = HashMap::new();
         let mut available = 0usize;
 
-        for (i, result) in results {
+        for (i, result, latency) in results {
             if let Ok(payload) = result {
-                self.record_health_success(i, download_latency).await;
                 // Header: [4-byte CRC-32] [8-byte LE original_size] [shard_data]
                 if payload.len() < 12 {
                     warn!(shard = i, "Erasure download: shard too short, skipping");
+                    self.record_health_failure(i).await;
                     continue;
                 }
                 let stored_crc = u32::from_le_bytes(payload[..4].try_into().unwrap());
@@ -717,9 +754,12 @@ impl CompositeStorageProvider {
                         computed_crc,
                         "Erasure download: CRC mismatch, treating shard as missing"
                     );
+                    self.record_health_failure(i).await;
                     continue;
                 }
 
+                // Only record success after payload validation passes
+                self.record_health_success(i, latency).await;
                 *size_votes.entry(size).or_insert(0) += 1;
                 shard_opts[i] = Some(shard_data.to_vec());
                 available += 1;

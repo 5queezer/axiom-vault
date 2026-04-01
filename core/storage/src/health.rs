@@ -55,6 +55,20 @@ impl Default for HealthConfig {
 }
 
 impl HealthConfig {
+    /// Validate that the config is consistent.
+    ///
+    /// Returns an error if `failure_threshold > offline_threshold`, since
+    /// `record_failure` assumes degraded transitions happen before offline.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.failure_threshold > self.offline_threshold {
+            return Err(format!(
+                "failure_threshold ({}) must be <= offline_threshold ({})",
+                self.failure_threshold, self.offline_threshold
+            ));
+        }
+        Ok(())
+    }
+
     /// Recovery interval as a `Duration`.
     pub fn recovery_interval(&self) -> Duration {
         Duration::from_secs(self.recovery_interval_secs)
@@ -168,6 +182,27 @@ mod tests {
         assert_eq!(config.offline_threshold, 10);
         assert_eq!(config.recovery_interval_secs, 60);
         assert_eq!(config.recovery_interval(), Duration::from_secs(60));
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_health_config_validate_rejects_invalid_thresholds() {
+        let config = HealthConfig {
+            failure_threshold: 10,
+            offline_threshold: 3,
+            ..HealthConfig::default()
+        };
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_health_config_validate_equal_thresholds_ok() {
+        let config = HealthConfig {
+            failure_threshold: 5,
+            offline_threshold: 5,
+            ..HealthConfig::default()
+        };
+        assert!(config.validate().is_ok());
     }
 
     #[test]
