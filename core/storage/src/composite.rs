@@ -2086,8 +2086,7 @@ mod tests {
         let b2 = Arc::new(ToggleableProvider::new("t2"));
 
         // Upload some data while all backends are healthy
-        let backends: Vec<Arc<dyn StorageProvider>> =
-            vec![b0.clone(), b1.clone(), b2.clone()];
+        let backends: Vec<Arc<dyn StorageProvider>> = vec![b0.clone(), b1.clone(), b2.clone()];
         let config = CompositeConfig {
             mode: RaidMode::Mirror,
             health: HealthConfig {
@@ -2298,7 +2297,11 @@ mod tests {
             HealthStatus::Healthy
         );
         assert_eq!(
-            provider.backend_health(0).await.unwrap().consecutive_failures,
+            provider
+                .backend_health(0)
+                .await
+                .unwrap()
+                .consecutive_failures,
             0
         );
     }

@@ -23,9 +23,9 @@ pub mod registry;
 pub mod shard_map;
 
 pub use composite::{CompositeConfig, CompositeStorageProvider, RaidMode};
-pub use health::{HealthConfig, HealthStatus, ProviderHealth};
 pub use dropbox::{DropboxConfig, DropboxProvider};
 pub use gdrive::{GDriveConfig, GDriveProvider};
+pub use health::{HealthConfig, HealthStatus, ProviderHealth};
 pub use icloud::{ICloudConfig, ICloudProvider};
 pub use local::LocalProvider;
 pub use memory::MemoryProvider;

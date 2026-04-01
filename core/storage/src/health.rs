@@ -106,7 +106,8 @@ impl ProviderHealth {
         if self.avg_latency_ms == 0.0 {
             self.avg_latency_ms = latency_ms;
         } else {
-            self.avg_latency_ms = EWMA_ALPHA * latency_ms + (1.0 - EWMA_ALPHA) * self.avg_latency_ms;
+            self.avg_latency_ms =
+                EWMA_ALPHA * latency_ms + (1.0 - EWMA_ALPHA) * self.avg_latency_ms;
         }
     }
 
@@ -194,7 +195,11 @@ mod tests {
 
     #[test]
     fn test_health_status_serde_roundtrip() {
-        for status in [HealthStatus::Healthy, HealthStatus::Degraded, HealthStatus::Offline] {
+        for status in [
+            HealthStatus::Healthy,
+            HealthStatus::Degraded,
+            HealthStatus::Offline,
+        ] {
             let json = serde_json::to_string(&status).unwrap();
             let decoded: HealthStatus = serde_json::from_str(&json).unwrap();
             assert_eq!(decoded, status);
