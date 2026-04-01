@@ -556,9 +556,7 @@ async fn main() -> Result<()> {
 
         Commands::RaidStatus { vault_path } => cmd_raid_status(&vault_path).await,
 
-        Commands::RaidRebuild { vault_path, target } => {
-            cmd_raid_rebuild(&vault_path, target).await
-        }
+        Commands::RaidRebuild { vault_path, target } => cmd_raid_rebuild(&vault_path, target).await,
 
         Commands::RaidConfigure {
             vault_path,
@@ -1792,8 +1790,7 @@ async fn save_raid_config(vault_path: &Path, config: &RaidConfig) -> Result<()> 
     let tmp_path = dir.join("raid.json.tmp");
     let final_path = dir.join("raid.json");
 
-    let json =
-        serde_json::to_string_pretty(config).context("Failed to serialize RAID config")?;
+    let json = serde_json::to_string_pretty(config).context("Failed to serialize RAID config")?;
     tokio::fs::write(&tmp_path, &json)
         .await
         .context("Failed to write RAID config tmp")?;
@@ -1903,10 +1900,7 @@ async fn cmd_raid_add_backend(vault_path: &Path, provider: &str, config_json: &s
     save_raid_config(vault_path, &raid_cfg).await?;
 
     println!("Backend added successfully!");
-    println!(
-        "  Index: {}",
-        raid_cfg.backends.len() - 1
-    );
+    println!("  Index: {}", raid_cfg.backends.len() - 1);
     println!("  Provider: {}", provider);
     println!("  Total backends: {}", raid_cfg.backends.len());
 
@@ -1917,9 +1911,9 @@ async fn cmd_raid_add_backend(vault_path: &Path, provider: &str, config_json: &s
 async fn cmd_raid_remove_backend(vault_path: &Path, index: usize) -> Result<()> {
     info!("Removing backend {} from RAID pool", index);
 
-    let mut raid_cfg = load_raid_config(vault_path)
-        .await?
-        .ok_or_else(|| anyhow::anyhow!("No RAID configuration found. Run raid-add-backend first."))?;
+    let mut raid_cfg = load_raid_config(vault_path).await?.ok_or_else(|| {
+        anyhow::anyhow!("No RAID configuration found. Run raid-add-backend first.")
+    })?;
 
     if index >= raid_cfg.backends.len() {
         anyhow::bail!(
@@ -1963,9 +1957,9 @@ async fn cmd_raid_remove_backend(vault_path: &Path, index: usize) -> Result<()> 
 
 /// Show RAID status: mode, backends, health, and shard distribution.
 async fn cmd_raid_status(vault_path: &Path) -> Result<()> {
-    let raid_cfg = load_raid_config(vault_path)
-        .await?
-        .ok_or_else(|| anyhow::anyhow!("No RAID configuration found. Run raid-add-backend first."))?;
+    let raid_cfg = load_raid_config(vault_path).await?.ok_or_else(|| {
+        anyhow::anyhow!("No RAID configuration found. Run raid-add-backend first.")
+    })?;
 
     // Print RAID mode.
     println!("RAID Configuration");
@@ -1985,7 +1979,10 @@ async fn cmd_raid_status(vault_path: &Path) -> Result<()> {
     if raid_cfg.backends.len() < 2 {
         println!("Backends:");
         for (i, entry) in raid_cfg.backends.iter().enumerate() {
-            println!("  [{}] {} — not enough backends for RAID", i, entry.provider_type);
+            println!(
+                "  [{}] {} — not enough backends for RAID",
+                i, entry.provider_type
+            );
         }
         return Ok(());
     }
@@ -2040,23 +2037,24 @@ async fn cmd_raid_status(vault_path: &Path) -> Result<()> {
     }
 
     println!();
-    println!("Shard Map: {} entries, version {}", shard_map.entries.len(), shard_map.version);
+    println!(
+        "Shard Map: {} entries, version {}",
+        shard_map.entries.len(),
+        shard_map.version
+    );
 
     // Redundancy summary.
     let healthy = composite.healthy_backend_count().await;
-    println!(
-        "Redundancy: {}/{} backends healthy",
-        healthy, backend_count
-    );
+    println!("Redundancy: {}/{} backends healthy", healthy, backend_count);
 
     Ok(())
 }
 
 /// Rebuild missing shards on a target backend.
 async fn cmd_raid_rebuild(vault_path: &Path, target: Option<usize>) -> Result<()> {
-    let raid_cfg = load_raid_config(vault_path)
-        .await?
-        .ok_or_else(|| anyhow::anyhow!("No RAID configuration found. Run raid-add-backend first."))?;
+    let raid_cfg = load_raid_config(vault_path).await?.ok_or_else(|| {
+        anyhow::anyhow!("No RAID configuration found. Run raid-add-backend first.")
+    })?;
 
     if raid_cfg.backends.len() < 2 {
         anyhow::bail!("Need at least 2 backends for RAID rebuild");
@@ -2126,9 +2124,9 @@ async fn cmd_raid_configure(
 ) -> Result<()> {
     info!("Configuring RAID mode");
 
-    let mut raid_cfg = load_raid_config(vault_path)
-        .await?
-        .ok_or_else(|| anyhow::anyhow!("No RAID configuration found. Run raid-add-backend first."))?;
+    let mut raid_cfg = load_raid_config(vault_path).await?.ok_or_else(|| {
+        anyhow::anyhow!("No RAID configuration found. Run raid-add-backend first.")
+    })?;
 
     let mode_config = match mode {
         RaidModeArg::Mirror => RaidModeConfig {
