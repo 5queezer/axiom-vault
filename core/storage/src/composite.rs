@@ -129,19 +129,13 @@ impl CompositeStorageProvider {
     /// Called lazily before the first save to prevent overwriting existing data.
     ///
     /// Uses a `OnceCell` so at most one load ever runs, even under concurrency.
-    /// If the load fails (e.g. a backend is temporarily unavailable), logs a
-    /// warning and continues with an empty map rather than blocking operations.
+    /// If the load fails, the error is propagated and the `OnceCell` remains
+    /// unset, allowing retry on the next call.
     async fn ensure_shard_map_loaded(&self) -> Result<()> {
         self.shard_map_init
             .get_or_try_init(|| async {
-                match ShardMap::load_from_all(&self.backends).await {
-                    Ok(loaded) => {
-                        *self.shard_map.write().await = loaded;
-                    }
-                    Err(e) => {
-                        warn!(error = %e, "Failed to load shard map, starting with empty map");
-                    }
-                }
+                let loaded = ShardMap::load_from_all(&self.backends).await?;
+                *self.shard_map.write().await = loaded;
                 Ok::<(), Error>(())
             })
             .await?;
@@ -1308,10 +1302,17 @@ mod tests {
 
     // -- Partial-failure tests ---------------------------------------------
 
+    /// Seed an empty shard map on a backend so `load_from_all` finds `Ok(Some(_))`
+    /// even when other backends in the composite are failing.
+    async fn seed_empty_shard_map(backend: &dyn StorageProvider) {
+        ShardMap::new().save_to_backend(backend).await.unwrap();
+    }
+
     #[tokio::test]
     async fn test_mirror_upload_succeeds_with_one_failing_backend() {
-        let backends: Vec<Arc<dyn StorageProvider>> =
-            vec![Arc::new(FailingProvider), Arc::new(MemoryProvider::new())];
+        let healthy = Arc::new(MemoryProvider::new());
+        seed_empty_shard_map(healthy.as_ref()).await;
+        let backends: Vec<Arc<dyn StorageProvider>> = vec![Arc::new(FailingProvider), healthy];
         let provider = CompositeStorageProvider::new(backends, mirror_config()).unwrap();
 
         let path = VaultPath::parse("/test.txt").unwrap();
@@ -1348,6 +1349,7 @@ mod tests {
         let healthy = Arc::new(MemoryProvider::new());
         let path = VaultPath::parse("/test.txt").unwrap();
         healthy.upload(&path, vec![1]).await.unwrap();
+        seed_empty_shard_map(healthy.as_ref()).await;
 
         let backends: Vec<Arc<dyn StorageProvider>> =
             vec![Arc::new(FailingProvider), healthy.clone()];
