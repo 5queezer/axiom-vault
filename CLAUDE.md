@@ -41,7 +41,7 @@ cargo test --workspace --exclude axiomvault-linux --verbose
 
 ## Architecture
 
-```
+```text
 core/
   crypto/     # Encryption, key derivation, recovery keys (bip39)
   vault/      # Vault engine, config, tree index
@@ -78,8 +78,8 @@ tools/
 
 ## CI & Automation
 
-- CI runs on push to `main`, `develop`, and `claude/**` branches
-- Never commit directly to `main` — use feature branches and PRs
+- CI runs on push to `master`, `develop`, and `claude/**` branches
+- Never commit directly to `master` — use feature branches and PRs
 - Pre-commit hooks (install: `pre-commit install`):
   - `gitleaks` — scans for leaked secrets
   - `cargo fmt --check` — format enforcement
