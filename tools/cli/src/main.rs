@@ -6,7 +6,9 @@
 use anyhow::{Context, Result};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::Shell;
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tracing::{info, Level};
@@ -17,6 +19,10 @@ use axiomvault_common::{VaultId, VaultPath};
 use axiomvault_crypto::recovery::RecoveryKey;
 use axiomvault_crypto::KdfParams;
 use axiomvault_storage::gdrive::{AuthConfig, AuthManager, GDriveConfig, Tokens};
+use axiomvault_storage::{
+    create_default_registry, CompositeConfig, CompositeStorageProvider, HealthStatus, RaidMode,
+    RaidRebuilder, RebuildConfig,
+};
 use axiomvault_sync::{ConflictStrategy, SyncConfig, SyncEngine, SyncMode, SyncState};
 use axiomvault_vault::{
     check_migration_needed, check_vault_health, check_vault_structure, MigrationRegistry,
@@ -56,6 +62,45 @@ enum SyncModeArg {
     Periodic,
     /// Combine on-demand and periodic sync.
     Hybrid,
+}
+
+/// RAID mode for CLI configuration.
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum RaidModeArg {
+    /// Mirror (RAID 1): replicate to all backends.
+    Mirror,
+    /// Erasure coding (RAID 5/6): Reed-Solomon sharding.
+    Erasure,
+}
+
+/// Persistent RAID configuration stored at `<vault>/.axiomvault/raid.json`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct RaidConfig {
+    mode: RaidModeConfig,
+    backends: Vec<BackendEntry>,
+}
+
+/// Serialised RAID mode.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct RaidModeConfig {
+    /// `"mirror"` or `"erasure"`.
+    #[serde(rename = "type")]
+    mode_type: String,
+    /// Number of data shards (erasure only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    data_shards: Option<usize>,
+    /// Number of parity shards (erasure only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    parity_shards: Option<usize>,
+}
+
+/// A single backend entry in the RAID config.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct BackendEntry {
+    /// Provider type name (e.g. `"local"`, `"gdrive"`).
+    provider_type: String,
+    /// Provider-specific configuration (passed to `ProviderRegistry::resolve`).
+    config: serde_json::Value,
 }
 
 #[derive(Parser)]
@@ -325,6 +370,69 @@ enum Commands {
         #[arg(long)]
         install: bool,
     },
+
+    /// Add a storage backend to the RAID pool.
+    RaidAddBackend {
+        /// Path to the vault.
+        #[arg(short = 'p', long)]
+        vault_path: PathBuf,
+
+        /// Provider type (local, gdrive, dropbox, onedrive, icloud).
+        #[arg(short = 't', long)]
+        provider: String,
+
+        /// Provider configuration as a JSON string.
+        #[arg(short, long)]
+        config: String,
+    },
+
+    /// Remove a storage backend from the RAID pool.
+    RaidRemoveBackend {
+        /// Path to the vault.
+        #[arg(short = 'p', long)]
+        vault_path: PathBuf,
+
+        /// Index of the backend to remove (shown in raid-status).
+        #[arg(short, long)]
+        index: usize,
+    },
+
+    /// Show RAID status: mode, backends, health, and shard distribution.
+    RaidStatus {
+        /// Path to the vault.
+        #[arg(short = 'p', long)]
+        vault_path: PathBuf,
+    },
+
+    /// Rebuild missing shards on a target backend.
+    RaidRebuild {
+        /// Path to the vault.
+        #[arg(short = 'p', long)]
+        vault_path: PathBuf,
+
+        /// Target backend index to rebuild (defaults to first degraded backend).
+        #[arg(short = 't', long)]
+        target: Option<usize>,
+    },
+
+    /// Configure or change the RAID mode.
+    RaidConfigure {
+        /// Path to the vault.
+        #[arg(short = 'p', long)]
+        vault_path: PathBuf,
+
+        /// RAID mode.
+        #[arg(long, value_enum)]
+        mode: RaidModeArg,
+
+        /// Number of data shards (required for erasure mode).
+        #[arg(short = 'k', long)]
+        data_shards: Option<usize>,
+
+        /// Number of parity shards (required for erasure mode).
+        #[arg(short = 'm', long)]
+        parity_shards: Option<usize>,
+    },
 }
 
 #[tokio::main]
@@ -435,6 +543,29 @@ async fn main() -> Result<()> {
             }
             Ok(())
         }
+
+        Commands::RaidAddBackend {
+            vault_path,
+            provider,
+            config,
+        } => cmd_raid_add_backend(&vault_path, &provider, &config).await,
+
+        Commands::RaidRemoveBackend { vault_path, index } => {
+            cmd_raid_remove_backend(&vault_path, index).await
+        }
+
+        Commands::RaidStatus { vault_path } => cmd_raid_status(&vault_path).await,
+
+        Commands::RaidRebuild { vault_path, target } => {
+            cmd_raid_rebuild(&vault_path, target).await
+        }
+
+        Commands::RaidConfigure {
+            vault_path,
+            mode,
+            data_shards,
+            parity_shards,
+        } => cmd_raid_configure(&vault_path, mode, data_shards, parity_shards).await,
     }
 }
 
@@ -1625,6 +1756,426 @@ async fn cmd_migrate(path: &Path, dry_run: bool) -> Result<()> {
         "Migration completed successfully! Vault is now at version {}.",
         config.version
     );
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// RAID helpers
+// ---------------------------------------------------------------------------
+
+/// Path to the RAID configuration file within a vault directory.
+fn raid_config_path(vault_path: &Path) -> PathBuf {
+    vault_path.join(".axiomvault").join("raid.json")
+}
+
+/// Load the RAID configuration from disk.  Returns `None` if not found.
+async fn load_raid_config(vault_path: &Path) -> Result<Option<RaidConfig>> {
+    let path = raid_config_path(vault_path);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let data = tokio::fs::read_to_string(&path)
+        .await
+        .context("Failed to read RAID config")?;
+    let cfg: RaidConfig = serde_json::from_str(&data).context("Failed to parse RAID config")?;
+    Ok(Some(cfg))
+}
+
+/// Save the RAID configuration atomically (write-then-rename).
+async fn save_raid_config(vault_path: &Path, config: &RaidConfig) -> Result<()> {
+    let dir = vault_path.join(".axiomvault");
+    tokio::fs::create_dir_all(&dir)
+        .await
+        .context("Failed to create .axiomvault directory")?;
+
+    let tmp_path = dir.join("raid.json.tmp");
+    let final_path = dir.join("raid.json");
+
+    let json =
+        serde_json::to_string_pretty(config).context("Failed to serialize RAID config")?;
+    tokio::fs::write(&tmp_path, &json)
+        .await
+        .context("Failed to write RAID config tmp")?;
+    tokio::fs::rename(&tmp_path, &final_path)
+        .await
+        .context("Failed to rename RAID config")?;
+    Ok(())
+}
+
+/// Convert a `RaidConfig` into a `RaidMode`.
+fn raid_mode_from_config(cfg: &RaidModeConfig) -> Result<RaidMode> {
+    match cfg.mode_type.as_str() {
+        "mirror" => Ok(RaidMode::Mirror),
+        "erasure" => {
+            let data_shards = cfg
+                .data_shards
+                .ok_or_else(|| anyhow::anyhow!("erasure mode requires data_shards"))?;
+            let parity_shards = cfg
+                .parity_shards
+                .ok_or_else(|| anyhow::anyhow!("erasure mode requires parity_shards"))?;
+            Ok(RaidMode::Erasure {
+                data_shards,
+                parity_shards,
+            })
+        }
+        other => anyhow::bail!("Unknown RAID mode type: {}", other),
+    }
+}
+
+/// Build a `CompositeStorageProvider` from a persisted `RaidConfig`.
+fn build_composite(config: &RaidConfig) -> Result<CompositeStorageProvider> {
+    let registry = create_default_registry();
+    let mut backends: Vec<Arc<dyn axiomvault_storage::StorageProvider>> = Vec::new();
+
+    for (i, entry) in config.backends.iter().enumerate() {
+        let provider = registry
+            .resolve(&entry.provider_type, entry.config.clone())
+            .with_context(|| format!("Failed to create backend {} ({})", i, entry.provider_type))?;
+        backends.push(provider);
+    }
+
+    let mode = raid_mode_from_config(&config.mode)?;
+    let composite_config = CompositeConfig {
+        mode,
+        health: Default::default(),
+    };
+
+    let composite = CompositeStorageProvider::new(backends, composite_config)
+        .map_err(|e| anyhow::anyhow!("{}", e))?;
+    Ok(composite)
+}
+
+// ---------------------------------------------------------------------------
+// RAID commands
+// ---------------------------------------------------------------------------
+
+/// Add a storage backend to the RAID pool.
+async fn cmd_raid_add_backend(vault_path: &Path, provider: &str, config_json: &str) -> Result<()> {
+    info!("Adding backend to RAID pool: {}", provider);
+
+    // Validate provider type and config by trying to resolve it.
+    let provider_config: serde_json::Value =
+        serde_json::from_str(config_json).context("Invalid JSON config")?;
+    let registry = create_default_registry();
+    registry
+        .resolve(provider, provider_config.clone())
+        .with_context(|| format!("Failed to create provider '{}'", provider))?;
+
+    let entry = BackendEntry {
+        provider_type: provider.to_string(),
+        config: provider_config,
+    };
+
+    let mut raid_cfg = load_raid_config(vault_path)
+        .await?
+        .unwrap_or_else(|| RaidConfig {
+            mode: RaidModeConfig {
+                mode_type: "mirror".to_string(),
+                data_shards: None,
+                parity_shards: None,
+            },
+            backends: Vec::new(),
+        });
+
+    raid_cfg.backends.push(entry);
+
+    // If we now have >=2 backends and a composite can be formed, sync the shard map.
+    if raid_cfg.backends.len() >= 2 {
+        match build_composite(&raid_cfg) {
+            Ok(composite) => {
+                if let Err(e) = composite.load_shard_map().await {
+                    eprintln!("Warning: could not load shard map: {}", e);
+                } else if let Err(e) = composite.save_shard_map().await {
+                    eprintln!("Warning: could not sync shard map to new backend: {}", e);
+                }
+            }
+            Err(e) => {
+                eprintln!(
+                    "Warning: cannot form composite yet ({}). \
+                     You may need to run raid-configure after adding enough backends.",
+                    e
+                );
+            }
+        }
+    }
+
+    save_raid_config(vault_path, &raid_cfg).await?;
+
+    println!("Backend added successfully!");
+    println!(
+        "  Index: {}",
+        raid_cfg.backends.len() - 1
+    );
+    println!("  Provider: {}", provider);
+    println!("  Total backends: {}", raid_cfg.backends.len());
+
+    Ok(())
+}
+
+/// Remove a storage backend from the RAID pool.
+async fn cmd_raid_remove_backend(vault_path: &Path, index: usize) -> Result<()> {
+    info!("Removing backend {} from RAID pool", index);
+
+    let mut raid_cfg = load_raid_config(vault_path)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("No RAID configuration found. Run raid-add-backend first."))?;
+
+    if index >= raid_cfg.backends.len() {
+        anyhow::bail!(
+            "Backend index {} out of range (have {} backends)",
+            index,
+            raid_cfg.backends.len()
+        );
+    }
+
+    // Check minimum redundancy.
+    let remaining = raid_cfg.backends.len() - 1;
+    let min_required = match raid_cfg.mode.mode_type.as_str() {
+        "mirror" => 2,
+        "erasure" => {
+            let ds = raid_cfg.mode.data_shards.unwrap_or(0);
+            let ps = raid_cfg.mode.parity_shards.unwrap_or(0);
+            ds + ps
+        }
+        _ => 2,
+    };
+
+    if remaining < min_required {
+        anyhow::bail!(
+            "Cannot remove backend: {} mode requires at least {} backends, \
+             but only {} would remain",
+            raid_cfg.mode.mode_type,
+            min_required,
+            remaining
+        );
+    }
+
+    let removed = raid_cfg.backends.remove(index);
+    save_raid_config(vault_path, &raid_cfg).await?;
+
+    println!("Backend removed successfully!");
+    println!("  Removed: {} (index {})", removed.provider_type, index);
+    println!("  Remaining backends: {}", raid_cfg.backends.len());
+
+    Ok(())
+}
+
+/// Show RAID status: mode, backends, health, and shard distribution.
+async fn cmd_raid_status(vault_path: &Path) -> Result<()> {
+    let raid_cfg = load_raid_config(vault_path)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("No RAID configuration found. Run raid-add-backend first."))?;
+
+    // Print RAID mode.
+    println!("RAID Configuration");
+    println!("{}", "=".repeat(60));
+    match raid_cfg.mode.mode_type.as_str() {
+        "mirror" => println!("  Mode: Mirror (RAID 1)"),
+        "erasure" => println!(
+            "  Mode: Erasure (RAID 5/6) — k={}, m={}",
+            raid_cfg.mode.data_shards.unwrap_or(0),
+            raid_cfg.mode.parity_shards.unwrap_or(0),
+        ),
+        other => println!("  Mode: {}", other),
+    }
+    println!("  Backends: {}", raid_cfg.backends.len());
+    println!();
+
+    if raid_cfg.backends.len() < 2 {
+        println!("Backends:");
+        for (i, entry) in raid_cfg.backends.iter().enumerate() {
+            println!("  [{}] {} — not enough backends for RAID", i, entry.provider_type);
+        }
+        return Ok(());
+    }
+
+    // Build the composite and show live health.
+    let composite = build_composite(&raid_cfg)?;
+    if let Err(e) = composite.load_shard_map().await {
+        eprintln!("Warning: could not load shard map: {}", e);
+    }
+
+    let shard_map = composite.get_shard_map().await;
+
+    // Count shards per backend.
+    let backend_count = composite.backend_count();
+    let mut shard_counts = vec![0usize; backend_count];
+    for entry in shard_map.entries.values() {
+        for shard in entry.shards.values() {
+            if shard.shard_index < backend_count {
+                shard_counts[shard.shard_index] += 1;
+            }
+        }
+    }
+
+    println!(
+        "  {:<6} {:<12} {:<10} {:<8} Last Success",
+        "Index", "Provider", "Health", "Shards"
+    );
+    println!("  {}", "-".repeat(54));
+
+    for (i, shard_count) in shard_counts.iter().enumerate() {
+        let health = composite.backend_health(i).await;
+        let (status_str, last_success) = match &health {
+            Some(h) => {
+                let status = match h.status {
+                    HealthStatus::Healthy => "Healthy",
+                    HealthStatus::Degraded => "Degraded",
+                    HealthStatus::Offline => "Offline",
+                };
+                let last = h
+                    .last_success
+                    .map(|t| t.format("%Y-%m-%d %H:%M").to_string())
+                    .unwrap_or_else(|| "never".to_string());
+                (status, last)
+            }
+            None => ("Unknown", "n/a".to_string()),
+        };
+
+        println!(
+            "  {:<6} {:<12} {:<10} {:<8} {}",
+            i, raid_cfg.backends[i].provider_type, status_str, shard_count, last_success
+        );
+    }
+
+    println!();
+    println!("Shard Map: {} entries, version {}", shard_map.entries.len(), shard_map.version);
+
+    // Redundancy summary.
+    let healthy = composite.healthy_backend_count().await;
+    println!(
+        "Redundancy: {}/{} backends healthy",
+        healthy, backend_count
+    );
+
+    Ok(())
+}
+
+/// Rebuild missing shards on a target backend.
+async fn cmd_raid_rebuild(vault_path: &Path, target: Option<usize>) -> Result<()> {
+    let raid_cfg = load_raid_config(vault_path)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("No RAID configuration found. Run raid-add-backend first."))?;
+
+    if raid_cfg.backends.len() < 2 {
+        anyhow::bail!("Need at least 2 backends for RAID rebuild");
+    }
+
+    let composite = build_composite(&raid_cfg)?;
+
+    // Determine target: explicit index or first non-healthy backend.
+    let target_index = match target {
+        Some(idx) => {
+            if idx >= composite.backend_count() {
+                anyhow::bail!(
+                    "Target index {} out of range (have {} backends)",
+                    idx,
+                    composite.backend_count()
+                );
+            }
+            idx
+        }
+        None => {
+            // Find first degraded/offline backend.
+            let mut found = None;
+            for i in 0..composite.backend_count() {
+                if let Some(h) = composite.backend_health(i).await {
+                    if h.status != HealthStatus::Healthy {
+                        found = Some(i);
+                        break;
+                    }
+                }
+            }
+            found.ok_or_else(|| {
+                anyhow::anyhow!(
+                    "All backends are healthy. Use --target to force rebuild on a specific backend."
+                )
+            })?
+        }
+    };
+
+    println!(
+        "Rebuilding backend {} ({})...",
+        target_index, raid_cfg.backends[target_index].provider_type
+    );
+
+    let rebuilder = RaidRebuilder::new(&composite, target_index, RebuildConfig::default())
+        .map_err(|e| anyhow::anyhow!("{}", e))?;
+
+    let result = rebuilder
+        .rebuild()
+        .await
+        .map_err(|e| anyhow::anyhow!("{}", e))?;
+
+    println!("Rebuild completed!");
+    println!("  Rebuilt:  {}", result.rebuilt);
+    println!("  Skipped:  {}", result.skipped);
+    println!("  Failed:   {}", result.failed);
+    println!("  Elapsed:  {:.1?}", result.elapsed);
+
+    Ok(())
+}
+
+/// Configure or change the RAID mode.
+async fn cmd_raid_configure(
+    vault_path: &Path,
+    mode: RaidModeArg,
+    data_shards: Option<usize>,
+    parity_shards: Option<usize>,
+) -> Result<()> {
+    info!("Configuring RAID mode");
+
+    let mut raid_cfg = load_raid_config(vault_path)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("No RAID configuration found. Run raid-add-backend first."))?;
+
+    let mode_config = match mode {
+        RaidModeArg::Mirror => RaidModeConfig {
+            mode_type: "mirror".to_string(),
+            data_shards: None,
+            parity_shards: None,
+        },
+        RaidModeArg::Erasure => {
+            let k = data_shards
+                .ok_or_else(|| anyhow::anyhow!("Erasure mode requires --data-shards (-k)"))?;
+            let m = parity_shards
+                .ok_or_else(|| anyhow::anyhow!("Erasure mode requires --parity-shards (-m)"))?;
+
+            if k == 0 {
+                anyhow::bail!("data-shards must be at least 1");
+            }
+            if m == 0 {
+                anyhow::bail!("parity-shards must be at least 1");
+            }
+            if k + m != raid_cfg.backends.len() {
+                anyhow::bail!(
+                    "data-shards ({}) + parity-shards ({}) must equal backend count ({})",
+                    k,
+                    m,
+                    raid_cfg.backends.len()
+                );
+            }
+
+            RaidModeConfig {
+                mode_type: "erasure".to_string(),
+                data_shards: Some(k),
+                parity_shards: Some(m),
+            }
+        }
+    };
+
+    raid_cfg.mode = mode_config;
+    save_raid_config(vault_path, &raid_cfg).await?;
+
+    match mode {
+        RaidModeArg::Mirror => println!("RAID mode set to Mirror (RAID 1)."),
+        RaidModeArg::Erasure => println!(
+            "RAID mode set to Erasure (k={}, m={}).",
+            data_shards.unwrap(),
+            parity_shards.unwrap()
+        ),
+    }
 
     Ok(())
 }
