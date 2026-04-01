@@ -307,18 +307,18 @@ impl ShardMap {
     /// per-entry latest-timestamp-wins semantics. The resulting version is the
     /// maximum found across all backends plus one.
     ///
-    /// Returns a new empty shard map if no backend has a stored map.
-    /// Returns an error if every backend returned an error (as opposed to NotFound).
+    /// Returns a new empty shard map if no backend has a stored map and none errored.
+    /// Returns an error if no actual map was loaded (`Ok(Some(_))`) AND at least one
+    /// backend returned an error. `Ok(None)` (not found) does not suppress errors
+    /// from other backends.
     pub async fn load_from_all(backends: &[Arc<dyn StorageProvider>]) -> Result<ShardMap> {
         let mut merged = ShardMap::new();
         let mut found_any = false;
-        let mut any_responded = false; // true if at least one backend returned Ok (even None)
         let mut last_error: Option<Error> = None;
 
         for (i, backend) in backends.iter().enumerate() {
             match Self::load_from_backend(backend.as_ref()).await {
                 Ok(Some(map)) => {
-                    any_responded = true;
                     if !found_any {
                         merged = map;
                         found_any = true;
@@ -327,7 +327,6 @@ impl ShardMap {
                     }
                 }
                 Ok(None) => {
-                    any_responded = true;
                     // No shard map on this backend yet — skip
                 }
                 Err(e) => {
@@ -342,10 +341,9 @@ impl ShardMap {
             }
         }
 
-        // Only error if ALL backends failed (none returned Ok, even NotFound).
-        // If at least one backend responded successfully (with or without a map),
-        // the empty/merged result is valid — this covers new setups and partial outages.
-        if !any_responded {
+        // Only error if no actual map was loaded AND at least one backend errored.
+        // Ok(None) (not found) does not suppress errors from other backends.
+        if !found_any {
             if let Some(e) = last_error {
                 return Err(e);
             }

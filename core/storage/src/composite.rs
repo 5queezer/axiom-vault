@@ -9,9 +9,8 @@ use futures::stream;
 use reed_solomon_erasure::galois_8::ReedSolomon;
 use serde::{Deserialize, Serialize};
 use std::future::Future;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{OnceCell, RwLock};
 use tracing::warn;
 
 use std::collections::HashMap;
@@ -51,8 +50,8 @@ pub struct CompositeStorageProvider {
     reed_solomon: Option<ReedSolomon>,
     /// Persistent shard map tracking chunk-to-backend mappings.
     shard_map: Arc<RwLock<ShardMap>>,
-    /// Whether the shard map has been hydrated from persistent storage.
-    shard_map_loaded: AtomicBool,
+    /// One-shot cell that ensures shard map hydration runs exactly once.
+    shard_map_init: OnceCell<()>,
 }
 
 impl CompositeStorageProvider {
@@ -111,7 +110,7 @@ impl CompositeStorageProvider {
             config,
             reed_solomon,
             shard_map: Arc::new(RwLock::new(ShardMap::new())),
-            shard_map_loaded: AtomicBool::new(false),
+            shard_map_init: OnceCell::const_new(),
         })
     }
 
@@ -122,16 +121,30 @@ impl CompositeStorageProvider {
     pub async fn load_shard_map(&self) -> Result<()> {
         let loaded = ShardMap::load_from_all(&self.backends).await?;
         *self.shard_map.write().await = loaded;
-        self.shard_map_loaded.store(true, Ordering::Release);
+        let _ = self.shard_map_init.set(());
         Ok(())
     }
 
     /// Ensure the shard map has been hydrated from persistent storage.
     /// Called lazily before the first save to prevent overwriting existing data.
+    ///
+    /// Uses a `OnceCell` so at most one load ever runs, even under concurrency.
+    /// If the load fails (e.g. a backend is temporarily unavailable), logs a
+    /// warning and continues with an empty map rather than blocking operations.
     async fn ensure_shard_map_loaded(&self) -> Result<()> {
-        if !self.shard_map_loaded.load(Ordering::Acquire) {
-            self.load_shard_map().await?;
-        }
+        self.shard_map_init
+            .get_or_try_init(|| async {
+                match ShardMap::load_from_all(&self.backends).await {
+                    Ok(loaded) => {
+                        *self.shard_map.write().await = loaded;
+                    }
+                    Err(e) => {
+                        warn!(error = %e, "Failed to load shard map, starting with empty map");
+                    }
+                }
+                Ok::<(), Error>(())
+            })
+            .await?;
         Ok(())
     }
 
