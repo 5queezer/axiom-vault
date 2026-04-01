@@ -1945,6 +1945,13 @@ async fn cmd_raid_remove_backend(vault_path: &Path, index: usize) -> Result<()> 
         );
     }
 
+    if raid_cfg.mode.mode_type == "erasure" && remaining == min_required {
+        eprintln!(
+            "Warning: After removal, the array will have zero fault tolerance. \
+             Any backend failure will result in data loss."
+        );
+    }
+
     let removed = raid_cfg.backends.remove(index);
     save_raid_config(vault_path, &raid_cfg).await?;
 
@@ -2062,6 +2069,12 @@ async fn cmd_raid_rebuild(vault_path: &Path, target: Option<usize>) -> Result<()
 
     let composite = build_composite(&raid_cfg)?;
 
+    // Load the shard map so the rebuilder knows which shards need reconstruction.
+    composite
+        .load_shard_map()
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to load shard map: {}", e))?;
+
     // Determine target: explicit index or first non-healthy backend.
     let target_index = match target {
         Some(idx) => {
@@ -2168,11 +2181,11 @@ async fn cmd_raid_configure(
 
     match mode {
         RaidModeArg::Mirror => println!("RAID mode set to Mirror (RAID 1)."),
-        RaidModeArg::Erasure => println!(
-            "RAID mode set to Erasure (k={}, m={}).",
-            data_shards.unwrap(),
-            parity_shards.unwrap()
-        ),
+        RaidModeArg::Erasure => {
+            let k = data_shards.expect("validated above");
+            let m = parity_shards.expect("validated above");
+            println!("RAID mode set to Erasure (k={k}, m={m}).");
+        }
     }
 
     Ok(())
