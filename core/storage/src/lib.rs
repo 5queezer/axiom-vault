@@ -19,6 +19,7 @@ pub mod memory;
 pub mod onedrive;
 pub mod provider;
 pub mod registry;
+pub mod shard_map;
 
 pub use composite::{CompositeConfig, CompositeStorageProvider, RaidMode};
 pub use dropbox::{DropboxConfig, DropboxProvider};
@@ -29,3 +30,4 @@ pub use memory::MemoryProvider;
 pub use onedrive::{OneDriveConfig, OneDriveProvider};
 pub use provider::{ConflictResolution, Metadata, StorageProvider};
 pub use registry::{create_default_registry, ProviderFactory, ProviderRegistry};
+pub use shard_map::{ChunkEntry, ErasureParams, ShardLocation, ShardMap};
