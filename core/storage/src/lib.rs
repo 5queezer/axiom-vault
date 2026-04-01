@@ -13,6 +13,7 @@
 pub mod composite;
 pub mod dropbox;
 pub mod gdrive;
+pub mod health;
 pub mod icloud;
 pub mod local;
 pub mod memory;
@@ -24,6 +25,7 @@ pub mod shard_map;
 pub use composite::{CompositeConfig, CompositeStorageProvider, RaidMode};
 pub use dropbox::{DropboxConfig, DropboxProvider};
 pub use gdrive::{GDriveConfig, GDriveProvider};
+pub use health::{HealthConfig, HealthStatus, ProviderHealth};
 pub use icloud::{ICloudConfig, ICloudProvider};
 pub use local::LocalProvider;
 pub use memory::MemoryProvider;

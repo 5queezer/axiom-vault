@@ -15,6 +15,7 @@ use tracing::warn;
 
 use std::collections::HashMap;
 
+use crate::health::{HealthConfig, HealthStatus, ProviderHealth};
 use crate::provider::{ByteStream, Metadata, StorageProvider};
 use crate::shard_map::ShardMap;
 use axiomvault_common::{Error, Result, VaultPath};
@@ -36,6 +37,9 @@ pub enum RaidMode {
 pub struct CompositeConfig {
     /// RAID mode to use.
     pub mode: RaidMode,
+    /// Health tracking configuration.
+    #[serde(default)]
+    pub health: HealthConfig,
 }
 
 /// A storage provider that distributes operations across multiple backends.
@@ -52,6 +56,8 @@ pub struct CompositeStorageProvider {
     shard_map: Arc<RwLock<ShardMap>>,
     /// One-shot cell that ensures shard map hydration runs exactly once.
     shard_map_init: OnceCell<()>,
+    /// Per-backend health state for tracking availability and latency.
+    health_states: Vec<Arc<RwLock<ProviderHealth>>>,
 }
 
 impl CompositeStorageProvider {
@@ -66,6 +72,8 @@ impl CompositeStorageProvider {
                 "CompositeStorageProvider requires at least 2 backends".to_string(),
             ));
         }
+
+        config.health.validate().map_err(Error::InvalidInput)?;
 
         if let RaidMode::Erasure {
             data_shards,
@@ -105,12 +113,17 @@ impl CompositeStorageProvider {
             None
         };
 
+        let health_states = (0..backends.len())
+            .map(|i| Arc::new(RwLock::new(ProviderHealth::new(i))))
+            .collect();
+
         Ok(Self {
             backends,
             config,
             reed_solomon,
             shard_map: Arc::new(RwLock::new(ShardMap::new())),
             shard_map_init: OnceCell::const_new(),
+            health_states,
         })
     }
 
@@ -168,6 +181,111 @@ impl CompositeStorageProvider {
         self.backends.iter().map(|b| b.name()).collect()
     }
 
+    /// Get a snapshot of a backend's health state.
+    pub async fn backend_health(&self, index: usize) -> Option<ProviderHealth> {
+        match self.health_states.get(index) {
+            Some(hs) => Some(hs.read().await.clone()),
+            None => None,
+        }
+    }
+
+    /// Get the number of backends currently in `Healthy` status.
+    pub async fn healthy_backend_count(&self) -> usize {
+        let mut count = 0;
+        for hs in &self.health_states {
+            if hs.read().await.status == HealthStatus::Healthy {
+                count += 1;
+            }
+        }
+        count
+    }
+
+    /// Indices of backends that are not degraded/offline.
+    /// Falls back to all backends if none are healthy (prevents total lockout).
+    async fn healthy_backend_indices(&self) -> Vec<usize> {
+        let mut indices = Vec::new();
+        for (i, hs) in self.health_states.iter().enumerate() {
+            if !hs.read().await.should_skip_for_reads() {
+                indices.push(i);
+            }
+        }
+        if indices.is_empty() {
+            (0..self.backends.len()).collect()
+        } else {
+            indices
+        }
+    }
+
+    /// Attempt a lightweight recovery probe on backends that are due for one.
+    async fn probe_if_due(&self) {
+        for (i, hs) in self.health_states.iter().enumerate() {
+            // Claim the probe window under write lock *before* the network call
+            // to prevent concurrent reads from firing duplicate probes.
+            let should = {
+                let mut state = hs.write().await;
+                if state.should_probe(&self.config.health) {
+                    state.last_probe = Some(chrono::Utc::now());
+                    true
+                } else {
+                    false
+                }
+            };
+            if should {
+                let start = tokio::time::Instant::now();
+                let result = self.backends[i].exists(&VaultPath::root()).await;
+                let latency = start.elapsed();
+                let mut state = hs.write().await;
+                match result {
+                    Ok(_) => {
+                        tracing::info!(
+                            backend = self.backends[i].name(),
+                            index = i,
+                            "Backend recovered after probe"
+                        );
+                        state.record_success(latency);
+                    }
+                    Err(_) => {
+                        // Still down — last_probe was already claimed above
+                    }
+                }
+            }
+        }
+    }
+
+    /// Log a warning if the number of healthy backends drops below a safe threshold.
+    async fn check_redundancy_warning(&self) {
+        let healthy = self.healthy_backend_count().await;
+        let total = self.backends.len();
+
+        let min_safe = match self.config.mode {
+            RaidMode::Mirror => 2,
+            RaidMode::Erasure { data_shards, .. } => data_shards + 1,
+        };
+
+        if healthy < min_safe {
+            warn!(
+                healthy_backends = healthy,
+                total_backends = total,
+                min_safe = min_safe,
+                "Redundancy below safe threshold — risk of data loss on further failures"
+            );
+        }
+    }
+
+    /// Record a success on the given backend's health state.
+    async fn record_health_success(&self, index: usize, latency: std::time::Duration) {
+        if let Some(hs) = self.health_states.get(index) {
+            hs.write().await.record_success(latency);
+        }
+    }
+
+    /// Record a failure on the given backend's health state.
+    async fn record_health_failure(&self, index: usize) {
+        if let Some(hs) = self.health_states.get(index) {
+            hs.write().await.record_failure(&self.config.health);
+        }
+    }
+
     /// Fan out a `Result<Metadata>` operation to all backends concurrently.
     /// Returns the first successful result and the indices of backends that
     /// succeeded; fails only if ALL backends fail.
@@ -176,7 +294,19 @@ impl CompositeStorageProvider {
         F: Fn(Arc<dyn StorageProvider>) -> Fut,
         Fut: Future<Output = Result<Metadata>>,
     {
-        let futures: Vec<_> = self.backends.iter().map(|b| f(Arc::clone(b))).collect();
+        // Wrap each future to measure per-backend latency.
+        let futures: Vec<_> = self
+            .backends
+            .iter()
+            .map(|b| {
+                let fut = f(Arc::clone(b));
+                async move {
+                    let start = tokio::time::Instant::now();
+                    let result = fut.await;
+                    (result, start.elapsed())
+                }
+            })
+            .collect();
         let results = futures::future::join_all(futures).await;
 
         let mut first_success: Option<Metadata> = None;
@@ -184,15 +314,17 @@ impl CompositeStorageProvider {
         let mut last_error: Option<Error> = None;
         let mut failure_count = 0usize;
 
-        for (i, result) in results.into_iter().enumerate() {
+        for (i, (result, latency)) in results.into_iter().enumerate() {
             match result {
                 Ok(meta) => {
+                    self.record_health_success(i, latency).await;
                     succeeded.push(i);
                     if first_success.is_none() {
                         first_success = Some(meta);
                     }
                 }
                 Err(e) => {
+                    self.record_health_failure(i).await;
                     failure_count += 1;
                     warn!(
                         backend = self.backends[i].name(),
@@ -214,6 +346,7 @@ impl CompositeStorageProvider {
                 failure_count,
                 self.backends.len()
             );
+            self.check_redundancy_warning().await;
         }
 
         first_success.map(|meta| (meta, succeeded)).ok_or_else(|| {
@@ -227,17 +360,32 @@ impl CompositeStorageProvider {
         F: Fn(Arc<dyn StorageProvider>) -> Fut,
         Fut: Future<Output = Result<()>>,
     {
-        let futures: Vec<_> = self.backends.iter().map(|b| f(Arc::clone(b))).collect();
+        let futures: Vec<_> = self
+            .backends
+            .iter()
+            .map(|b| {
+                let fut = f(Arc::clone(b));
+                async move {
+                    let start = tokio::time::Instant::now();
+                    let result = fut.await;
+                    (result, start.elapsed())
+                }
+            })
+            .collect();
         let results = futures::future::join_all(futures).await;
 
         let mut any_success = false;
         let mut last_error: Option<Error> = None;
         let mut failure_count = 0usize;
 
-        for (i, result) in results.into_iter().enumerate() {
+        for (i, (result, latency)) in results.into_iter().enumerate() {
             match result {
-                Ok(()) => any_success = true,
+                Ok(()) => {
+                    self.record_health_success(i, latency).await;
+                    any_success = true;
+                }
                 Err(e) => {
+                    self.record_health_failure(i).await;
                     failure_count += 1;
                     warn!(
                         backend = self.backends[i].name(),
@@ -259,6 +407,7 @@ impl CompositeStorageProvider {
                 failure_count,
                 self.backends.len()
             );
+            self.check_redundancy_warning().await;
         }
 
         if any_success {
@@ -270,24 +419,62 @@ impl CompositeStorageProvider {
     }
 
     /// Try backends in priority order, returning the first success.
+    ///
+    /// Healthy backends are tried first. Degraded/offline backends are only
+    /// attempted if all healthy ones fail (prevents total lockout).
     /// Only warns on errors that are not `NotFound` (which is a normal result).
     async fn try_first<T, F, Fut>(&self, op: &str, f: F) -> Result<T>
     where
         F: Fn(Arc<dyn StorageProvider>) -> Fut,
         Fut: Future<Output = Result<T>>,
     {
+        self.probe_if_due().await;
+
+        let healthy_indices = self.healthy_backend_indices().await;
         let mut last_error: Option<Error> = None;
 
-        for backend in &self.backends {
-            match f(Arc::clone(backend)).await {
-                Ok(val) => return Ok(val),
+        // First pass: try healthy backends
+        for &i in &healthy_indices {
+            let start = tokio::time::Instant::now();
+            match f(Arc::clone(&self.backends[i])).await {
+                Ok(val) => {
+                    self.record_health_success(i, start.elapsed()).await;
+                    return Ok(val);
+                }
                 Err(e) => {
                     if !matches!(&e, Error::NotFound(_)) {
+                        self.record_health_failure(i).await;
+                        warn!(
+                            backend = self.backends[i].name(),
+                            operation = op,
+                            error = %e,
+                            "Backend read failed, trying next"
+                        );
+                    }
+                    last_error = Some(e);
+                }
+            }
+        }
+
+        // Second pass: try remaining (degraded) backends not already tried
+        for (i, backend) in self.backends.iter().enumerate() {
+            if healthy_indices.contains(&i) {
+                continue;
+            }
+            let start = tokio::time::Instant::now();
+            match f(Arc::clone(backend)).await {
+                Ok(val) => {
+                    self.record_health_success(i, start.elapsed()).await;
+                    return Ok(val);
+                }
+                Err(e) => {
+                    if !matches!(&e, Error::NotFound(_)) {
+                        self.record_health_failure(i).await;
                         warn!(
                             backend = backend.name(),
                             operation = op,
                             error = %e,
-                            "Backend read failed, trying next"
+                            "Degraded backend read also failed"
                         );
                     }
                     last_error = Some(e);
@@ -428,7 +615,11 @@ impl CompositeStorageProvider {
             payload.extend_from_slice(&crc.to_le_bytes());
             payload.extend_from_slice(&(original_size as u64).to_le_bytes());
             payload.extend_from_slice(&shard);
-            futures.push(async move { backend.upload(&shard_path, payload).await });
+            futures.push(async move {
+                let start = tokio::time::Instant::now();
+                let result = backend.upload(&shard_path, payload).await;
+                (result, start.elapsed())
+            });
         }
 
         let results = futures::future::join_all(futures).await;
@@ -438,9 +629,10 @@ impl CompositeStorageProvider {
         let mut failure_count = 0usize;
         let mut last_error: Option<Error> = None;
 
-        for (i, result) in results.into_iter().enumerate() {
+        for (i, (result, latency)) in results.into_iter().enumerate() {
             match result {
                 Ok(meta) => {
+                    self.record_health_success(i, latency).await;
                     succeeded.push(i);
                     if first_meta.is_none() {
                         // Return metadata reflecting the original file, not the shard
@@ -452,6 +644,7 @@ impl CompositeStorageProvider {
                     }
                 }
                 Err(e) => {
+                    self.record_health_failure(i).await;
                     failure_count += 1;
                     warn!(
                         backend = self.backends[i].name(),
@@ -465,7 +658,7 @@ impl CompositeStorageProvider {
         }
 
         let (_, parity_shards) = self.erasure_params()?;
-        if failure_count >= parity_shards {
+        if failure_count > parity_shards {
             return Err(last_error
                 .unwrap_or_else(|| Error::Storage("Too many shard write failures".to_string())));
         }
@@ -479,6 +672,7 @@ impl CompositeStorageProvider {
                 failure_count,
                 self.backends.len()
             );
+            self.check_redundancy_warning().await;
         }
 
         let meta = first_meta.ok_or_else(|| {
@@ -508,6 +702,8 @@ impl CompositeStorageProvider {
 
     /// Download data in erasure mode: fetch shards, reconstruct original data.
     async fn erasure_download(&self, path: &VaultPath) -> Result<Vec<u8>> {
+        self.probe_if_due().await;
+
         let RaidMode::Erasure {
             data_shards,
             parity_shards,
@@ -521,7 +717,11 @@ impl CompositeStorageProvider {
         for i in 0..total {
             let backend = Arc::clone(&self.backends[i]);
             let shard_path = Self::shard_path(path, i)?;
-            futures.push(async move { (i, backend.download(&shard_path).await) });
+            futures.push(async move {
+                let start = tokio::time::Instant::now();
+                let result = backend.download(&shard_path).await;
+                (i, result, start.elapsed())
+            });
         }
 
         let results = futures::future::join_all(futures).await;
@@ -530,11 +730,12 @@ impl CompositeStorageProvider {
         let mut size_votes: HashMap<usize, usize> = HashMap::new();
         let mut available = 0usize;
 
-        for (i, result) in results {
+        for (i, result, latency) in results {
             if let Ok(payload) = result {
                 // Header: [4-byte CRC-32] [8-byte LE original_size] [shard_data]
                 if payload.len() < 12 {
                     warn!(shard = i, "Erasure download: shard too short, skipping");
+                    self.record_health_failure(i).await;
                     continue;
                 }
                 let stored_crc = u32::from_le_bytes(payload[..4].try_into().unwrap());
@@ -550,12 +751,17 @@ impl CompositeStorageProvider {
                         computed_crc,
                         "Erasure download: CRC mismatch, treating shard as missing"
                     );
+                    self.record_health_failure(i).await;
                     continue;
                 }
 
+                // Only record success after payload validation passes
+                self.record_health_success(i, latency).await;
                 *size_votes.entry(size).or_insert(0) += 1;
                 shard_opts[i] = Some(shard_data.to_vec());
                 available += 1;
+            } else {
+                self.record_health_failure(i).await;
             }
         }
 
@@ -1022,6 +1228,7 @@ mod tests {
     fn mirror_config() -> CompositeConfig {
         CompositeConfig {
             mode: RaidMode::Mirror,
+            health: HealthConfig::default(),
         }
     }
 
@@ -1103,6 +1310,7 @@ mod tests {
                     data_shards: 2,
                     parity_shards: 2,
                 },
+                health: HealthConfig::default(),
             },
         )
         .is_err());
@@ -1115,6 +1323,7 @@ mod tests {
                     data_shards: 3,
                     parity_shards: 2,
                 },
+                health: HealthConfig::default(),
             },
         )
         .is_ok());
@@ -1127,6 +1336,7 @@ mod tests {
                     data_shards: 0,
                     parity_shards: 2,
                 },
+                health: HealthConfig::default(),
             },
         )
         .is_err());
@@ -1147,6 +1357,7 @@ mod tests {
                 data_shards: 3,
                 parity_shards: 2,
             },
+            health: HealthConfig::default(),
         };
         let json = serde_json::to_string(&config).unwrap();
         let decoded: CompositeConfig = serde_json::from_str(&json).unwrap();
@@ -1445,6 +1656,7 @@ mod tests {
                 data_shards,
                 parity_shards,
             },
+            health: HealthConfig::default(),
         }
     }
 
@@ -1801,5 +2013,396 @@ mod tests {
         assert!(!is_shard_file("file.shard"));
         assert!(!is_shard_file("file.shardX"));
         assert!(!is_shard_file("noshard"));
+    }
+
+    // -- Toggleable provider for health tests ---------------------------------
+
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    /// A provider that delegates to an inner `MemoryProvider` but can be toggled
+    /// to fail all operations on demand.
+    struct ToggleableProvider {
+        inner: MemoryProvider,
+        should_fail: AtomicBool,
+        provider_name: String,
+    }
+
+    impl ToggleableProvider {
+        fn new(name: &str) -> Self {
+            Self {
+                inner: MemoryProvider::new(),
+                should_fail: AtomicBool::new(false),
+                provider_name: name.to_string(),
+            }
+        }
+
+        fn set_failing(&self, fail: bool) {
+            self.should_fail.store(fail, Ordering::SeqCst);
+        }
+
+        fn check(&self) -> Result<()> {
+            if self.should_fail.load(Ordering::SeqCst) {
+                Err(Error::Storage("backend down".into()))
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    #[async_trait]
+    impl StorageProvider for ToggleableProvider {
+        fn name(&self) -> &str {
+            &self.provider_name
+        }
+        async fn upload(&self, path: &VaultPath, data: Vec<u8>) -> Result<Metadata> {
+            self.check()?;
+            self.inner.upload(path, data).await
+        }
+        async fn upload_stream(&self, path: &VaultPath, stream: ByteStream) -> Result<Metadata> {
+            self.check()?;
+            self.inner.upload_stream(path, stream).await
+        }
+        async fn download(&self, path: &VaultPath) -> Result<Vec<u8>> {
+            self.check()?;
+            self.inner.download(path).await
+        }
+        async fn download_stream(&self, path: &VaultPath) -> Result<ByteStream> {
+            self.check()?;
+            self.inner.download_stream(path).await
+        }
+        async fn exists(&self, path: &VaultPath) -> Result<bool> {
+            self.check()?;
+            self.inner.exists(path).await
+        }
+        async fn delete(&self, path: &VaultPath) -> Result<()> {
+            self.check()?;
+            self.inner.delete(path).await
+        }
+        async fn list(&self, path: &VaultPath) -> Result<Vec<Metadata>> {
+            self.check()?;
+            self.inner.list(path).await
+        }
+        async fn metadata(&self, path: &VaultPath) -> Result<Metadata> {
+            self.check()?;
+            self.inner.metadata(path).await
+        }
+        async fn create_dir(&self, path: &VaultPath) -> Result<Metadata> {
+            self.check()?;
+            self.inner.create_dir(path).await
+        }
+        async fn delete_dir(&self, path: &VaultPath) -> Result<()> {
+            self.check()?;
+            self.inner.delete_dir(path).await
+        }
+        async fn rename(&self, from: &VaultPath, to: &VaultPath) -> Result<Metadata> {
+            self.check()?;
+            self.inner.rename(from, to).await
+        }
+        async fn copy(&self, from: &VaultPath, to: &VaultPath) -> Result<Metadata> {
+            self.check()?;
+            self.inner.copy(from, to).await
+        }
+    }
+
+    // -- Health tracking tests ------------------------------------------------
+
+    #[tokio::test]
+    async fn test_health_backends_start_healthy() {
+        let provider = CompositeStorageProvider::new(make_backends(3), mirror_config()).unwrap();
+        assert_eq!(provider.healthy_backend_count().await, 3);
+        for i in 0..3 {
+            let h = provider.backend_health(i).await.unwrap();
+            assert_eq!(h.status, HealthStatus::Healthy);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_health_degraded_after_consecutive_failures() {
+        let b0 = Arc::new(ToggleableProvider::new("t0"));
+        let b1 = Arc::new(ToggleableProvider::new("t1"));
+        let b2 = Arc::new(ToggleableProvider::new("t2"));
+
+        // Upload some data while all backends are healthy
+        let backends: Vec<Arc<dyn StorageProvider>> = vec![b0.clone(), b1.clone(), b2.clone()];
+        let config = CompositeConfig {
+            mode: RaidMode::Mirror,
+            health: HealthConfig {
+                failure_threshold: 3,
+                offline_threshold: 10,
+                recovery_interval_secs: 3600,
+            },
+        };
+        let provider = CompositeStorageProvider::new(backends, config).unwrap();
+
+        let path = VaultPath::parse("/test.txt").unwrap();
+        provider.upload(&path, b"hello".to_vec()).await.unwrap();
+
+        // Now make b0 fail
+        b0.set_failing(true);
+
+        // Trigger 3 write failures on b0 (fan_out writes to all, so b0 fails each time)
+        for _ in 0..3 {
+            provider.upload(&path, b"hello".to_vec()).await.unwrap();
+        }
+
+        let h0 = provider.backend_health(0).await.unwrap();
+        assert_eq!(h0.status, HealthStatus::Degraded);
+        assert_eq!(h0.consecutive_failures, 3);
+
+        // Backends 1 and 2 should still be healthy
+        let h1 = provider.backend_health(1).await.unwrap();
+        assert_eq!(h1.status, HealthStatus::Healthy);
+        let h2 = provider.backend_health(2).await.unwrap();
+        assert_eq!(h2.status, HealthStatus::Healthy);
+
+        assert_eq!(provider.healthy_backend_count().await, 2);
+    }
+
+    #[tokio::test]
+    async fn test_health_degraded_skipped_for_reads() {
+        let b0 = Arc::new(ToggleableProvider::new("t0"));
+        let b1 = Arc::new(ToggleableProvider::new("t1"));
+
+        let backends: Vec<Arc<dyn StorageProvider>> = vec![b0.clone(), b1.clone()];
+        let config = CompositeConfig {
+            mode: RaidMode::Mirror,
+            health: HealthConfig {
+                failure_threshold: 2,
+                offline_threshold: 10,
+                recovery_interval_secs: 3600,
+            },
+        };
+        let provider = CompositeStorageProvider::new(backends, config).unwrap();
+
+        let path = VaultPath::parse("/data.bin").unwrap();
+        provider.upload(&path, b"data".to_vec()).await.unwrap();
+
+        // Make b0 fail and trigger enough failures to degrade it
+        b0.set_failing(true);
+        for _ in 0..2 {
+            // These writes succeed overall (b1 is healthy) but record failures for b0
+            provider.upload(&path, b"data".to_vec()).await.unwrap();
+        }
+
+        let h0 = provider.backend_health(0).await.unwrap();
+        assert_eq!(h0.status, HealthStatus::Degraded);
+
+        // Download should still succeed via b1 (b0 is skipped)
+        let data = provider.download(&path).await.unwrap();
+        assert_eq!(data, b"data");
+    }
+
+    #[tokio::test]
+    async fn test_health_recovery_on_success() {
+        let b0 = Arc::new(ToggleableProvider::new("t0"));
+        let b1 = Arc::new(ToggleableProvider::new("t1"));
+
+        let backends: Vec<Arc<dyn StorageProvider>> = vec![b0.clone(), b1.clone()];
+        let config = CompositeConfig {
+            mode: RaidMode::Mirror,
+            health: HealthConfig {
+                failure_threshold: 2,
+                offline_threshold: 10,
+                recovery_interval_secs: 3600,
+            },
+        };
+        let provider = CompositeStorageProvider::new(backends, config).unwrap();
+
+        let path = VaultPath::parse("/recover.txt").unwrap();
+        provider.upload(&path, b"v1".to_vec()).await.unwrap();
+
+        // Degrade b0
+        b0.set_failing(true);
+        for _ in 0..2 {
+            provider.upload(&path, b"v1".to_vec()).await.unwrap();
+        }
+        assert_eq!(
+            provider.backend_health(0).await.unwrap().status,
+            HealthStatus::Degraded
+        );
+
+        // Restore b0
+        b0.set_failing(false);
+
+        // A successful write should recover it
+        provider.upload(&path, b"v2".to_vec()).await.unwrap();
+        assert_eq!(
+            provider.backend_health(0).await.unwrap().status,
+            HealthStatus::Healthy
+        );
+        assert_eq!(provider.healthy_backend_count().await, 2);
+    }
+
+    #[tokio::test]
+    async fn test_health_transition_to_offline() {
+        let b0 = Arc::new(ToggleableProvider::new("t0"));
+        let b1 = Arc::new(ToggleableProvider::new("t1"));
+
+        let backends: Vec<Arc<dyn StorageProvider>> = vec![b0.clone(), b1.clone()];
+        let config = CompositeConfig {
+            mode: RaidMode::Mirror,
+            health: HealthConfig {
+                failure_threshold: 2,
+                offline_threshold: 5,
+                recovery_interval_secs: 3600,
+            },
+        };
+        let provider = CompositeStorageProvider::new(backends, config).unwrap();
+
+        let path = VaultPath::parse("/offline.txt").unwrap();
+        provider.upload(&path, b"data".to_vec()).await.unwrap();
+
+        b0.set_failing(true);
+
+        // 5 consecutive failures should transition through Degraded -> Offline
+        for _ in 0..5 {
+            provider.upload(&path, b"data".to_vec()).await.unwrap();
+        }
+
+        let h0 = provider.backend_health(0).await.unwrap();
+        assert_eq!(h0.status, HealthStatus::Offline);
+        assert_eq!(h0.consecutive_failures, 5);
+    }
+
+    #[tokio::test]
+    async fn test_health_all_degraded_fallback_reads() {
+        // When all backends are degraded, reads should still try all (prevent lockout)
+        let b0 = Arc::new(ToggleableProvider::new("t0"));
+        let b1 = Arc::new(ToggleableProvider::new("t1"));
+
+        let backends: Vec<Arc<dyn StorageProvider>> = vec![b0.clone(), b1.clone()];
+        let config = CompositeConfig {
+            mode: RaidMode::Mirror,
+            health: HealthConfig {
+                failure_threshold: 1,
+                offline_threshold: 10,
+                recovery_interval_secs: 3600,
+            },
+        };
+        let provider = CompositeStorageProvider::new(backends, config).unwrap();
+
+        let path = VaultPath::parse("/fallback.txt").unwrap();
+        provider.upload(&path, b"data".to_vec()).await.unwrap();
+
+        // Make both backends fail once each to degrade them
+        b0.set_failing(true);
+        b1.set_failing(true);
+        let _ = provider.upload(&path, b"data".to_vec()).await; // Both fail
+
+        // Now restore both
+        b0.set_failing(false);
+        b1.set_failing(false);
+
+        // Both are degraded, but healthy_backend_indices falls back to all
+        assert_eq!(provider.healthy_backend_count().await, 0);
+
+        // Download should succeed because fallback tries all backends
+        let data = provider.download(&path).await.unwrap();
+        assert_eq!(data, b"data");
+    }
+
+    #[tokio::test]
+    async fn test_health_intermittent_failures_dont_degrade() {
+        let b0 = Arc::new(ToggleableProvider::new("t0"));
+        let b1 = Arc::new(ToggleableProvider::new("t1"));
+
+        let backends: Vec<Arc<dyn StorageProvider>> = vec![b0.clone(), b1.clone()];
+        let config = CompositeConfig {
+            mode: RaidMode::Mirror,
+            health: HealthConfig {
+                failure_threshold: 3,
+                offline_threshold: 10,
+                recovery_interval_secs: 3600,
+            },
+        };
+        let provider = CompositeStorageProvider::new(backends, config).unwrap();
+
+        let path = VaultPath::parse("/intermittent.txt").unwrap();
+        provider.upload(&path, b"v1".to_vec()).await.unwrap();
+
+        // 2 failures on b0
+        b0.set_failing(true);
+        provider.upload(&path, b"v1".to_vec()).await.unwrap();
+        provider.upload(&path, b"v1".to_vec()).await.unwrap();
+
+        // Success resets counter
+        b0.set_failing(false);
+        provider.upload(&path, b"v1".to_vec()).await.unwrap();
+
+        assert_eq!(
+            provider.backend_health(0).await.unwrap().status,
+            HealthStatus::Healthy
+        );
+        assert_eq!(
+            provider
+                .backend_health(0)
+                .await
+                .unwrap()
+                .consecutive_failures,
+            0
+        );
+    }
+
+    #[tokio::test]
+    async fn test_health_latency_tracking() {
+        let provider = CompositeStorageProvider::new(make_backends(2), mirror_config()).unwrap();
+        let path = VaultPath::parse("/latency.txt").unwrap();
+        provider.upload(&path, b"data".to_vec()).await.unwrap();
+
+        let h = provider.backend_health(0).await.unwrap();
+        // After at least one successful op, avg_latency_ms should be > 0
+        assert!(h.avg_latency_ms > 0.0);
+    }
+
+    #[tokio::test]
+    async fn test_health_probe_recovers_degraded_backend() {
+        let b0 = Arc::new(ToggleableProvider::new("t0"));
+        let b1 = Arc::new(ToggleableProvider::new("t1"));
+
+        let backends: Vec<Arc<dyn StorageProvider>> = vec![b0.clone(), b1.clone()];
+        let config = CompositeConfig {
+            mode: RaidMode::Mirror,
+            health: HealthConfig {
+                failure_threshold: 1,
+                offline_threshold: 10,
+                // Very short recovery interval so the probe fires immediately
+                recovery_interval_secs: 0,
+            },
+        };
+        let provider = CompositeStorageProvider::new(backends, config).unwrap();
+
+        let path = VaultPath::parse("/probe.txt").unwrap();
+        provider.upload(&path, b"data".to_vec()).await.unwrap();
+
+        // Degrade b0
+        b0.set_failing(true);
+        provider.upload(&path, b"data".to_vec()).await.unwrap();
+        assert_eq!(
+            provider.backend_health(0).await.unwrap().status,
+            HealthStatus::Degraded
+        );
+
+        // Restore b0
+        b0.set_failing(false);
+
+        // The next read triggers probe_if_due(), which should recover b0
+        let data = provider.download(&path).await.unwrap();
+        assert_eq!(data, b"data");
+
+        assert_eq!(
+            provider.backend_health(0).await.unwrap().status,
+            HealthStatus::Healthy
+        );
+    }
+
+    #[tokio::test]
+    async fn test_config_serde_backward_compat() {
+        // Old-format JSON without health field should deserialize with defaults
+        let json = r#"{"mode":"Mirror"}"#;
+        let config: CompositeConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.mode, RaidMode::Mirror);
+        assert_eq!(config.health.failure_threshold, 3);
+        assert_eq!(config.health.offline_threshold, 10);
+        assert_eq!(config.health.recovery_interval_secs, 60);
     }
 }
