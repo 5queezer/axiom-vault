@@ -73,10 +73,7 @@ impl CompositeStorageProvider {
             ));
         }
 
-        config
-            .health
-            .validate()
-            .map_err(Error::InvalidInput)?;
+        config.health.validate().map_err(Error::InvalidInput)?;
 
         if let RaidMode::Erasure {
             data_shards,
