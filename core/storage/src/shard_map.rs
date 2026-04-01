@@ -97,6 +97,8 @@ impl ShardMap {
     pub fn insert(&mut self, path: &str, entry: ChunkEntry) {
         self.version += 1;
         self.updated_at = Utc::now();
+        // Clear any stale tombstone so merge doesn't suppress this entry.
+        self.tombstones.remove(path);
         self.entries.insert(path.to_string(), entry);
     }
 
@@ -106,12 +108,12 @@ impl ShardMap {
     /// to prevent the entry from being resurrected when merging with stale backends.
     pub fn remove(&mut self, path: &str) -> Option<ChunkEntry> {
         let removed = self.entries.remove(path);
-        if removed.is_some() {
-            self.version += 1;
-            let now = Utc::now();
-            self.updated_at = now;
-            self.tombstones.insert(path.to_string(), now);
-        }
+        // Always refresh the tombstone so repeated deletes advance the timestamp,
+        // ensuring stale entries on diverged backends are suppressed on merge.
+        let now = Utc::now();
+        self.version += 1;
+        self.updated_at = now;
+        self.tombstones.insert(path.to_string(), now);
         removed
     }
 
@@ -133,6 +135,8 @@ impl ShardMap {
             self.updated_at = now;
             // Tombstone the old path to prevent resurrection from stale backends.
             self.tombstones.insert(from.to_string(), now);
+            // Clear any stale tombstone on the destination path.
+            self.tombstones.remove(to);
             self.entries.insert(to.to_string(), entry.clone());
             Some(entry)
         } else {
@@ -579,20 +583,22 @@ mod tests {
     }
 
     #[test]
-    fn test_remove_bumps_version_only_if_present() {
+    fn test_remove_always_records_tombstone() {
         let mut map = ShardMap::new();
         let backends = make_backends(2);
         map.insert("/a", ShardMap::mirror_entry("/a", 100, &backends, None));
         assert_eq!(map.version, 1);
 
-        // Remove nonexistent — version should not change
+        // Remove nonexistent — still bumps version and records tombstone
         assert!(map.remove("/nonexistent").is_none());
-        assert_eq!(map.version, 1);
+        assert_eq!(map.version, 2);
+        assert!(map.tombstones.contains_key("/nonexistent"));
 
         // Remove existing
         assert!(map.remove("/a").is_some());
-        assert_eq!(map.version, 2);
+        assert_eq!(map.version, 3);
         assert!(map.entries.is_empty());
+        assert!(map.tombstones.contains_key("/a"));
     }
 
     #[test]
