@@ -19,6 +19,7 @@ pub mod local;
 pub mod memory;
 pub mod onedrive;
 pub mod provider;
+pub mod rebuild;
 pub mod registry;
 pub mod shard_map;
 
@@ -31,5 +32,6 @@ pub use local::LocalProvider;
 pub use memory::MemoryProvider;
 pub use onedrive::{OneDriveConfig, OneDriveProvider};
 pub use provider::{ConflictResolution, Metadata, StorageProvider};
+pub use rebuild::{RaidRebuilder, RebuildConfig, RebuildResult};
 pub use registry::{create_default_registry, ProviderFactory, ProviderRegistry};
 pub use shard_map::{ChunkEntry, ErasureParams, ShardLocation, ShardMap};

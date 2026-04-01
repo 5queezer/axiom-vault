@@ -171,6 +171,21 @@ impl CompositeStorageProvider {
         self.config.mode
     }
 
+    /// Get a reference to the backend list.
+    pub fn backends(&self) -> &[Arc<dyn StorageProvider>] {
+        &self.backends
+    }
+
+    /// Get a reference to the composite configuration.
+    pub fn composite_config(&self) -> &CompositeConfig {
+        &self.config
+    }
+
+    /// Get a reference to the shard map (behind `Arc<RwLock<_>>`).
+    pub fn shard_map_ref(&self) -> &Arc<RwLock<ShardMap>> {
+        &self.shard_map
+    }
+
     /// Get the number of backends.
     pub fn backend_count(&self) -> usize {
         self.backends.len()
@@ -486,7 +501,7 @@ impl CompositeStorageProvider {
     }
 
     /// Get erasure mode parameters, or error if in mirror mode.
-    fn erasure_params(&self) -> Result<(usize, usize)> {
+    pub(crate) fn erasure_params(&self) -> Result<(usize, usize)> {
         match self.config.mode {
             RaidMode::Erasure {
                 data_shards,
@@ -497,14 +512,14 @@ impl CompositeStorageProvider {
     }
 
     /// Get the cached Reed-Solomon encoder (only valid in erasure mode).
-    fn reed_solomon(&self) -> Result<&ReedSolomon> {
+    pub(crate) fn reed_solomon(&self) -> Result<&ReedSolomon> {
         self.reed_solomon
             .as_ref()
             .ok_or_else(|| Error::Storage("Reed-Solomon not available in mirror mode".to_string()))
     }
 
     /// Encode data into N shards (k data + m parity) using Reed-Solomon.
-    fn erasure_encode(&self, data: &[u8]) -> Result<Vec<Vec<u8>>> {
+    pub(crate) fn erasure_encode(&self, data: &[u8]) -> Result<Vec<Vec<u8>>> {
         let (data_shards, parity_shards) = self.erasure_params()?;
         let total_shards = data_shards + parity_shards;
 
@@ -541,7 +556,7 @@ impl CompositeStorageProvider {
 
     /// Decode data from shards using Reed-Solomon.
     /// `shard_opts` has N entries; missing shards are `None`.
-    fn erasure_decode(
+    pub(crate) fn erasure_decode(
         &self,
         mut shard_opts: Vec<Option<Vec<u8>>>,
         original_size: usize,
@@ -595,7 +610,7 @@ impl CompositeStorageProvider {
     }
 
     /// Build the shard path for a given file path and shard index.
-    fn shard_path(path: &VaultPath, shard_index: usize) -> Result<VaultPath> {
+    pub(crate) fn shard_path(path: &VaultPath, shard_index: usize) -> Result<VaultPath> {
         let path_str = path.to_string_path();
         VaultPath::parse(&format!("{}.shard{}", path_str, shard_index))
     }
