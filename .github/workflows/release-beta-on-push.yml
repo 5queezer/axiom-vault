@@ -25,18 +25,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 0
       - name: Compute beta version
         id: ver
         shell: bash
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
         run: |
           set -euo pipefail
           base_version=$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -1)
 
-          # Skip beta if this is a version bump commit (stable release handles it)
-          commit_msg=$(git log -1 --pretty=format:"%s")
-          if [[ "$commit_msg" =~ ^chore:\ bump\ version ]]; then
-            echo "Version bump commit detected — skipping beta release"
+          # Skip beta if the pushed commits changed the version in Cargo.toml
+          # (stable release workflow handles version bumps)
+          if [[ "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ]] && \
+             git diff "$BEFORE_SHA" "$GITHUB_SHA" -- Cargo.toml | grep -qE '^[+-]version = "'; then
+            echo "Version bump detected in Cargo.toml — skipping beta release"
             echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
