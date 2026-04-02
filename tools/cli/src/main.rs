@@ -2391,3 +2391,252 @@ async fn cmd_raid_configure(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{print_progress_bar, rebuild_with_progress};
+
+    use axiomvault_storage::{
+        rebuild::{RebuildConfig, RebuildProgress},
+        CompositeConfig, CompositeStorageProvider, MemoryProvider, RaidMode, RaidRebuilder,
+    };
+    use std::sync::Arc;
+    use std::time::Instant;
+
+    // -----------------------------------------------------------------------
+    // Helpers
+    // -----------------------------------------------------------------------
+
+    fn make_mirror_composite(n: usize) -> CompositeStorageProvider {
+        let backends: Vec<Arc<dyn axiomvault_storage::StorageProvider>> = (0..n)
+            .map(|_| Arc::new(MemoryProvider::new()) as _)
+            .collect();
+        let config = CompositeConfig {
+            mode: RaidMode::Mirror,
+            health: Default::default(),
+        };
+        CompositeStorageProvider::new(backends, config).expect("mirror composite")
+    }
+
+    fn progress_with(total: usize, completed: usize, skipped: usize, failed: usize) -> RebuildProgress {
+        RebuildProgress {
+            total,
+            completed,
+            skipped,
+            failed,
+            started_at: Instant::now(),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // print_progress_bar – smoke tests covering all three arrow branches
+    // -----------------------------------------------------------------------
+
+    /// filled == 0: all spaces branch (pct is 0 and total > 0)
+    #[test]
+    fn test_print_progress_bar_zero_percent() {
+        let progress = progress_with(100, 0, 0, 0);
+        // Must not panic; ETA is None because done == 0.
+        print_progress_bar(&progress);
+    }
+
+    /// filled == bar_width (30): equals-only branch (100%)
+    #[test]
+    fn test_print_progress_bar_full_progress() {
+        let progress = progress_with(10, 10, 0, 0);
+        // All items completed => 100% => filled == 30 => "=" * 30 branch.
+        print_progress_bar(&progress);
+    }
+
+    /// filled in (0, bar_width): arrow branch with "===>   " format
+    #[test]
+    fn test_print_progress_bar_mid_progress_arrow() {
+        // 5/10 completed = 50% => filled = 15 => arrow branch
+        let progress = progress_with(10, 5, 0, 0);
+        print_progress_bar(&progress);
+    }
+
+    /// filled == 1: degenerate arrow (0 '=' chars before '>') must not panic.
+    /// filled = floor((pct/100) * 30). With 4/100 done => pct=4.0 =>
+    /// floor(0.04 * 30) = floor(1.2) = 1. Arrow becomes ">" + 29 spaces.
+    #[test]
+    fn test_print_progress_bar_one_unit_filled() {
+        // 4 out of 100 done => pct=4.0% => filled=1 => degenerate arrow branch
+        let progress = progress_with(100, 4, 0, 0);
+        print_progress_bar(&progress);
+    }
+
+    /// ETA branch: Some(d) when done > 0 and remaining > 0
+    #[test]
+    fn test_print_progress_bar_eta_displayed() {
+        // 5 completed with 5 remaining => ETA should be Some
+        let progress = progress_with(10, 5, 0, 0);
+        // Verify eta() returns Some before calling print.
+        assert!(progress.eta().is_some());
+        print_progress_bar(&progress);
+    }
+
+    /// No ETA when done == 0 (rate is unknown)
+    #[test]
+    fn test_print_progress_bar_no_eta_when_nothing_done() {
+        let progress = progress_with(10, 0, 0, 0);
+        assert!(progress.eta().is_none());
+        print_progress_bar(&progress);
+    }
+
+    /// total == 0: percentage() returns 100.0, filled == 30, equals-only branch
+    #[test]
+    fn test_print_progress_bar_empty_total() {
+        let progress = progress_with(0, 0, 0, 0);
+        assert_eq!(progress.percentage(), 100.0);
+        print_progress_bar(&progress);
+    }
+
+    /// Mixed completed/skipped/failed contributes to 'done' counter
+    #[test]
+    fn test_print_progress_bar_counts_all_outcomes() {
+        let progress = progress_with(30, 5, 3, 2);
+        // done = 10/30 = 33% => filled = 10 => arrow branch
+        let pct = progress.percentage();
+        assert!((pct - 33.33).abs() < 0.5);
+        print_progress_bar(&progress);
+    }
+
+    // -----------------------------------------------------------------------
+    // rebuild_with_progress – integration tests using MemoryProvider backends
+    // -----------------------------------------------------------------------
+
+    /// Empty shard map: rebuild completes immediately with zero counts.
+    #[tokio::test]
+    async fn test_rebuild_with_progress_empty_shard_map() {
+        let composite = make_mirror_composite(3);
+        let rebuilder =
+            RaidRebuilder::new(&composite, 0, RebuildConfig::default()).expect("rebuilder");
+
+        let result = rebuild_with_progress(&rebuilder)
+            .await
+            .expect("rebuild_with_progress");
+
+        assert_eq!(result.rebuilt, 0);
+        assert_eq!(result.skipped, 0);
+        assert_eq!(result.failed, 0);
+    }
+
+    /// File present on all backends: rebuild skips everything (already present).
+    #[tokio::test]
+    async fn test_rebuild_with_progress_skips_existing_chunks() {
+        let composite = make_mirror_composite(3);
+
+        // Upload a file so it exists on all backends via the composite.
+        let vp = axiomvault_common::VaultPath::parse("/test.enc").unwrap();
+        composite
+            .upload(&vp, b"test data".to_vec())
+            .await
+            .expect("upload");
+
+        // Target is backend 2, which already has the file.
+        let rebuilder =
+            RaidRebuilder::new(&composite, 2, RebuildConfig::default()).expect("rebuilder");
+
+        let result = rebuild_with_progress(&rebuilder)
+            .await
+            .expect("rebuild_with_progress");
+
+        assert_eq!(result.rebuilt, 0);
+        assert_eq!(result.skipped, 1);
+        assert_eq!(result.failed, 0);
+    }
+
+    /// File missing from target backend: rebuild restores it.
+    #[tokio::test]
+    async fn test_rebuild_with_progress_restores_missing_chunk() {
+        let composite = make_mirror_composite(3);
+
+        let vp = axiomvault_common::VaultPath::parse("/restore.enc").unwrap();
+        composite
+            .upload(&vp, b"restore me".to_vec())
+            .await
+            .expect("upload");
+
+        // Manually delete the file from backend 2 via direct backend access.
+        composite.backends()[2]
+            .delete(&vp)
+            .await
+            .expect("delete from backend 2");
+
+        assert!(
+            !composite.backends()[2]
+                .exists(&vp)
+                .await
+                .expect("exists check"),
+            "backend 2 should be missing the file"
+        );
+
+        // Rebuild targeting backend 2.
+        let rebuilder =
+            RaidRebuilder::new(&composite, 2, RebuildConfig::default()).expect("rebuilder");
+
+        let result = rebuild_with_progress(&rebuilder)
+            .await
+            .expect("rebuild_with_progress");
+
+        assert_eq!(result.rebuilt, 1);
+        assert_eq!(result.skipped, 0);
+        assert_eq!(result.failed, 0);
+
+        // Verify the file is restored on backend 2.
+        assert!(
+            composite.backends()[2]
+                .exists(&vp)
+                .await
+                .expect("exists after rebuild"),
+            "backend 2 should have the file after rebuild"
+        );
+        let data = composite.backends()[2]
+            .download(&vp)
+            .await
+            .expect("download after rebuild");
+        assert_eq!(data, b"restore me");
+    }
+
+    /// Multiple files, some missing: counts rebuilt vs skipped correctly.
+    #[tokio::test]
+    async fn test_rebuild_with_progress_multiple_files_partial_miss() {
+        let composite = make_mirror_composite(3);
+
+        let vp_a = axiomvault_common::VaultPath::parse("/a.enc").unwrap();
+        let vp_b = axiomvault_common::VaultPath::parse("/b.enc").unwrap();
+        let vp_c = axiomvault_common::VaultPath::parse("/c.enc").unwrap();
+
+        composite.upload(&vp_a, b"aaa".to_vec()).await.expect("upload a");
+        composite.upload(&vp_b, b"bbb".to_vec()).await.expect("upload b");
+        composite.upload(&vp_c, b"ccc".to_vec()).await.expect("upload c");
+
+        // Delete a and c from backend 1.
+        composite.backends()[1].delete(&vp_a).await.expect("del a");
+        composite.backends()[1].delete(&vp_c).await.expect("del c");
+
+        let rebuilder =
+            RaidRebuilder::new(&composite, 1, RebuildConfig::default()).expect("rebuilder");
+
+        let result = rebuild_with_progress(&rebuilder)
+            .await
+            .expect("rebuild_with_progress");
+
+        assert_eq!(result.rebuilt, 2);
+        assert_eq!(result.skipped, 1);
+        assert_eq!(result.failed, 0);
+    }
+
+    /// rebuild_with_progress returns Ok even when the RebuildResult has all zeros.
+    /// This verifies the function's return type and that it doesn't error on no-op.
+    #[tokio::test]
+    async fn test_rebuild_with_progress_returns_ok_on_noop() {
+        let composite = make_mirror_composite(2);
+        let rebuilder =
+            RaidRebuilder::new(&composite, 0, RebuildConfig::default()).expect("rebuilder");
+
+        let result = rebuild_with_progress(&rebuilder).await;
+        assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
+    }
+}
