@@ -1,19 +1,12 @@
-name: Release Stable
+name: Release Beta
 
 on:
   push:
-    tags:
-      - "v[0-9]+.[0-9]+.[0-9]+"   # stable tags only (no -beta suffix)
-  workflow_dispatch:
-    inputs:
-      version:
-        description: "Stable version to release (e.g. 0.1.0)"
-        required: true
-        type: string
+    branches: [master]
 
 concurrency:
-  group: release-stable
-  cancel-in-progress: false
+  group: release-beta
+  cancel-in-progress: true
 
 permissions:
   contents: write
@@ -22,61 +15,52 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  validate:
-    name: Validate Version
+  version:
+    name: Resolve Version
     runs-on: ubuntu-latest
     outputs:
-      tag: ${{ steps.check.outputs.tag }}
+      version: ${{ steps.ver.outputs.version }}
+      tag: ${{ steps.ver.outputs.tag }}
+      skip: ${{ steps.ver.outputs.skip }}
     steps:
       - uses: actions/checkout@v4
-      - name: Validate semver and Cargo.toml match
-        id: check
+        with:
+          fetch-depth: 0
+      - name: Compute beta version
+        id: ver
         shell: bash
         env:
-          INPUT_VERSION: ${{ inputs.version || '' }}
-          REF_NAME: ${{ github.ref_name }}
-          EVENT_NAME: ${{ github.event_name }}
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          BEFORE_SHA: ${{ github.event.before }}
         run: |
           set -euo pipefail
-          cargo_version=$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -1)
+          base_version=$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -1)
 
-          # Resolve version from tag push or manual input
-          if [[ "$EVENT_NAME" == "push" ]]; then
-            input_version="${REF_NAME#v}"
-          else
-            input_version="$INPUT_VERSION"
-            # Manual releases must run from the default branch
-            if [[ "$REF_NAME" != "$DEFAULT_BRANCH" ]]; then
-              echo "::error::Manual releases must run from ${DEFAULT_BRANCH}. Got: ${REF_NAME}"
-              exit 1
-            fi
+          # Skip beta if the pushed commits changed the version in Cargo.toml
+          # (stable release workflow handles version bumps)
+          if [[ "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ]] && \
+             git diff "$BEFORE_SHA" "$GITHUB_SHA" -- Cargo.toml | grep -qE '^[+-]version = "'; then
+            echo "Version bump detected in Cargo.toml — skipping beta release"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
 
-          if [[ ! "$input_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::Version must be semver (X.Y.Z). Got: ${input_version}"
-            exit 1
+          # Skip beta if a stable tag already exists for this version
+          if git ls-remote --exit-code --tags origin "refs/tags/v${base_version}" >/dev/null 2>&1; then
+            echo "Stable tag v${base_version} exists — skipping beta release"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
 
-          if [[ "$cargo_version" != "$input_version" ]]; then
-            echo "::error::Cargo.toml version (${cargo_version}) does not match input (${input_version}). Bump Cargo.toml first."
-            exit 1
-          fi
-
-          tag="v${input_version}"
-
-          # Only check tag existence for manual dispatch (tag push means it already exists)
-          if [[ "$EVENT_NAME" != "push" ]]; then
-            if git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1; then
-              echo "::error::Tag ${tag} already exists."
-              exit 1
-            fi
-          fi
-
-          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          beta_tag="v${base_version}-beta.${GITHUB_RUN_NUMBER}"
+          echo "version=${base_version}" >> "$GITHUB_OUTPUT"
+          echo "tag=${beta_tag}" >> "$GITHUB_OUTPUT"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "Beta release: ${beta_tag}"
 
   release-notes:
     name: Generate Release Notes
+    needs: [version]
+    if: needs.version.outputs.skip != 'true'
     runs-on: ubuntu-latest
     outputs:
       notes: ${{ steps.notes.outputs.body }}
@@ -87,27 +71,20 @@ jobs:
       - name: Build release notes
         id: notes
         shell: bash
-        env:
-          INPUT_VERSION: ${{ inputs.version || '' }}
-          REF_NAME: ${{ github.ref_name }}
-          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
 
-          # Resolve version from tag push or manual input
-          if [[ "$EVENT_NAME" == "push" ]]; then
-            INPUT_VERSION="${REF_NAME#v}"
-          fi
-
-          # Find the previous stable tag (exclude beta tags)
-          PREV_TAG=$(git tag --sort=-creatordate | grep -vE '\-beta\.' | grep -v "^v${INPUT_VERSION}$" | head -1 || echo "")
+          # Find the previous stable tag to capture the full release cycle
+          PREV_TAG=$(git tag --sort=-creatordate \
+            | grep -vE '\-beta\.' \
+            | head -1 || echo "")
           if [ -z "$PREV_TAG" ]; then
             RANGE="HEAD"
           else
             RANGE="${PREV_TAG}..HEAD"
           fi
 
-          # Extract features only — skip bug fixes for clean release notes
+          # Extract features only (feat commits) — skip bug fixes for clean notes
           FEATURES=$(git log "$RANGE" --pretty=format:"%s" --no-merges \
             | grep -iE '^feat(\(|:)' \
             | sed 's/^feat(\([^)]*\)): /\1: /' \
@@ -136,7 +113,7 @@ jobs:
             | while IFS= read -r name; do echo "- ${name}"; done || true)
 
           if [ -n "$PREV_TAG" ]; then
-            CHANGELOG_LINE="*Full changelog: ${PREV_TAG}...v${INPUT_VERSION}*"
+            CHANGELOG_LINE="*Full changelog: ${PREV_TAG}...HEAD*"
           else
             CHANGELOG_LINE="*Initial release*"
           fi
@@ -163,7 +140,8 @@ jobs:
 
   build:
     name: Build ${{ matrix.target }}
-    needs: [validate]
+    needs: [version]
+    if: needs.version.outputs.skip != 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     strategy:
@@ -213,11 +191,11 @@ jobs:
         with:
           name: axiomvault-${{ matrix.target }}
           path: axiomvault-${{ matrix.target }}.tar.gz
-          retention-days: 14
+          retention-days: 7
 
   publish:
-    name: Publish Stable Release
-    needs: [validate, release-notes, build]
+    name: Publish Beta Release
+    needs: [version, release-notes, build]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -245,23 +223,13 @@ jobs:
           NOTES: ${{ needs.release-notes.outputs.notes }}
         run: printf '%s\n' "$NOTES" > release-notes.md
 
-      - name: Create tag if manual dispatch
-        if: github.event_name == 'workflow_dispatch'
-        env:
-          TAG: ${{ needs.validate.outputs.tag }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "$TAG" -m "axiomvault $TAG"
-          git push origin "$TAG"
-
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ needs.validate.outputs.tag }}
+          TAG: ${{ needs.version.outputs.tag }}
         run: |
           gh release create "$TAG" release-assets/* \
             --repo "${{ github.repository }}" \
             --title "$TAG" \
             --notes-file release-notes.md \
-            --latest
+            --prerelease
