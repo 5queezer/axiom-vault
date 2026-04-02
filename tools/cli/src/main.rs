@@ -1958,108 +1958,135 @@ async fn cmd_raid_remove_backend(vault_path: &Path, index: usize) -> Result<()> 
 
     // Migrate shards before removal if the backend holds any data.
     if raid_cfg.backends.len() >= 2 {
-        if let Ok(composite) = build_composite(&raid_cfg) {
-            if let Err(e) = composite.load_shard_map().await {
-                eprintln!("Warning: could not load shard map: {}", e);
-            } else {
-                let shard_map = composite.get_shard_map().await;
-                let has_shards = shard_map
-                    .entries
-                    .values()
-                    .any(|entry| entry.shards.contains_key(&index));
+        let composite = build_composite(&raid_cfg)?;
+        composite.load_shard_map().await?;
 
-                if has_shards {
-                    match raid_cfg.mode.mode_type.as_str() {
-                        "mirror" => {
-                            // Mirror mode: data exists on all other backends,
-                            // no migration needed. Just clean up the shard map.
-                            eprintln!(
-                                "Mirror mode: data is replicated on other backends, \
-                                 no migration needed."
-                            );
+        let shard_map = composite.get_shard_map().await;
+        let has_shards = shard_map
+            .entries
+            .values()
+            .any(|entry| entry.shards.contains_key(&index));
+
+        if has_shards {
+            match raid_cfg.mode.mode_type.as_str() {
+                "mirror" => {
+                    // Mirror mode: data exists on all other backends,
+                    // no migration needed. Just clean up the shard map.
+                    eprintln!(
+                        "Mirror mode: data is replicated on other backends, \
+                         no migration needed."
+                    );
+                }
+                "erasure" => {
+                    // Erasure mode: rebuild shards onto another backend
+                    // before removing this one.
+                    eprintln!(
+                        "Erasure mode: rebuilding shards from backend {} \
+                         before removal...",
+                        index
+                    );
+
+                    // Pick a rebuild target: first healthy backend that isn't
+                    // the one being removed.
+                    let mut rebuild_target = None;
+                    for i in 0..composite.backend_count() {
+                        if i == index {
+                            continue;
                         }
-                        "erasure" => {
-                            // Erasure mode: rebuild shards onto another backend
-                            // before removing this one.
-                            eprintln!(
-                                "Erasure mode: rebuilding shards from backend {} \
-                                 before removal...",
-                                index
-                            );
-
-                            // Pick a rebuild target: first healthy backend that isn't
-                            // the one being removed.
-                            let mut rebuild_target = None;
-                            for i in 0..composite.backend_count() {
-                                if i == index {
-                                    continue;
-                                }
-                                if let Some(h) = composite.backend_health(i).await {
-                                    if h.status == HealthStatus::Healthy {
-                                        rebuild_target = Some(i);
-                                        break;
-                                    }
-                                }
-                            }
-
-                            let target = rebuild_target.ok_or_else(|| {
-                                anyhow::anyhow!(
-                                    "No healthy backend available to receive \
-                                     redistributed shards. Aborting removal."
-                                )
-                            })?;
-
-                            let rebuilder =
-                                RaidRebuilder::new(&composite, target, RebuildConfig::default())
-                                    .map_err(|e| anyhow::anyhow!("{}", e))?;
-
-                            let result = rebuilder.rebuild().await.map_err(|e| {
-                                anyhow::anyhow!("Shard migration failed, aborting removal: {}", e)
-                            })?;
-
-                            eprintln!(
-                                "Migration complete: {} rebuilt, {} skipped, {} failed",
-                                result.rebuilt, result.skipped, result.failed
-                            );
-
-                            if result.failed > 0 {
-                                anyhow::bail!(
-                                    "Shard migration had {} failures. \
-                                     Aborting removal to prevent data loss.",
-                                    result.failed
-                                );
+                        if let Some(h) = composite.backend_health(i).await {
+                            if h.status == HealthStatus::Healthy {
+                                rebuild_target = Some(i);
+                                break;
                             }
                         }
-                        _ => {}
                     }
-                }
 
-                // Update shard map: remove all references to the removed backend
-                // and re-index higher backend indices.
-                {
-                    let mut map = composite.shard_map_ref().write().await;
-                    for entry in map.entries.values_mut() {
-                        entry.shards.remove(&index);
-                        // Re-index: shift down any shard indices above the removed one.
-                        let shifted: std::collections::HashMap<usize, _> = entry
-                            .shards
-                            .drain()
-                            .map(|(k, mut loc)| {
-                                let new_idx = if k > index { k - 1 } else { k };
-                                loc.shard_index = new_idx;
-                                (new_idx, loc)
-                            })
-                            .collect();
-                        entry.shards = shifted;
+                    let target = rebuild_target.ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "No healthy backend available to receive \
+                             redistributed shards. Aborting removal."
+                        )
+                    })?;
+
+                    let rebuilder =
+                        RaidRebuilder::new(&composite, target, RebuildConfig::default())
+                            .map_err(|e| anyhow::anyhow!("{}", e))?;
+
+                    let result = rebuilder.rebuild().await.map_err(|e| {
+                        anyhow::anyhow!("Shard migration failed, aborting removal: {}", e)
+                    })?;
+
+                    eprintln!(
+                        "Migration complete: {} rebuilt, {} skipped, {} failed",
+                        result.rebuilt, result.skipped, result.failed
+                    );
+
+                    if result.failed > 0 {
+                        anyhow::bail!(
+                            "Shard migration had {} failures. \
+                             Aborting removal to prevent data loss.",
+                            result.failed
+                        );
                     }
-                    map.version += 1;
-                    map.updated_at = chrono::Utc::now();
                 }
-                if let Err(e) = composite.save_shard_map().await {
-                    eprintln!("Warning: could not save updated shard map: {}", e);
-                }
+                _ => {}
             }
         }
+
+        // Clone the current shard map before mutating so we can roll back.
+        let shard_map_backup = composite.get_shard_map().await;
+
+        // Compute the updated shard map: remove all references to the removed
+        // backend and re-index higher backend indices.
+        {
+            let mut map = composite.shard_map_ref().write().await;
+            for entry in map.entries.values_mut() {
+                entry.shards.remove(&index);
+                // Re-index: shift down any shard indices above the removed one.
+                let shifted: std::collections::HashMap<usize, _> = entry
+                    .shards
+                    .drain()
+                    .map(|(k, mut loc)| {
+                        let new_idx = if k > index { k - 1 } else { k };
+                        loc.shard_index = new_idx;
+                        (new_idx, loc)
+                    })
+                    .collect();
+                entry.shards = shifted;
+            }
+            map.version += 1;
+            map.updated_at = chrono::Utc::now();
+        }
+
+        // Persist updated shard map first (step 1 of atomic commit).
+        composite.save_shard_map().await?;
+
+        // Remove the backend from config and persist (step 2 of atomic commit).
+        let removed = raid_cfg.backends.remove(index);
+        if let Err(e) = save_raid_config(vault_path, &raid_cfg).await {
+            // Roll back the shard map to the pre-removal state.
+            eprintln!("Failed to save RAID config, rolling back shard map...");
+            {
+                let mut map = composite.shard_map_ref().write().await;
+                *map = shard_map_backup;
+            }
+            composite.save_shard_map().await.map_err(|rollback_err| {
+                anyhow::anyhow!(
+                    "CRITICAL: config save failed ({}) and shard map rollback \
+                         also failed ({}). Manual recovery may be needed.",
+                    e,
+                    rollback_err
+                )
+            })?;
+            // Re-insert the backend so the in-memory state is consistent.
+            raid_cfg.backends.insert(index, removed);
+            return Err(e);
+        }
+
+        println!("Backend removed successfully!");
+        println!("  Removed: {} (index {})", removed.provider_type, index);
+        println!("  Remaining backends: {}", raid_cfg.backends.len());
+        return Ok(());
     }
 
     let removed = raid_cfg.backends.remove(index);
