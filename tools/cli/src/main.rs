@@ -21,7 +21,7 @@ use axiomvault_crypto::KdfParams;
 use axiomvault_storage::gdrive::{AuthConfig, AuthManager, GDriveConfig, Tokens};
 use axiomvault_storage::{
     create_default_registry, CompositeConfig, CompositeStorageProvider, HealthStatus, RaidMode,
-    RaidRebuilder, RebuildConfig,
+    RaidRebuilder, RebuildConfig, RebuildResult,
 };
 use axiomvault_sync::{ConflictStrategy, SyncConfig, SyncEngine, SyncMode, SyncState};
 use axiomvault_vault::{
@@ -1908,6 +1908,10 @@ async fn cmd_raid_add_backend(vault_path: &Path, provider: &str, config_json: &s
 }
 
 /// Remove a storage backend from the RAID pool.
+///
+/// In erasure mode, shards on the removed backend are rebuilt onto remaining
+/// backends before removal. In mirror mode, data exists on all other backends
+/// so no migration is needed.
 async fn cmd_raid_remove_backend(vault_path: &Path, index: usize) -> Result<()> {
     info!("Removing backend {} from RAID pool", index);
 
@@ -1950,6 +1954,112 @@ async fn cmd_raid_remove_backend(vault_path: &Path, index: usize) -> Result<()> 
             "Warning: After removal, the array will have zero fault tolerance. \
              Any backend failure will result in data loss."
         );
+    }
+
+    // Migrate shards before removal if the backend holds any data.
+    if raid_cfg.backends.len() >= 2 {
+        if let Ok(composite) = build_composite(&raid_cfg) {
+            if let Err(e) = composite.load_shard_map().await {
+                eprintln!("Warning: could not load shard map: {}", e);
+            } else {
+                let shard_map = composite.get_shard_map().await;
+                let has_shards = shard_map
+                    .entries
+                    .values()
+                    .any(|entry| entry.shards.contains_key(&index));
+
+                if has_shards {
+                    match raid_cfg.mode.mode_type.as_str() {
+                        "mirror" => {
+                            // Mirror mode: data exists on all other backends,
+                            // no migration needed. Just clean up the shard map.
+                            eprintln!(
+                                "Mirror mode: data is replicated on other backends, \
+                                 no migration needed."
+                            );
+                        }
+                        "erasure" => {
+                            // Erasure mode: rebuild shards onto another backend
+                            // before removing this one.
+                            eprintln!(
+                                "Erasure mode: rebuilding shards from backend {} \
+                                 before removal...",
+                                index
+                            );
+
+                            // Pick a rebuild target: first healthy backend that isn't
+                            // the one being removed.
+                            let mut rebuild_target = None;
+                            for i in 0..composite.backend_count() {
+                                if i == index {
+                                    continue;
+                                }
+                                if let Some(h) = composite.backend_health(i).await {
+                                    if h.status == HealthStatus::Healthy {
+                                        rebuild_target = Some(i);
+                                        break;
+                                    }
+                                }
+                            }
+
+                            let target = rebuild_target.ok_or_else(|| {
+                                anyhow::anyhow!(
+                                    "No healthy backend available to receive \
+                                     redistributed shards. Aborting removal."
+                                )
+                            })?;
+
+                            let rebuilder =
+                                RaidRebuilder::new(&composite, target, RebuildConfig::default())
+                                    .map_err(|e| anyhow::anyhow!("{}", e))?;
+
+                            let result = rebuilder.rebuild().await.map_err(|e| {
+                                anyhow::anyhow!("Shard migration failed, aborting removal: {}", e)
+                            })?;
+
+                            eprintln!(
+                                "Migration complete: {} rebuilt, {} skipped, {} failed",
+                                result.rebuilt, result.skipped, result.failed
+                            );
+
+                            if result.failed > 0 {
+                                anyhow::bail!(
+                                    "Shard migration had {} failures. \
+                                     Aborting removal to prevent data loss.",
+                                    result.failed
+                                );
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+
+                // Update shard map: remove all references to the removed backend
+                // and re-index higher backend indices.
+                {
+                    let mut map = composite.shard_map_ref().write().await;
+                    for entry in map.entries.values_mut() {
+                        entry.shards.remove(&index);
+                        // Re-index: shift down any shard indices above the removed one.
+                        let shifted: std::collections::HashMap<usize, _> = entry
+                            .shards
+                            .drain()
+                            .map(|(k, mut loc)| {
+                                let new_idx = if k > index { k - 1 } else { k };
+                                loc.shard_index = new_idx;
+                                (new_idx, loc)
+                            })
+                            .collect();
+                        entry.shards = shifted;
+                    }
+                    map.version += 1;
+                    map.updated_at = chrono::Utc::now();
+                }
+                if let Err(e) = composite.save_shard_map().await {
+                    eprintln!("Warning: could not save updated shard map: {}", e);
+                }
+            }
+        }
     }
 
     let removed = raid_cfg.backends.remove(index);
@@ -2114,18 +2224,82 @@ async fn cmd_raid_rebuild(vault_path: &Path, target: Option<usize>) -> Result<()
     let rebuilder = RaidRebuilder::new(&composite, target_index, RebuildConfig::default())
         .map_err(|e| anyhow::anyhow!("{}", e))?;
 
-    let result = rebuilder
-        .rebuild()
-        .await
-        .map_err(|e| anyhow::anyhow!("{}", e))?;
+    // Run the rebuild with a progress bar by polling progress every 500ms.
+    let result = rebuild_with_progress(&rebuilder).await?;
 
-    println!("Rebuild completed!");
+    println!("\nRebuild completed!");
     println!("  Rebuilt:  {}", result.rebuilt);
     println!("  Skipped:  {}", result.skipped);
     println!("  Failed:   {}", result.failed);
     println!("  Elapsed:  {:.1?}", result.elapsed);
 
     Ok(())
+}
+
+/// Run a rebuild while displaying a text progress bar on stderr.
+///
+/// Uses `tokio::select!` to poll `rebuilder.progress()` every 500ms while the
+/// rebuild future runs concurrently on the same task.
+async fn rebuild_with_progress(rebuilder: &RaidRebuilder<'_>) -> Result<RebuildResult> {
+    use tokio::pin;
+
+    let rebuild_fut = rebuilder.rebuild();
+    pin!(rebuild_fut);
+
+    let mut interval = tokio::time::interval(std::time::Duration::from_millis(500));
+    // First tick fires immediately; consume it so the first real tick is at 500ms.
+    interval.tick().await;
+
+    loop {
+        tokio::select! {
+            result = &mut rebuild_fut => {
+                // Print final progress state before returning.
+                let progress = rebuilder.progress().await;
+                print_progress_bar(&progress);
+                return result.map_err(|e| anyhow::anyhow!("{}", e));
+            }
+            _ = interval.tick() => {
+                let progress = rebuilder.progress().await;
+                print_progress_bar(&progress);
+            }
+        }
+    }
+}
+
+/// Print a single-line progress bar to stderr, overwriting the previous line.
+///
+/// Format: `[=====>    ] 55% (12/22 chunks, ETA: 3s)`
+fn print_progress_bar(progress: &axiomvault_storage::rebuild::RebuildProgress) {
+    use std::io::Write;
+
+    let pct = progress.percentage();
+    let done = progress.completed + progress.skipped + progress.failed;
+    let total = progress.total;
+
+    // Build bar: 30 characters wide.
+    let bar_width = 30;
+    let filled = ((pct / 100.0) * bar_width as f64) as usize;
+    let filled = filled.min(bar_width);
+    let empty = bar_width - filled;
+
+    let arrow = if filled > 0 && filled < bar_width {
+        format!("{}>{}", "=".repeat(filled - 1), " ".repeat(empty))
+    } else if filled == bar_width {
+        "=".repeat(bar_width)
+    } else {
+        " ".repeat(bar_width)
+    };
+
+    let eta_str = match progress.eta() {
+        Some(d) => format!(", ETA: {}s", d.as_secs()),
+        None => String::new(),
+    };
+
+    eprint!(
+        "\r[{}] {:>3.0}% ({}/{} chunks{})",
+        arrow, pct, done, total, eta_str,
+    );
+    let _ = std::io::stderr().flush();
 }
 
 /// Configure or change the RAID mode.
