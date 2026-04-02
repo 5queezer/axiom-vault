@@ -135,6 +135,12 @@ jobs:
             | grep -viE '\[bot\]$|^dependabot|^github-actions|^copilot|^Claude' \
             | while IFS= read -r name; do echo "- ${name}"; done || true)
 
+          if [ -n "$PREV_TAG" ]; then
+            CHANGELOG_LINE="*Full changelog: ${PREV_TAG}...v${INPUT_VERSION}*"
+          else
+            CHANGELOG_LINE="*Initial release*"
+          fi
+
           BODY=$(cat <<NOTES_EOF
           ## What's New
 
@@ -145,7 +151,7 @@ jobs:
           ${ALL_CONTRIBUTORS}
 
           ---
-          *Full changelog: ${PREV_TAG}...v${INPUT_VERSION}*
+          ${CHANGELOG_LINE}
           NOTES_EOF
           )
 
