@@ -52,6 +52,25 @@ axiomvault raid-remove-backend -p /path/to/vault -i 2
 
 In erasure mode, shards are automatically redistributed before removal. In mirror mode, data already exists on the remaining backends.
 
+**Erasure-mode prerequisite:** Removal will fail if the remaining backend count
+would drop below `data_shards + parity_shards` (k + m). Because
+`raid-configure` pins k + m to the current backend count, you must add spare
+capacity *before* removing a backend:
+
+```bash
+# Check current k + m values
+axiomvault raid-status -p /path/to/vault
+
+# Add a spare backend so that backends > k + m
+axiomvault raid-add-backend -p /path/to/vault -t local -c '{"root": "/mnt/spare"}'
+
+# Now removal is possible
+axiomvault raid-remove-backend -p /path/to/vault -i 2
+```
+
+Mirror mode does not have this constraint — it only requires at least 2
+backends to remain after removal.
+
 ## Example Workflow: Mirror Mode with Local Backends
 
 ```bash
