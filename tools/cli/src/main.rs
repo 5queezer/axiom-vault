@@ -2399,6 +2399,7 @@ mod tests {
     use axiomvault_storage::{
         rebuild::{RebuildConfig, RebuildProgress},
         CompositeConfig, CompositeStorageProvider, MemoryProvider, RaidMode, RaidRebuilder,
+        StorageProvider,
     };
     use std::sync::Arc;
     use std::time::Instant;
@@ -2418,7 +2419,12 @@ mod tests {
         CompositeStorageProvider::new(backends, config).expect("mirror composite")
     }
 
-    fn progress_with(total: usize, completed: usize, skipped: usize, failed: usize) -> RebuildProgress {
+    fn progress_with(
+        total: usize,
+        completed: usize,
+        skipped: usize,
+        failed: usize,
+    ) -> RebuildProgress {
         RebuildProgress {
             total,
             completed,
@@ -2608,9 +2614,18 @@ mod tests {
         let vp_b = axiomvault_common::VaultPath::parse("/b.enc").unwrap();
         let vp_c = axiomvault_common::VaultPath::parse("/c.enc").unwrap();
 
-        composite.upload(&vp_a, b"aaa".to_vec()).await.expect("upload a");
-        composite.upload(&vp_b, b"bbb".to_vec()).await.expect("upload b");
-        composite.upload(&vp_c, b"ccc".to_vec()).await.expect("upload c");
+        composite
+            .upload(&vp_a, b"aaa".to_vec())
+            .await
+            .expect("upload a");
+        composite
+            .upload(&vp_b, b"bbb".to_vec())
+            .await
+            .expect("upload b");
+        composite
+            .upload(&vp_c, b"ccc".to_vec())
+            .await
+            .expect("upload c");
 
         // Delete a and c from backend 1.
         composite.backends()[1].delete(&vp_a).await.expect("del a");
