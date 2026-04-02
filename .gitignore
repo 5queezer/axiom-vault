@@ -4,8 +4,7 @@
 **/*.rs.bk
 *.pdb
 
-# Cargo.lock for applications
-Cargo.lock
+# Cargo.lock — checked in (binary project)
 
 # IDE
 .idea/
