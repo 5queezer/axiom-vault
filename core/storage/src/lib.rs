@@ -32,6 +32,8 @@ pub use local::LocalProvider;
 pub use memory::MemoryProvider;
 pub use onedrive::{OneDriveConfig, OneDriveProvider};
 pub use provider::{ConflictResolution, Metadata, StorageProvider};
-pub use rebuild::{RaidRebuilder, RebuildConfig, RebuildResult};
+pub use rebuild::{
+    RaidRebuilder, RebuildCheckpoint, RebuildConfig, RebuildProgress, RebuildResult,
+};
 pub use registry::{create_default_registry, ProviderFactory, ProviderRegistry};
 pub use shard_map::{ChunkEntry, ErasureParams, ShardLocation, ShardMap};

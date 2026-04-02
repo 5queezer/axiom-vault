@@ -6,12 +6,17 @@
 //! specific missing shard from the remaining shards via Reed-Solomon.
 //!
 //! Rebuilds are incremental (existing data is skipped) and resumable
-//! (re-running the rebuild picks up where it left off).
+//! (re-running the rebuild picks up where it left off). A persistent
+//! checkpoint is saved periodically so that a crashed rebuild can resume
+//! from where it left off without re-transferring completed chunks.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use chrono::{DateTime, Utc};
 use futures::stream::{self, StreamExt};
+use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use tracing::{info, warn};
 
@@ -19,16 +24,109 @@ use crate::composite::{CompositeStorageProvider, RaidMode};
 use crate::provider::StorageProvider;
 use axiomvault_common::{Error, Result, VaultPath};
 
+/// Well-known path for the rebuild checkpoint file on the target backend.
+const CHECKPOINT_PATH: &str = ".axiomvault/rebuild_checkpoint.json";
+
 /// Configuration for a rebuild operation.
 #[derive(Debug, Clone)]
 pub struct RebuildConfig {
     /// Maximum number of concurrent transfers during rebuild. Default: 4.
     pub concurrency: usize,
+    /// Save a checkpoint every N completed chunks. Default: 10.
+    /// Set to 0 to disable periodic checkpointing (checkpoint is still
+    /// deleted on successful completion).
+    pub checkpoint_interval: usize,
 }
 
 impl Default for RebuildConfig {
     fn default() -> Self {
-        Self { concurrency: 4 }
+        Self {
+            concurrency: 4,
+            checkpoint_interval: 10,
+        }
+    }
+}
+
+/// Persistent checkpoint for resumable rebuilds.
+///
+/// Serialized to JSON and stored on the target backend so that a crashed
+/// rebuild can skip already-completed chunks on restart.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RebuildCheckpoint {
+    /// Index of the target backend being rebuilt.
+    pub target_index: usize,
+    /// Set of chunk paths that have been successfully rebuilt or confirmed present.
+    pub completed_paths: HashSet<String>,
+    /// Timestamp when this checkpoint was last saved.
+    pub saved_at: DateTime<Utc>,
+    /// The RAID mode active when this checkpoint was created.
+    pub mode: RaidMode,
+}
+
+impl RebuildCheckpoint {
+    /// Create a new empty checkpoint.
+    fn new(target_index: usize, mode: RaidMode) -> Self {
+        Self {
+            target_index,
+            completed_paths: HashSet::new(),
+            saved_at: Utc::now(),
+            mode,
+        }
+    }
+
+    /// Load a checkpoint from the target backend, if one exists.
+    ///
+    /// Returns `None` if no checkpoint is found or it cannot be parsed.
+    async fn load(
+        backend: &dyn StorageProvider,
+        target_index: usize,
+        mode: RaidMode,
+    ) -> Option<Self> {
+        let path = match VaultPath::parse(CHECKPOINT_PATH) {
+            Ok(p) => p,
+            Err(_) => return None,
+        };
+        let data = match backend.download(&path).await {
+            Ok(d) => d,
+            Err(_) => return None,
+        };
+        let ckpt: Self = match serde_json::from_slice(&data) {
+            Ok(c) => c,
+            Err(e) => {
+                warn!(error = %e, "Failed to parse rebuild checkpoint, starting fresh");
+                return None;
+            }
+        };
+        // Only resume if the checkpoint matches this rebuild's parameters.
+        if ckpt.target_index != target_index || ckpt.mode != mode {
+            warn!("Rebuild checkpoint does not match current parameters, starting fresh");
+            return None;
+        }
+        Some(ckpt)
+    }
+
+    /// Save this checkpoint to the target backend.
+    async fn save(&mut self, backend: &dyn StorageProvider) -> Result<()> {
+        self.saved_at = Utc::now();
+        let data =
+            serde_json::to_vec_pretty(self).map_err(|e| Error::Serialization(e.to_string()))?;
+        let path = VaultPath::parse(CHECKPOINT_PATH)?;
+        // Ensure the .axiomvault directory exists.
+        let dir = VaultPath::parse(".axiomvault")?;
+        if !backend.exists(&dir).await.unwrap_or(false) {
+            let _ = backend.create_dir(&dir).await;
+        }
+        backend.upload(&path, data).await?;
+        Ok(())
+    }
+
+    /// Delete the checkpoint from the target backend (called on successful completion).
+    async fn delete(backend: &dyn StorageProvider) -> Result<()> {
+        let path = VaultPath::parse(CHECKPOINT_PATH)?;
+        if backend.exists(&path).await.unwrap_or(false) {
+            backend.delete(&path).await?;
+        }
+        Ok(())
     }
 }
 
@@ -109,6 +207,9 @@ pub struct RaidRebuilder<'a> {
     target_index: usize,
     config: RebuildConfig,
     progress: Arc<RwLock<RebuildProgress>>,
+    /// Optional push-based progress channel. When set, a snapshot of
+    /// `RebuildProgress` is sent after each chunk is processed.
+    progress_tx: Option<tokio::sync::mpsc::Sender<RebuildProgress>>,
 }
 
 impl<'a> RaidRebuilder<'a> {
@@ -135,12 +236,32 @@ impl<'a> RaidRebuilder<'a> {
             target_index,
             config,
             progress: Arc::new(RwLock::new(RebuildProgress::new(0))),
+            progress_tx: None,
         })
+    }
+
+    /// Attach a push-based progress channel.
+    ///
+    /// When set, a snapshot of `RebuildProgress` is sent through `tx` after
+    /// each chunk is processed (rebuilt, skipped, or failed). The existing
+    /// poll-based `progress()` method continues to work regardless.
+    pub fn with_progress_channel(mut self, tx: tokio::sync::mpsc::Sender<RebuildProgress>) -> Self {
+        self.progress_tx = Some(tx);
+        self
     }
 
     /// Get a snapshot of current rebuild progress.
     pub async fn progress(&self) -> RebuildProgress {
         self.progress.read().await.clone()
+    }
+
+    /// Send a progress snapshot through the channel, if one is attached.
+    async fn notify_progress(&self) {
+        if let Some(tx) = &self.progress_tx {
+            let snapshot = self.progress.read().await.clone();
+            // Best-effort: drop the update if the receiver is full or gone.
+            let _ = tx.try_send(snapshot);
+        }
     }
 
     /// Run the rebuild, returning a summary when complete.
@@ -184,15 +305,28 @@ impl<'a> RaidRebuilder<'a> {
         let progress = Arc::clone(&self.progress);
         let target_index = self.target_index;
 
+        // Load any existing checkpoint for resume.
+        let mut checkpoint =
+            RebuildCheckpoint::load(target.as_ref(), target_index, RaidMode::Mirror)
+                .await
+                .unwrap_or_else(|| RebuildCheckpoint::new(target_index, RaidMode::Mirror));
+
         // Build a list of (path, source_backend_index) for chunks that are missing on target.
         let mut work_items: Vec<(String, Vec<usize>)> = Vec::new();
         let mut skipped = 0usize;
 
         for (path, _) in &entries {
+            // Skip paths already completed in a previous run's checkpoint.
+            if checkpoint.completed_paths.contains(path) {
+                skipped += 1;
+                continue;
+            }
+
             let vault_path = VaultPath::parse(path)?;
             match target.exists(&vault_path).await {
                 Ok(true) => {
                     skipped += 1;
+                    checkpoint.completed_paths.insert(path.clone());
                 }
                 _ => {
                     // Collect all candidate backends that have this chunk.
@@ -213,6 +347,7 @@ impl<'a> RaidRebuilder<'a> {
                     if candidates.is_empty() {
                         let mut p = progress.write().await;
                         p.failed += 1;
+                        self.notify_progress().await;
                         warn!(
                             path = path.as_str(),
                             "Mirror rebuild: no source backend available"
@@ -228,10 +363,17 @@ impl<'a> RaidRebuilder<'a> {
             let mut p = progress.write().await;
             p.skipped = skipped;
         }
+        self.notify_progress().await;
 
         // Process work items with bounded concurrency.
+        // We use a stream that yields (path, success) results so we can
+        // checkpoint and send progress notifications incrementally.
         let composite = self.composite;
-        let results: Vec<bool> = stream::iter(work_items)
+        let checkpoint = Arc::new(RwLock::new(checkpoint));
+        let checkpoint_interval = self.config.checkpoint_interval;
+        let items_since_checkpoint = Arc::new(RwLock::new(0usize));
+
+        let results: Vec<(String, bool)> = stream::iter(work_items)
             .map(|(path, candidates)| {
                 let progress = Arc::clone(&progress);
                 async move {
@@ -242,21 +384,44 @@ impl<'a> RaidRebuilder<'a> {
                     match result {
                         Ok(()) => {
                             p.completed += 1;
-                            true
+                            (path, true)
                         }
                         Err(e) => {
                             warn!(path = path.as_str(), error = %e, "Mirror rebuild: failed to copy chunk");
                             p.failed += 1;
-                            false
+                            (path, false)
                         }
                     }
                 }
             })
             .buffer_unordered(self.config.concurrency)
+            .then(|(path, ok)| {
+                let checkpoint = Arc::clone(&checkpoint);
+                let items_since = Arc::clone(&items_since_checkpoint);
+                async move {
+                    if ok {
+                        checkpoint.write().await.completed_paths.insert(path.clone());
+                    }
+                    self.notify_progress().await;
+
+                    // Periodic checkpoint save.
+                    if checkpoint_interval > 0 {
+                        let mut count = items_since.write().await;
+                        *count += 1;
+                        if *count >= checkpoint_interval {
+                            *count = 0;
+                            let mut ckpt = checkpoint.write().await;
+                            let _ = ckpt.save(target.as_ref()).await;
+                        }
+                    }
+
+                    (path, ok)
+                }
+            })
             .collect()
             .await;
 
-        let rebuilt = results.iter().filter(|&&ok| ok).count();
+        let rebuilt = results.iter().filter(|(_, ok)| *ok).count();
 
         // Update shard map to include target backend in rebuilt entries.
         // Separate lock acquisition from backend I/O to avoid holding the lock during async calls.
@@ -316,6 +481,9 @@ impl<'a> RaidRebuilder<'a> {
             self.composite.save_shard_map().await?;
         }
 
+        // Delete checkpoint on successful completion.
+        let _ = RebuildCheckpoint::delete(target.as_ref()).await;
+
         let progress = self.progress.read().await;
         Ok(RebuildResult {
             rebuilt,
@@ -358,6 +526,10 @@ impl<'a> RaidRebuilder<'a> {
         let backends = self.composite.backends();
         let (data_shards, parity_shards) = self.composite.erasure_params()?;
         let total_shards = data_shards + parity_shards;
+        let mode = RaidMode::Erasure {
+            data_shards,
+            parity_shards,
+        };
 
         // Collect entries where the target backend's shard is missing.
         let entries: Vec<(String, crate::shard_map::ChunkEntry)> = shard_map
@@ -384,17 +556,30 @@ impl<'a> RaidRebuilder<'a> {
         let started_at = Instant::now();
         let progress = Arc::clone(&self.progress);
         let target_index = self.target_index;
+        let target = &backends[target_index];
+
+        // Load any existing checkpoint for resume.
+        let mut checkpoint = RebuildCheckpoint::load(target.as_ref(), target_index, mode)
+            .await
+            .unwrap_or_else(|| RebuildCheckpoint::new(target_index, mode));
 
         // Determine which entries need rebuilding.
         let mut work_items: Vec<(String, crate::shard_map::ChunkEntry)> = Vec::new();
         let mut skipped = 0usize;
 
         for (path, entry) in &entries {
+            // Skip paths already completed in a previous run's checkpoint.
+            if checkpoint.completed_paths.contains(path) {
+                skipped += 1;
+                continue;
+            }
+
             let shard_path =
                 CompositeStorageProvider::shard_path(&VaultPath::parse(path)?, target_index)?;
             match backends[target_index].exists(&shard_path).await {
                 Ok(true) => {
                     skipped += 1;
+                    checkpoint.completed_paths.insert(path.clone());
                 }
                 _ => {
                     work_items.push((path.clone(), entry.clone()));
@@ -406,10 +591,15 @@ impl<'a> RaidRebuilder<'a> {
             let mut p = progress.write().await;
             p.skipped = skipped;
         }
+        self.notify_progress().await;
 
         // Process work items with bounded concurrency.
         let composite = self.composite;
-        let results: Vec<bool> = stream::iter(work_items)
+        let checkpoint = Arc::new(RwLock::new(checkpoint));
+        let checkpoint_interval = self.config.checkpoint_interval;
+        let items_since_checkpoint = Arc::new(RwLock::new(0usize));
+
+        let results: Vec<(String, bool)> = stream::iter(work_items)
             .map(|(path, entry)| {
                 let progress = Arc::clone(&progress);
                 async move {
@@ -426,21 +616,44 @@ impl<'a> RaidRebuilder<'a> {
                     match result {
                         Ok(()) => {
                             p.completed += 1;
-                            true
+                            (path, true)
                         }
                         Err(e) => {
                             warn!(path = path.as_str(), error = %e, "Erasure rebuild: failed to reconstruct shard");
                             p.failed += 1;
-                            false
+                            (path, false)
                         }
                     }
                 }
             })
             .buffer_unordered(self.config.concurrency)
+            .then(|(path, ok)| {
+                let checkpoint = Arc::clone(&checkpoint);
+                let items_since = Arc::clone(&items_since_checkpoint);
+                async move {
+                    if ok {
+                        checkpoint.write().await.completed_paths.insert(path.clone());
+                    }
+                    self.notify_progress().await;
+
+                    // Periodic checkpoint save.
+                    if checkpoint_interval > 0 {
+                        let mut count = items_since.write().await;
+                        *count += 1;
+                        if *count >= checkpoint_interval {
+                            *count = 0;
+                            let mut ckpt = checkpoint.write().await;
+                            let _ = ckpt.save(target.as_ref()).await;
+                        }
+                    }
+
+                    (path, ok)
+                }
+            })
             .collect()
             .await;
 
-        let rebuilt = results.iter().filter(|&&ok| ok).count();
+        let rebuilt = results.iter().filter(|(_, ok)| *ok).count();
 
         // Update shard map entries for rebuilt shards.
         // Separate lock acquisition from backend I/O to avoid holding the lock during async calls.
@@ -503,6 +716,9 @@ impl<'a> RaidRebuilder<'a> {
         if map_dirty {
             self.composite.save_shard_map().await?;
         }
+
+        // Delete checkpoint on successful completion.
+        let _ = RebuildCheckpoint::delete(target.as_ref()).await;
 
         let progress = self.progress.read().await;
         Ok(RebuildResult {
@@ -867,7 +1083,14 @@ mod tests {
     #[tokio::test]
     async fn test_zero_concurrency_rejected() {
         let (composite, _backends) = make_mirror_composite(3);
-        let result = RaidRebuilder::new(&composite, 0, RebuildConfig { concurrency: 0 });
+        let result = RaidRebuilder::new(
+            &composite,
+            0,
+            RebuildConfig {
+                concurrency: 0,
+                ..Default::default()
+            },
+        );
         assert!(result.is_err());
     }
 
@@ -892,5 +1115,236 @@ mod tests {
         let r2 = rebuilder.rebuild().await.unwrap();
         assert_eq!(r2.rebuilt, 0);
         assert_eq!(r2.skipped, 1);
+    }
+
+    // -- Checkpoint tests -------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_checkpoint_save_load_roundtrip() {
+        let backend = MemoryProvider::new();
+
+        // Create and save a checkpoint.
+        let mut ckpt = RebuildCheckpoint::new(1, RaidMode::Mirror);
+        ckpt.completed_paths.insert("/a.enc".to_string());
+        ckpt.completed_paths.insert("/b.enc".to_string());
+        ckpt.save(&backend).await.unwrap();
+
+        // Load it back.
+        let loaded = RebuildCheckpoint::load(&backend, 1, RaidMode::Mirror)
+            .await
+            .expect("checkpoint should load");
+        assert_eq!(loaded.target_index, 1);
+        assert_eq!(loaded.completed_paths.len(), 2);
+        assert!(loaded.completed_paths.contains("/a.enc"));
+        assert!(loaded.completed_paths.contains("/b.enc"));
+        assert_eq!(loaded.mode, RaidMode::Mirror);
+    }
+
+    #[tokio::test]
+    async fn test_checkpoint_mismatched_params_ignored() {
+        let backend = MemoryProvider::new();
+
+        // Save a checkpoint for target_index=1, Mirror mode.
+        let mut ckpt = RebuildCheckpoint::new(1, RaidMode::Mirror);
+        ckpt.completed_paths.insert("/a.enc".to_string());
+        ckpt.save(&backend).await.unwrap();
+
+        // Loading with different target_index should return None.
+        let loaded = RebuildCheckpoint::load(&backend, 2, RaidMode::Mirror).await;
+        assert!(loaded.is_none());
+
+        // Loading with different mode should return None.
+        let loaded = RebuildCheckpoint::load(
+            &backend,
+            1,
+            RaidMode::Erasure {
+                data_shards: 3,
+                parity_shards: 2,
+            },
+        )
+        .await;
+        assert!(loaded.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_checkpoint_resume_skips_completed() {
+        let (composite, backends) = make_mirror_composite(3);
+
+        upload_file(&composite, "/a.enc", b"aaa").await;
+        upload_file(&composite, "/b.enc", b"bbb").await;
+
+        let pa = VaultPath::parse("/a.enc").unwrap();
+        let pb = VaultPath::parse("/b.enc").unwrap();
+
+        // Delete both files from backend 2.
+        backends[2].delete(&pa).await.unwrap();
+        backends[2].delete(&pb).await.unwrap();
+
+        // Manually save a checkpoint claiming /a.enc is already done.
+        let mut ckpt = RebuildCheckpoint::new(2, RaidMode::Mirror);
+        ckpt.completed_paths.insert("/a.enc".to_string());
+        ckpt.save(backends[2].as_ref()).await.unwrap();
+
+        // Rebuild: /a.enc should be skipped via checkpoint (even though it's
+        // not on the target), /b.enc should be rebuilt.
+        let rebuilder = RaidRebuilder::new(&composite, 2, RebuildConfig::default()).unwrap();
+        let result = rebuilder.rebuild().await.unwrap();
+
+        // /a.enc was skipped (checkpoint), /b.enc was rebuilt.
+        assert_eq!(result.rebuilt, 1);
+        assert_eq!(result.skipped, 1);
+        assert_eq!(result.failed, 0);
+
+        // /b.enc is restored.
+        assert_eq!(backends[2].download(&pb).await.unwrap(), b"bbb");
+
+        // Checkpoint should be deleted after successful completion.
+        let ckpt_path = VaultPath::parse(CHECKPOINT_PATH).unwrap();
+        assert!(!backends[2].exists(&ckpt_path).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_checkpoint_deleted_on_success() {
+        let (composite, backends) = make_mirror_composite(3);
+
+        upload_file(&composite, "/file1.enc", b"data").await;
+        let vp = VaultPath::parse("/file1.enc").unwrap();
+        backends[2].delete(&vp).await.unwrap();
+
+        let config = RebuildConfig {
+            concurrency: 1,
+            checkpoint_interval: 1, // Save checkpoint after every chunk.
+        };
+        let rebuilder = RaidRebuilder::new(&composite, 2, config).unwrap();
+        rebuilder.rebuild().await.unwrap();
+
+        // Checkpoint should have been deleted.
+        let ckpt_path = VaultPath::parse(CHECKPOINT_PATH).unwrap();
+        assert!(!backends[2].exists(&ckpt_path).await.unwrap());
+    }
+
+    // -- Progress channel tests -------------------------------------------------
+
+    #[tokio::test]
+    async fn test_progress_channel_receives_updates() {
+        let (composite, backends) = make_mirror_composite(3);
+
+        upload_file(&composite, "/a.enc", b"aaa").await;
+        upload_file(&composite, "/b.enc", b"bbb").await;
+
+        // Delete both from backend 2.
+        let pa = VaultPath::parse("/a.enc").unwrap();
+        let pb = VaultPath::parse("/b.enc").unwrap();
+        backends[2].delete(&pa).await.unwrap();
+        backends[2].delete(&pb).await.unwrap();
+
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<RebuildProgress>(32);
+        let rebuilder = RaidRebuilder::new(&composite, 2, RebuildConfig::default())
+            .unwrap()
+            .with_progress_channel(tx);
+        let result = rebuilder.rebuild().await.unwrap();
+
+        assert_eq!(result.rebuilt, 2);
+        assert_eq!(result.failed, 0);
+
+        // We should have received at least one progress update per rebuilt chunk.
+        let mut updates = Vec::new();
+        while let Ok(p) = rx.try_recv() {
+            updates.push(p);
+        }
+        assert!(
+            updates.len() >= 2,
+            "expected at least 2 progress updates, got {}",
+            updates.len()
+        );
+
+        // The last update should show all chunks processed.
+        let last = updates.last().unwrap();
+        assert_eq!(last.completed + last.skipped + last.failed, last.total);
+    }
+
+    #[tokio::test]
+    async fn test_progress_channel_optional() {
+        // Verify rebuild works fine without a channel.
+        let (composite, backends) = make_mirror_composite(3);
+        upload_file(&composite, "/file1.enc", b"test").await;
+        let vp = VaultPath::parse("/file1.enc").unwrap();
+        backends[2].delete(&vp).await.unwrap();
+
+        let rebuilder = RaidRebuilder::new(&composite, 2, RebuildConfig::default()).unwrap();
+        let result = rebuilder.rebuild().await.unwrap();
+        assert_eq!(result.rebuilt, 1);
+    }
+
+    // -- Backend-replace integration test ---------------------------------------
+
+    #[tokio::test]
+    async fn test_backend_replace_integration() {
+        // 1. Create a composite with 3 MemoryProvider backends.
+        let backends: Vec<Arc<dyn StorageProvider>> = (0..3)
+            .map(|_| Arc::new(MemoryProvider::new()) as _)
+            .collect();
+        let config = CompositeConfig {
+            mode: RaidMode::Mirror,
+            health: Default::default(),
+        };
+        let composite =
+            CompositeStorageProvider::new(backends.clone(), config.clone()).expect("composite");
+
+        // 2. Upload several chunks.
+        upload_file(&composite, "/doc1.enc", b"document one").await;
+        upload_file(&composite, "/doc2.enc", b"document two").await;
+        upload_file(&composite, "/doc3.enc", b"document three").await;
+
+        // Verify all backends have all files.
+        for path in &["/doc1.enc", "/doc2.enc", "/doc3.enc"] {
+            let vp = VaultPath::parse(path).unwrap();
+            for b in &backends {
+                assert!(b.exists(&vp).await.unwrap(), "missing {} on backend", path);
+            }
+        }
+
+        // 3. Replace backend 1 with a new empty MemoryProvider.
+        let new_backend: Arc<dyn StorageProvider> = Arc::new(MemoryProvider::new());
+        let mut new_backends = backends.clone();
+        new_backends[1] = new_backend.clone();
+        let composite2 =
+            CompositeStorageProvider::new(new_backends.clone(), config).expect("composite2");
+
+        // Manually load the shard map from the surviving backends.
+        composite2.load_shard_map().await.unwrap();
+
+        // Verify the new backend is empty.
+        for path in &["/doc1.enc", "/doc2.enc", "/doc3.enc"] {
+            let vp = VaultPath::parse(path).unwrap();
+            assert!(!new_backend.exists(&vp).await.unwrap());
+        }
+
+        // 4. Run rebuild targeting the replaced backend.
+        let rebuilder = RaidRebuilder::new(&composite2, 1, RebuildConfig::default()).unwrap();
+        let result = rebuilder.rebuild().await.unwrap();
+
+        assert_eq!(result.rebuilt, 3);
+        assert_eq!(result.skipped, 0);
+        assert_eq!(result.failed, 0);
+
+        // 5. Verify all original data is intact and accessible.
+        let expected: &[(&str, &[u8])] = &[
+            ("/doc1.enc", b"document one"),
+            ("/doc2.enc", b"document two"),
+            ("/doc3.enc", b"document three"),
+        ];
+        for &(path, data) in expected {
+            let vp = VaultPath::parse(path).unwrap();
+            let restored = new_backend.download(&vp).await.unwrap();
+            assert_eq!(restored, data, "data mismatch for {}", path);
+        }
+
+        // Also verify the composite can download everything.
+        for &(path, data) in expected {
+            let vp = VaultPath::parse(path).unwrap();
+            let downloaded = composite2.download(&vp).await.unwrap();
+            assert_eq!(downloaded, data);
+        }
     }
 }
