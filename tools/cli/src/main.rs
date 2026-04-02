@@ -2070,17 +2070,14 @@ async fn cmd_raid_remove_backend(vault_path: &Path, index: usize) -> Result<()> 
                 let mut map = composite.shard_map_ref().write().await;
                 *map = shard_map_backup;
             }
-            composite
-                .save_shard_map()
-                .await
-                .map_err(|rollback_err| {
-                    anyhow::anyhow!(
-                        "CRITICAL: config save failed ({}) and shard map rollback \
+            composite.save_shard_map().await.map_err(|rollback_err| {
+                anyhow::anyhow!(
+                    "CRITICAL: config save failed ({}) and shard map rollback \
                          also failed ({}). Manual recovery may be needed.",
-                        e,
-                        rollback_err
-                    )
-                })?;
+                    e,
+                    rollback_err
+                )
+            })?;
             // Re-insert the backend so the in-memory state is consistent.
             raid_cfg.backends.insert(index, removed);
             return Err(e);
