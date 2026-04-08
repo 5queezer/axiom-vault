@@ -144,6 +144,11 @@ impl VaultPath {
                 "Child component cannot contain separators".to_string(),
             ));
         }
+        if child == "." || child == ".." {
+            return Err(crate::Error::InvalidInput(
+                "Path component cannot be '.' or '..'".to_string(),
+            ));
+        }
         let mut components = self.components.clone();
         components.push(child.to_string());
         Ok(Self { components })
@@ -249,5 +254,17 @@ mod tests {
     fn test_vault_path_name() {
         let path = VaultPath::parse("/foo/bar").unwrap();
         assert_eq!(path.name(), Some("bar"));
+    }
+
+    #[test]
+    fn test_vault_path_join_rejects_dot() {
+        let path = VaultPath::root();
+        assert!(path.join(".").is_err());
+    }
+
+    #[test]
+    fn test_vault_path_join_rejects_dotdot() {
+        let path = VaultPath::root();
+        assert!(path.join("..").is_err());
     }
 }
