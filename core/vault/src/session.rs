@@ -137,7 +137,7 @@ impl VaultSession {
             ))
         })?;
 
-        let tree_json = String::from_utf8(tree_bytes).map_err(|e| {
+        let mut tree_json = String::from_utf8(tree_bytes).map_err(|e| {
             // Zeroize the bytes recovered from the conversion error.
             use zeroize::Zeroize;
             let mut bytes = e.into_bytes();
@@ -145,7 +145,13 @@ impl VaultSession {
             Error::Serialization("Invalid UTF-8 in tree data".to_string())
         })?;
 
-        VaultTree::from_json(&tree_json)
+        let tree = VaultTree::from_json(&tree_json);
+
+        // Zeroize the JSON string containing decrypted filenames/metadata.
+        use zeroize::Zeroize;
+        tree_json.zeroize();
+
+        tree
     }
 
     /// Get the session handle.
