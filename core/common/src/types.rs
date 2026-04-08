@@ -259,12 +259,15 @@ mod tests {
     #[test]
     fn test_vault_path_join_rejects_dot() {
         let path = VaultPath::root();
-        assert!(path.join(".").is_err());
+        assert!(matches!(path.join("."), Err(crate::Error::InvalidInput(_))));
     }
 
     #[test]
     fn test_vault_path_join_rejects_dotdot() {
         let path = VaultPath::root();
-        assert!(path.join("..").is_err());
+        assert!(matches!(
+            path.join(".."),
+            Err(crate::Error::InvalidInput(_))
+        ));
     }
 }
