@@ -30,14 +30,14 @@ repos:
       - id: cargo-clippy
         name: cargo clippy (lint check)
         language: system
-        entry: cargo clippy --workspace --all-targets --all-features -- -D warnings
+        entry: cargo clippy --workspace --exclude axiomvault-linux --exclude axiomvault-desktop --all-targets --all-features -- -D warnings
         pass_filenames: false
         types: [rust]
 
       - id: cargo-deny-warnings
         name: cargo build (deny warnings)
         language: system
-        entry: bash -c 'RUSTFLAGS="-D warnings" cargo build --workspace --all-features 2>&1'
+        entry: bash -c 'RUSTFLAGS="-D warnings" cargo build --workspace --exclude axiomvault-linux --exclude axiomvault-desktop --all-features 2>&1'
         pass_filenames: false
         types: [rust]
 

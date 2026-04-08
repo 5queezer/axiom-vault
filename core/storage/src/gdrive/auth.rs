@@ -6,6 +6,7 @@ use oauth2::{
     TokenUrl,
 };
 use serde::{Deserialize, Serialize};
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use axiomvault_common::{Error, Result};
 
@@ -28,13 +29,14 @@ const REDIRECT_URL: &str = "http://localhost:8080/callback";
 const DRIVE_SCOPE: &str = "https://www.googleapis.com/auth/drive.file";
 
 /// OAuth2 tokens with expiration tracking.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
 pub struct Tokens {
     /// Access token for API requests.
     pub access_token: String,
     /// Refresh token for obtaining new access tokens.
     pub refresh_token: String,
     /// When the access token expires.
+    #[zeroize(skip)]
     pub expires_at: DateTime<Utc>,
 }
 
