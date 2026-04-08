@@ -591,6 +591,7 @@ impl Filesystem for VaultFilesystem {
 
                 // Always zeroize decrypted file content, regardless of flush outcome.
                 file.buffer.zeroize();
+                file.path.zeroize();
 
                 match flush_result {
                     Ok(()) => reply.ok(),
