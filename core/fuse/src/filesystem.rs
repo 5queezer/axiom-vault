@@ -564,7 +564,7 @@ impl Filesystem for VaultFilesystem {
             };
 
             if let Some(mut file) = file {
-                let flush_result: std::result::Result<(), Errno> = (|| async {
+                let flush_result: std::result::Result<(), Errno> = async {
                     if !file.dirty {
                         return Ok(());
                     }
@@ -586,7 +586,7 @@ impl Filesystem for VaultFilesystem {
 
                     info!("File saved");
                     Ok(())
-                })()
+                }
                 .await;
 
                 // Always zeroize decrypted file content, regardless of flush outcome.
