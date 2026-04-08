@@ -16,6 +16,7 @@ use fuser::{
 use tokio::runtime::Handle;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info};
+use zeroize::Zeroize;
 
 use axiomvault_common::VaultPath;
 use axiomvault_vault::{VaultOperations, VaultSession};
@@ -562,7 +563,7 @@ impl Filesystem for VaultFilesystem {
                 files.remove(&fh)
             };
 
-            if let Some(file) = file {
+            if let Some(mut file) = file {
                 if file.dirty {
                     let ops = match VaultOperations::new(&session) {
                         Ok(o) => o,
@@ -590,6 +591,8 @@ impl Filesystem for VaultFilesystem {
 
                     info!("File saved");
                 }
+                // Zeroize decrypted file content before dropping.
+                file.buffer.zeroize();
             }
 
             reply.ok();

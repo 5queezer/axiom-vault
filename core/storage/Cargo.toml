@@ -22,6 +22,7 @@ url.workspace = true
 tokio-util.workspace = true
 bytes.workspace = true
 tracing.workspace = true
+zeroize.workspace = true
 reed-solomon-erasure.workspace = true
 crc32fast.workspace = true
 dirs.workspace = true

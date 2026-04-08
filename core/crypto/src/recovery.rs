@@ -85,12 +85,12 @@ impl RecoveryKey {
     /// Since the recovery key is already 256 bits of high-entropy randomness,
     /// a fast hash (Blake2b) with domain separation is sufficient -- no need
     /// for the slow Argon2id used for passwords.
-    pub fn derive_kek(&self) -> [u8; KEY_LENGTH] {
+    pub fn derive_kek(&self) -> Zeroizing<[u8; KEY_LENGTH]> {
         let mut hasher = Blake2b::<U32>::new();
         hasher.update(self.entropy);
         hasher.update(RECOVERY_KEK_CONTEXT);
         let result = hasher.finalize();
-        let mut kek = [0u8; KEY_LENGTH];
+        let mut kek = Zeroizing::new([0u8; KEY_LENGTH]);
         kek.copy_from_slice(&result);
         kek
     }
@@ -148,7 +148,7 @@ pub const RECOVERY_VERIFICATION_PLAINTEXT: &[u8] = b"AXIOMVAULT_RECOVERY_VERIFIC
 /// check if the user's recovery words are correct without storing them.
 pub fn create_recovery_verification(recovery_key: &RecoveryKey) -> Result<Vec<u8>> {
     let kek = recovery_key.derive_kek();
-    aead::encrypt(&kek, RECOVERY_VERIFICATION_PLAINTEXT)
+    aead::encrypt(&*kek, RECOVERY_VERIFICATION_PLAINTEXT)
 }
 
 /// Verify recovery key against stored verification data.
@@ -157,7 +157,7 @@ pub fn create_recovery_verification(recovery_key: &RecoveryKey) -> Result<Vec<u8
 pub fn verify_recovery_key(recovery_key: &RecoveryKey, verification: &[u8]) -> Result<bool> {
     use subtle::ConstantTimeEq;
     let kek = recovery_key.derive_kek();
-    match aead::decrypt(&kek, verification) {
+    match aead::decrypt(&*kek, verification) {
         Ok(mut plaintext) => {
             let valid = plaintext.len() == RECOVERY_VERIFICATION_PLAINTEXT.len()
                 && bool::from(plaintext.as_slice().ct_eq(RECOVERY_VERIFICATION_PLAINTEXT));
@@ -234,13 +234,13 @@ mod tests {
         let key = RecoveryKey::from_bytes([99u8; KEY_LENGTH]);
         let kek1 = key.derive_kek();
         let kek2 = key.derive_kek();
-        assert_eq!(kek1, kek2);
+        assert_eq!(*kek1, *kek2);
     }
 
     #[test]
     fn test_recovery_kek_different_keys() {
         let k1 = RecoveryKey::from_bytes([1u8; KEY_LENGTH]);
         let k2 = RecoveryKey::from_bytes([2u8; KEY_LENGTH]);
-        assert_ne!(k1.derive_kek(), k2.derive_kek());
+        assert_ne!(*k1.derive_kek(), *k2.derive_kek());
     }
 }
