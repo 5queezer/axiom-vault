@@ -16,6 +16,7 @@ use fuser::{
 use tokio::runtime::Handle;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info};
+use zeroize::Zeroize;
 
 use axiomvault_common::VaultPath;
 use axiomvault_vault::{VaultOperations, VaultSession};
@@ -562,34 +563,41 @@ impl Filesystem for VaultFilesystem {
                 files.remove(&fh)
             };
 
-            if let Some(file) = file {
-                if file.dirty {
-                    let ops = match VaultOperations::new(&session) {
-                        Ok(o) => o,
-                        Err(e) => {
-                            error!("Failed to get operations: {}", e);
-                            reply.error(Errno::EIO);
-                            return;
-                        }
-                    };
-
-                    let path = match VaultPath::parse(&file.path) {
-                        Ok(p) => p,
-                        Err(e) => {
-                            error!("Invalid path: {}", e);
-                            reply.error(Errno::EIO);
-                            return;
-                        }
-                    };
-
-                    if let Err(e) = ops.update_file(&path, &file.buffer).await {
-                        error!("Failed to write file: {}", e);
-                        reply.error(Errno::EIO);
-                        return;
+            if let Some(mut file) = file {
+                let flush_result: std::result::Result<(), Errno> = async {
+                    if !file.dirty {
+                        return Ok(());
                     }
 
+                    let ops = VaultOperations::new(&session).map_err(|e| {
+                        error!("Failed to get operations: {}", e);
+                        Errno::EIO
+                    })?;
+
+                    let path = VaultPath::parse(&file.path).map_err(|e| {
+                        error!("Invalid path: {}", e);
+                        Errno::EIO
+                    })?;
+
+                    ops.update_file(&path, &file.buffer).await.map_err(|e| {
+                        error!("Failed to write file: {}", e);
+                        Errno::EIO
+                    })?;
+
                     info!("File saved");
+                    Ok(())
                 }
+                .await;
+
+                // Always zeroize decrypted file content, regardless of flush outcome.
+                file.buffer.zeroize();
+                file.path.zeroize();
+
+                match flush_result {
+                    Ok(()) => reply.ok(),
+                    Err(errno) => reply.error(errno),
+                }
+                return;
             }
 
             reply.ok();
