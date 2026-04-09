@@ -56,7 +56,7 @@ There is no bug bounty program at this time. We will credit reporters in release
 
 ### Key hierarchy
 
-```
+```text
 User password
     |
     v
