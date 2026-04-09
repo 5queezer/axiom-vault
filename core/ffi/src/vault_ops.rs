@@ -205,6 +205,7 @@ pub async fn show_recovery_key(handle: &FFIVaultHandle) -> FFIResult<String> {
 
     recovery_key
         .to_mnemonic()
+        .map(|z| String::from(&*z))
         .map_err(|e| FFIError::VaultError(e.to_string()))
 }
 

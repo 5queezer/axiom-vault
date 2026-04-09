@@ -5,6 +5,7 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// Information about an open vault.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,38 +56,45 @@ pub struct FileMetadataDto {
 }
 
 /// Parameters for creating a new vault.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
 pub struct CreateVaultParams {
     /// Vault identifier.
+    #[zeroize(skip)]
     pub vault_id: String,
     /// Password for the vault.
     pub password: String,
     /// Storage provider type.
+    #[zeroize(skip)]
     pub provider_type: String,
     /// Provider-specific configuration.
+    #[zeroize(skip)]
     pub provider_config: serde_json::Value,
 }
 
 /// Parameters for opening an existing vault.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
 pub struct OpenVaultParams {
     /// Password for the vault.
     pub password: String,
     /// Storage provider type.
+    #[zeroize(skip)]
     pub provider_type: String,
     /// Provider-specific configuration.
+    #[zeroize(skip)]
     pub provider_config: serde_json::Value,
 }
 
 /// Parameters for recovering a vault with recovery words.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
 pub struct RecoverVaultParams {
     /// BIP39 recovery words.
     pub recovery_words: String,
     /// New password.
     pub new_password: String,
     /// Storage provider type.
+    #[zeroize(skip)]
     pub provider_type: String,
     /// Provider-specific configuration.
+    #[zeroize(skip)]
     pub provider_config: serde_json::Value,
 }

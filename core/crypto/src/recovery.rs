@@ -56,10 +56,13 @@ impl RecoveryKey {
     }
 
     /// Encode recovery key as BIP39 mnemonic words (24 words for 256 bits).
-    pub fn to_mnemonic(&self) -> Result<String> {
+    ///
+    /// Returns the words wrapped in `Zeroizing` so they are wiped from memory
+    /// when the caller drops the value.
+    pub fn to_mnemonic(&self) -> Result<Zeroizing<String>> {
         let mnemonic = bip39::Mnemonic::from_entropy(&self.entropy)
             .map_err(|e| Error::Crypto(format!("Failed to encode recovery key: {}", e)))?;
-        Ok(mnemonic.to_string())
+        Ok(Zeroizing::new(mnemonic.to_string()))
     }
 
     /// Decode recovery key from BIP39 mnemonic words.

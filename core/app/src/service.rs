@@ -68,7 +68,7 @@ impl AppService {
     // -- Vault lifecycle --
 
     /// Create a new vault.
-    pub async fn create_vault(&self, params: CreateVaultParams) -> AppResult<VaultCreatedDto> {
+    pub async fn create_vault(&self, mut params: CreateVaultParams) -> AppResult<VaultCreatedDto> {
         let vault_id =
             VaultId::new(&params.vault_id).map_err(|e| AppError::InvalidInput(e.to_string()))?;
 
@@ -80,24 +80,28 @@ impl AppService {
             .map_err(AppError::from)?;
 
         if exists {
-            return Err(AppError::VaultAlreadyExists(params.vault_id));
+            return Err(AppError::VaultAlreadyExists(std::mem::take(
+                &mut params.vault_id,
+            )));
         }
 
+        let provider_config = std::mem::take(&mut params.provider_config);
         let creation = self
             .manager
             .create_vault(
                 vault_id,
                 params.password.as_bytes(),
                 &params.provider_type,
-                params.provider_config,
+                provider_config,
                 KdfParams::default(),
             )
             .await
             .map_err(AppError::from)?;
 
+        let provider_type = std::mem::take(&mut params.provider_type);
         let info = VaultInfoDto {
             id: creation.session.vault_id().to_string(),
-            provider_type: params.provider_type.clone(),
+            provider_type: provider_type.clone(),
             is_unlocked: true,
         };
 
@@ -108,7 +112,7 @@ impl AppService {
 
         *self.session.write().await = Some(ActiveVault {
             session: Arc::new(creation.session),
-            provider_type: params.provider_type,
+            provider_type,
             index: None,
         });
 
@@ -119,26 +123,28 @@ impl AppService {
     }
 
     /// Open an existing vault.
-    pub async fn open_vault(&self, params: OpenVaultParams) -> AppResult<VaultInfoDto> {
+    pub async fn open_vault(&self, mut params: OpenVaultParams) -> AppResult<VaultInfoDto> {
+        let provider_config = std::mem::take(&mut params.provider_config);
         let session = self
             .manager
             .open_vault(
                 &params.provider_type,
-                params.provider_config,
+                provider_config,
                 params.password.as_bytes(),
             )
             .await
             .map_err(AppError::from)?;
 
+        let provider_type = std::mem::take(&mut params.provider_type);
         let info = VaultInfoDto {
             id: session.vault_id().to_string(),
-            provider_type: params.provider_type.clone(),
+            provider_type: provider_type.clone(),
             is_unlocked: true,
         };
 
         *self.session.write().await = Some(ActiveVault {
             session: Arc::new(session),
-            provider_type: params.provider_type,
+            provider_type,
             index: None,
         });
 
@@ -149,27 +155,29 @@ impl AppService {
     }
 
     /// Recover a vault using recovery words.
-    pub async fn recover_vault(&self, params: RecoverVaultParams) -> AppResult<VaultInfoDto> {
+    pub async fn recover_vault(&self, mut params: RecoverVaultParams) -> AppResult<VaultInfoDto> {
+        let provider_config = std::mem::take(&mut params.provider_config);
         let session = self
             .manager
             .recover_vault(
                 &params.provider_type,
-                params.provider_config,
+                provider_config,
                 &params.recovery_words,
                 params.new_password.as_bytes(),
             )
             .await
             .map_err(AppError::from)?;
 
+        let provider_type = std::mem::take(&mut params.provider_type);
         let info = VaultInfoDto {
             id: session.vault_id().to_string(),
-            provider_type: params.provider_type.clone(),
+            provider_type: provider_type.clone(),
             is_unlocked: true,
         };
 
         *self.session.write().await = Some(ActiveVault {
             session: Arc::new(session),
-            provider_type: params.provider_type,
+            provider_type,
             index: None,
         });
 

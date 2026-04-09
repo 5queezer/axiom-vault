@@ -162,7 +162,7 @@ impl VaultConfig {
         //    re-displayed later when the vault is unlocked.
         let encrypted_recovery_key = encrypt(master_key.as_bytes(), recovery_key.as_bytes())?;
 
-        let recovery_words = recovery_key.to_mnemonic()?;
+        let recovery_words = String::from(&*recovery_key.to_mnemonic()?);
 
         let now = Utc::now();
 
@@ -365,7 +365,7 @@ impl VaultConfig {
         let recovery_wrapped = wrap_key(&master_key, &recovery_kek)?;
         let recovery_verification = create_recovery_verification(&recovery_key)?;
         let encrypted_recovery_key = encrypt(master_key.as_bytes(), recovery_key.as_bytes())?;
-        let recovery_words = recovery_key.to_mnemonic()?;
+        let recovery_words = String::from(&*recovery_key.to_mnemonic()?);
 
         self.version = VaultVersion::CURRENT;
         self.wrapped_master_key = Some(wrapped_master_key);
@@ -483,7 +483,7 @@ mod tests {
         let decrypted_rk = config.decrypt_recovery_key(&master_key).unwrap();
         let decrypted_words = decrypted_rk.to_mnemonic().unwrap();
 
-        assert_eq!(decrypted_words, recovery_words);
+        assert_eq!(*decrypted_words, recovery_words);
     }
 
     #[test]

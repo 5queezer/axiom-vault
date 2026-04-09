@@ -14,6 +14,7 @@ use tokio::net::TcpListener;
 use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
 use url::Url;
+use zeroize::{Zeroize, Zeroizing};
 
 use axiomvault_common::{VaultId, VaultPath};
 use axiomvault_crypto::recovery::RecoveryKey;
@@ -582,15 +583,19 @@ fn validate_password_strength(password: &[u8]) -> Result<()> {
 }
 
 /// Prompt for password securely.
-fn prompt_password(prompt: &str) -> Result<Vec<u8>> {
+fn prompt_password(prompt: &str) -> Result<Zeroizing<Vec<u8>>> {
     // Allow non-interactive use via environment variable (useful for scripting/testing)
-    if let Ok(pw) = std::env::var("AXIOMVAULT_PASSWORD") {
+    if let Ok(mut pw) = std::env::var("AXIOMVAULT_PASSWORD") {
         if !pw.is_empty() {
-            return Ok(pw.into_bytes());
+            let bytes = Zeroizing::new(pw.as_bytes().to_vec());
+            pw.zeroize();
+            return Ok(bytes);
         }
     }
-    let password = rpassword::prompt_password(prompt).context("Failed to read password")?;
-    Ok(password.into_bytes())
+    let mut password = rpassword::prompt_password(prompt).context("Failed to read password")?;
+    let bytes = Zeroizing::new(password.as_bytes().to_vec());
+    password.zeroize();
+    Ok(bytes)
 }
 
 /// Display recovery words and prompt user to confirm they've saved them.
@@ -1081,6 +1086,8 @@ async fn cmd_reset_password(path: &Path) -> Result<()> {
         .recover_vault("local", provider_config, recovery_words, &new_password)
         .await
         .context("Failed to reset password. Recovery key may be incorrect.")?;
+
+    recovery_input.zeroize();
 
     println!("Password reset successfully!");
 

@@ -6,6 +6,7 @@ use oauth2::{
     TokenUrl,
 };
 use serde::{Deserialize, Serialize};
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use axiomvault_common::{Error, Result};
 
@@ -28,13 +29,14 @@ const REDIRECT_URL: &str = "http://localhost:8080/callback";
 const ONEDRIVE_SCOPES: &[&str] = &["Files.ReadWrite", "offline_access"];
 
 /// OAuth2 tokens with expiration tracking.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
 pub struct OneDriveTokens {
     /// Access token for API requests.
     pub access_token: String,
     /// Refresh token for obtaining new access tokens.
     pub refresh_token: String,
     /// When the access token expires.
+    #[zeroize(skip)]
     pub expires_at: DateTime<Utc>,
 }
 
@@ -46,13 +48,14 @@ impl OneDriveTokens {
 }
 
 /// Configuration for OneDrive OAuth2 authentication.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
 pub struct OneDriveAuthConfig {
     /// Azure AD application (client) ID.
     pub client_id: String,
     /// Client secret.
     pub client_secret: String,
     /// Redirect URL for OAuth2 callback.
+    #[zeroize(skip)]
     pub redirect_url: String,
 }
 
