@@ -708,7 +708,7 @@ fn install_completions(shell: Shell) -> Result<()> {
 
 /// Create a new vault.
 async fn cmd_create(name: &str, path: &Path, strength: KdfStrength) -> Result<()> {
-    info!("Creating new vault: {}", name);
+    info!("Creating new vault");
 
     let kdf_params = kdf_params_from(strength);
 
@@ -745,7 +745,7 @@ async fn cmd_create(name: &str, path: &Path, strength: KdfStrength) -> Result<()
 
 /// Open vault for interactive session.
 async fn cmd_open(path: &Path) -> Result<()> {
-    info!("Opening vault at: {}", path.display());
+    info!("Opening vault");
 
     let password = prompt_password("Enter password: ")?;
     let vault_path = path.to_string_lossy().to_string();
@@ -889,7 +889,7 @@ async fn cmd_extract(vault_path: &Path, source: &str, dest: &Path) -> Result<()>
 
 /// Create a directory in the vault.
 async fn cmd_mkdir(vault_path: &Path, dir: &str) -> Result<()> {
-    info!("Creating directory: {}", dir);
+    info!("Creating directory");
 
     let password = prompt_password("Enter password: ")?;
     let path_str = vault_path.to_string_lossy().to_string();
@@ -918,7 +918,7 @@ async fn cmd_mkdir(vault_path: &Path, dir: &str) -> Result<()> {
 
 /// Remove a file from the vault.
 async fn cmd_remove(vault_path: &Path, file: &str) -> Result<()> {
-    info!("Removing: {}", file);
+    info!("Removing file from vault");
 
     let password = prompt_password("Enter password: ")?;
     let path_str = vault_path.to_string_lossy().to_string();
@@ -947,7 +947,7 @@ async fn cmd_remove(vault_path: &Path, file: &str) -> Result<()> {
 
 /// Show vault information.
 async fn cmd_info(path: &Path) -> Result<()> {
-    info!("Getting vault info: {}", path.display());
+    info!("Getting vault info");
 
     let password = prompt_password("Enter password: ")?;
     let path_str = path.to_string_lossy().to_string();
