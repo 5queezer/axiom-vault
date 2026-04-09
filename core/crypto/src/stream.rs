@@ -386,7 +386,7 @@ mod tests {
         );
     }
 
-    /// Chunk size of zero in header should be handled (decrypt of empty chunks).
+    /// Header with zero total_chunks should decrypt to empty output.
     #[test]
     fn test_zero_chunk_count_header() {
         let key = [42u8; KEY_LENGTH];

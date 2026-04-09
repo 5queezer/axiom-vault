@@ -152,7 +152,7 @@ pub fn mount(
     //   2. starts a dedicated OS thread to service /dev/fuse read/write,
     //   3. unmounts and joins the thread on drop.
     let bg_session = fuser::spawn_mount2(fs, &mount_point, &config).map_err(|e| {
-        error!("Failed to mount vault: {}", e);
+        error!("Failed to mount vault");
         Error::Io(e)
     })?;
 
