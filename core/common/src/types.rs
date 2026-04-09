@@ -211,6 +211,95 @@ impl fmt::Debug for SensitiveBytes {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
+
+    /// Strategy for generating valid path component strings.
+    fn valid_component_strategy() -> impl Strategy<Value = String> {
+        "[a-zA-Z0-9._-]{1,32}".prop_filter("must not be . or ..", |s| s != "." && s != "..")
+    }
+
+    proptest! {
+        /// Property: from_components rejects any component that is "." or "..".
+        #[test]
+        fn from_components_rejects_dot(
+            prefix in prop::collection::vec(valid_component_strategy(), 0..3),
+        ) {
+            let mut with_dot = prefix.clone();
+            with_dot.push(".".to_string());
+            prop_assert!(VaultPath::from_components(with_dot).is_err());
+
+            let mut with_dotdot = prefix;
+            with_dotdot.push("..".to_string());
+            prop_assert!(VaultPath::from_components(with_dotdot).is_err());
+        }
+
+        /// Property: join rejects "." and "..".
+        #[test]
+        fn join_rejects_dot_and_dotdot(
+            components in prop::collection::vec(valid_component_strategy(), 0..3),
+        ) {
+            let path = VaultPath::from_components(components).unwrap();
+            prop_assert!(path.join(".").is_err());
+            prop_assert!(path.join("..").is_err());
+        }
+
+        /// Property: from_components rejects empty component strings.
+        #[test]
+        fn from_components_rejects_empty(
+            prefix in prop::collection::vec(valid_component_strategy(), 0..3),
+        ) {
+            let mut with_empty = prefix;
+            with_empty.push(String::new());
+            prop_assert!(VaultPath::from_components(with_empty).is_err());
+        }
+
+        /// Property: valid components roundtrip through from_components/components.
+        #[test]
+        fn valid_components_roundtrip(
+            components in prop::collection::vec(valid_component_strategy(), 0..8),
+        ) {
+            let path = VaultPath::from_components(components.clone()).unwrap();
+            let recovered: Vec<String> = path.components().to_vec();
+            prop_assert_eq!(components, recovered);
+        }
+
+        /// Property: parse(to_string_path()) roundtrips for valid paths.
+        #[test]
+        fn parse_display_roundtrip(
+            components in prop::collection::vec(valid_component_strategy(), 0..8),
+        ) {
+            let path = VaultPath::from_components(components).unwrap();
+            let string_repr = path.to_string_path();
+            let parsed = VaultPath::parse(&string_repr).unwrap();
+            prop_assert_eq!(path, parsed);
+        }
+
+        /// Property: join then name returns the joined component.
+        #[test]
+        fn join_then_name(
+            base_components in prop::collection::vec(valid_component_strategy(), 0..4),
+            child in valid_component_strategy(),
+        ) {
+            let base = VaultPath::from_components(base_components).unwrap();
+            let joined = base.join(&child).unwrap();
+            prop_assert_eq!(joined.name(), Some(child.as_str()));
+        }
+
+        /// Property: join rejects components containing separators.
+        #[test]
+        fn join_rejects_separators(
+            base_components in prop::collection::vec(valid_component_strategy(), 0..2),
+            left in valid_component_strategy(),
+            right in valid_component_strategy(),
+        ) {
+            let base = VaultPath::from_components(base_components).unwrap();
+            let with_slash = format!("{}/{}", left, right);
+            prop_assert!(base.join(&with_slash).is_err());
+
+            let with_backslash = format!("{}\\{}", left, right);
+            prop_assert!(base.join(&with_backslash).is_err());
+        }
+    }
 
     #[test]
     fn test_vault_id_creation() {

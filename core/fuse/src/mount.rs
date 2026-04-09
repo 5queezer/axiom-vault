@@ -65,7 +65,7 @@ impl MountHandle {
 
 impl Drop for MountHandle {
     fn drop(&mut self) {
-        info!("Unmounting vault from {:?}", self.mount_point);
+        info!("Unmounting vault");
         // BackgroundSession::drop() joins the background thread and calls umount2.
     }
 }
@@ -115,7 +115,7 @@ pub fn mount(
         )));
     }
 
-    info!("Mounting vault at {:?}", mount_point);
+    info!("Mounting vault");
 
     // Create filesystem
     let fs = VaultFilesystem::new(session, runtime);
@@ -152,11 +152,11 @@ pub fn mount(
     //   2. starts a dedicated OS thread to service /dev/fuse read/write,
     //   3. unmounts and joins the thread on drop.
     let bg_session = fuser::spawn_mount2(fs, &mount_point, &config).map_err(|e| {
-        error!("Failed to mount vault at {:?}: {}", mount_point, e);
+        error!("Failed to mount vault");
         Error::Io(e)
     })?;
 
-    info!("Vault mounted successfully at {:?}", mount_point);
+    info!("Vault mounted successfully");
 
     Ok(MountHandle {
         mount_point,
