@@ -10,6 +10,7 @@ use axiomvault_crypto::recovery::{
     self, create_recovery_verification, generate_master_key, unwrap_key, wrap_key, RecoveryKey,
 };
 use axiomvault_crypto::{KdfParams, MasterKey, Salt};
+use zeroize::Zeroizing;
 
 /// Vault format version for migration support.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -117,7 +118,7 @@ pub struct VaultConfigCreation {
     /// The master key, passed through to avoid a second Argon2id round on vault creation.
     pub master_key: MasterKey,
     /// The recovery key mnemonic (24 BIP39 words). Show to user once.
-    pub recovery_words: String,
+    pub recovery_words: Zeroizing<String>,
 }
 
 impl VaultConfig {
@@ -162,7 +163,7 @@ impl VaultConfig {
         //    re-displayed later when the vault is unlocked.
         let encrypted_recovery_key = encrypt(master_key.as_bytes(), recovery_key.as_bytes())?;
 
-        let recovery_words = String::from(&*recovery_key.to_mnemonic()?);
+        let recovery_words = recovery_key.to_mnemonic()?;
 
         let now = Utc::now();
 
@@ -343,7 +344,7 @@ impl VaultConfig {
     ///
     /// # Returns
     /// The recovery words to show to the user.
-    pub fn migrate_to_v1_1(&mut self, password: &[u8]) -> Result<String> {
+    pub fn migrate_to_v1_1(&mut self, password: &[u8]) -> Result<Zeroizing<String>> {
         use axiomvault_crypto::encrypt;
 
         if !self.is_legacy_format() {
@@ -365,7 +366,7 @@ impl VaultConfig {
         let recovery_wrapped = wrap_key(&master_key, &recovery_kek)?;
         let recovery_verification = create_recovery_verification(&recovery_key)?;
         let encrypted_recovery_key = encrypt(master_key.as_bytes(), recovery_key.as_bytes())?;
-        let recovery_words = String::from(&*recovery_key.to_mnemonic()?);
+        let recovery_words = recovery_key.to_mnemonic()?;
 
         self.version = VaultVersion::CURRENT;
         self.wrapped_master_key = Some(wrapped_master_key);
@@ -483,7 +484,7 @@ mod tests {
         let decrypted_rk = config.decrypt_recovery_key(&master_key).unwrap();
         let decrypted_words = decrypted_rk.to_mnemonic().unwrap();
 
-        assert_eq!(*decrypted_words, recovery_words);
+        assert_eq!(*decrypted_words, *recovery_words);
     }
 
     #[test]

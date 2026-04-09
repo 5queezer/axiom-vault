@@ -107,7 +107,7 @@ impl AppService {
 
         let dto = VaultCreatedDto {
             info: info.clone(),
-            recovery_words: creation.recovery_words,
+            recovery_words: String::from(&*creation.recovery_words),
         };
 
         *self.session.write().await = Some(ActiveVault {
