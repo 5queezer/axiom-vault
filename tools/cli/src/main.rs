@@ -416,6 +416,17 @@ enum Commands {
         target: Option<usize>,
     },
 
+    /// Serve vault contents over WebDAV on the loopback interface.
+    Webdav {
+        /// Path to the vault.
+        #[arg(short, long)]
+        path: PathBuf,
+
+        /// Port to listen on (default: 8080).
+        #[arg(long, default_value_t = 8080)]
+        port: u16,
+    },
+
     /// Configure or change the RAID mode.
     RaidConfigure {
         /// Path to the vault.
@@ -565,6 +576,8 @@ async fn main() -> Result<()> {
             data_shards,
             parity_shards,
         } => cmd_raid_configure(&vault_path, mode, data_shards, parity_shards).await,
+
+        Commands::Webdav { path, port } => cmd_webdav(&path, port).await,
     }
 }
 
@@ -2397,6 +2410,43 @@ async fn cmd_raid_configure(
     }
 
     Ok(())
+}
+
+/// Serve vault contents over WebDAV.
+async fn cmd_webdav(path: &Path, port: u16) -> Result<()> {
+    info!("Starting WebDAV server for vault at: {}", path.display());
+
+    let password = prompt_password("Enter password: ")?;
+    let vault_path = path.to_string_lossy().to_string();
+
+    let manager = VaultManager::new();
+    let provider_config = serde_json::json!({
+        "root": vault_path
+    });
+
+    let session = manager
+        .open_vault("local", provider_config, &password)
+        .await
+        .context("Failed to open vault")?;
+
+    let session = Arc::new(session);
+
+    let config = axiomvault_webdav::WebDavConfig {
+        bind_address: "127.0.0.1".to_string(),
+        port,
+        ..Default::default()
+    };
+
+    let server = axiomvault_webdav::WebDavServer::new(session, config);
+    let url = server.url();
+
+    println!("WebDAV server running at {}/", url);
+    println!("Press Ctrl+C to stop.");
+
+    server
+        .start()
+        .await
+        .map_err(|e| anyhow::anyhow!("WebDAV server error: {}", e))
 }
 
 #[cfg(test)]

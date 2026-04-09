@@ -1,0 +1,35 @@
+[package]
+name = "axiomvault-webdav"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+axiomvault-common = { path = "../common" }
+axiomvault-vault = { path = "../vault" }
+
+# HTTP server
+axum = "0.8"
+hyper = { version = "1.6", features = ["server"] }
+http = "1.3"
+http-body-util = "0.1"
+
+# Async
+tokio.workspace = true
+
+# Error handling
+thiserror.workspace = true
+
+# Logging
+tracing.workspace = true
+
+# Utils
+chrono.workspace = true
+percent-encoding.workspace = true
+
+[dev-dependencies]
+axiomvault-crypto = { path = "../crypto" }
+axiomvault-storage = { path = "../storage" }
+serde_json.workspace = true
+tempfile.workspace = true
+reqwest = { workspace = true, features = ["json"] }

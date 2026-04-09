@@ -14,6 +14,7 @@ axiomvault-crypto = { path = "../../core/crypto" }
 axiomvault-storage = { path = "../../core/storage" }
 axiomvault-vault = { path = "../../core/vault" }
 axiomvault-sync = { path = "../../core/sync" }
+axiomvault-webdav = { path = "../../core/webdav" }
 
 serde.workspace = true
 clap.workspace = true
