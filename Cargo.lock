@@ -270,6 +270,7 @@ dependencies = [
 name = "axiomvault-common"
 version = "0.1.0"
 dependencies = [
+ "proptest",
  "serde",
  "thiserror 2.0.18",
  "zeroize",
@@ -405,6 +406,7 @@ dependencies = [
  "axiomvault-storage",
  "base64 0.22.1",
  "chrono",
+ "proptest",
  "serde",
  "serde_json",
  "subtle",
