@@ -2,6 +2,7 @@
 name = "axiomvault-fuse"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 # NOTE: This crate is Linux/macOS only. It must NOT be compiled for iOS targets.
 # The iOS FFI crate (core/ffi) intentionally does not depend on this crate.
 # All fuse/mount functionality is guarded by the "fuse" feature flag.

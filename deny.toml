@@ -1,0 +1,121 @@
+# cargo-deny configuration for AxiomVault
+# https://embarkstudios.github.io/cargo-deny/
+#
+# This is a security-critical encrypted vault application.
+# Policies are strict by default -- exceptions must be justified.
+
+# ============================================================================
+# Graph — how the dependency graph is constructed
+# ============================================================================
+[graph]
+all-features = true
+
+# ============================================================================
+# Advisories — check for known vulnerabilities and unmaintained crates
+# ============================================================================
+[advisories]
+# Advisories to ignore (add RUSTSEC IDs here with justification).
+# All entries below are "unmaintained" advisories from transitive dependencies
+# that we cannot update (they come from Tauri 2.x and its GTK3 bindings).
+# None are known security vulnerabilities.
+ignore = [
+    # gtk-rs GTK3 bindings -- transitive deps of Tauri 2.x (legacy desktop client).
+    # Tauri uses GTK3 internally; we use GTK4 for our native Linux client.
+    # These will be resolved when Tauri migrates off GTK3.
+    { id = "RUSTSEC-2024-0411", reason = "Tauri 2.x transitive dep (atk)" },
+    { id = "RUSTSEC-2024-0412", reason = "Tauri 2.x transitive dep (gdk)" },
+    { id = "RUSTSEC-2024-0413", reason = "Tauri 2.x transitive dep (gdkx11-sys)" },
+    { id = "RUSTSEC-2024-0414", reason = "Tauri 2.x transitive dep (gdk-sys)" },
+    { id = "RUSTSEC-2024-0415", reason = "Tauri 2.x transitive dep (gtk)" },
+    { id = "RUSTSEC-2024-0416", reason = "Tauri 2.x transitive dep (gdkx11)" },
+    { id = "RUSTSEC-2024-0417", reason = "Tauri 2.x transitive dep (gtk-sys)" },
+    { id = "RUSTSEC-2024-0418", reason = "Tauri 2.x transitive dep (atk-sys)" },
+    { id = "RUSTSEC-2024-0419", reason = "Tauri 2.x transitive dep (pango)" },
+    { id = "RUSTSEC-2024-0420", reason = "Tauri 2.x transitive dep (pango-sys)" },
+
+    # instant -- unmaintained, pulled in by Tauri's transitive deps.
+    { id = "RUSTSEC-2024-0384", reason = "transitive dep via Tauri/parking_lot; no security impact" },
+
+    # proc-macro-error -- unmaintained, pulled in transitively by several crates.
+    { id = "RUSTSEC-2024-0370", reason = "transitive dep via clap/others; proc-macro only, no runtime impact" },
+
+    # fxhash -- unmaintained, used by selectors/html5ever (Tauri dependency).
+    { id = "RUSTSEC-2025-0057", reason = "transitive dep via Tauri (html5ever); non-cryptographic hash, no security impact" },
+
+    # unic-* crates -- unmaintained, pulled in transitively by Tauri's unicode handling.
+    { id = "RUSTSEC-2025-0075", reason = "transitive dep via Tauri (unic-char-range); unicode data only" },
+    { id = "RUSTSEC-2025-0080", reason = "transitive dep via Tauri (unic-common); unicode data only" },
+    { id = "RUSTSEC-2025-0081", reason = "transitive dep via Tauri (unic-char-property); unicode data only" },
+    { id = "RUSTSEC-2025-0098", reason = "transitive dep via Tauri (unic-ucd-version); unicode data only" },
+    { id = "RUSTSEC-2025-0100", reason = "transitive dep via Tauri (unic-ucd-ident); unicode data only" },
+]
+
+# ============================================================================
+# Licenses — allow common permissive OSS licenses
+# ============================================================================
+[licenses]
+# Confidence threshold for license detection by askalono.
+confidence-threshold = 0.8
+
+# List of allowed licenses (SPDX identifiers).
+# Only permissive / weak-copyleft licenses are allowed.
+# GPL variants are denied by omission -- add exceptions below if needed.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Zlib",
+    "BSL-1.0",
+    "CC0-1.0",
+    "MPL-2.0",
+    "0BSD",
+]
+
+# Workspace crates that aren't published don't need license checks.
+[licenses.private]
+ignore = true
+
+# Per-crate license exceptions. Each must include a justification.
+
+# webpki-root-certs and webpki-roots contain Mozilla's CA certificate bundle.
+# CDLA-Permissive-2.0 is a permissive data license — it applies to the
+# certificate data, not to code we execute. Safe for inclusion.
+[[licenses.exceptions]]
+allow = ["CDLA-Permissive-2.0"]
+crate = "webpki-root-certs"
+
+[[licenses.exceptions]]
+allow = ["CDLA-Permissive-2.0"]
+crate = "webpki-roots"
+
+# ============================================================================
+# Bans — prevent duplicate or problematic crates
+# ============================================================================
+[bans]
+# Warn on multiple versions of the same crate. Duplicates increase
+# attack surface and binary size.
+multiple-versions = "warn"
+# Wildcards in dependency versions are too loose but common in the ecosystem.
+wildcards = "allow"
+# Use simplest path for duplicate highlighting in dotgraphs.
+highlight = "simplest-path"
+
+# Crates that are allowed to have duplicate versions (transitive deps we
+# cannot easily control). Add entries with justification.
+skip = [
+    #{ crate = "some-crate@0.1", reason = "transitive dup from X and Y" },
+]
+
+# ============================================================================
+# Sources — restrict where crates can be fetched from
+# ============================================================================
+[sources]
+# Only allow crates from crates.io. No unknown git repos or registries.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

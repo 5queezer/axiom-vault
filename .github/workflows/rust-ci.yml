@@ -186,6 +186,15 @@ jobs:
       - name: Build ${{ matrix.crate }}
         run: cargo build -p ${{ matrix.crate }} --verbose
 
+  # Dependency policy check (licenses, advisories, sources, bans)
+  cargo-deny:
+    name: Cargo Deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: EmbarkStudios/cargo-deny-action@v2
+
   # Security audit
   security-audit:
     name: Security Audit
@@ -309,7 +318,7 @@ jobs:
   ci-success:
     name: CI Success
     runs-on: ubuntu-latest
-    needs: [fmt, clippy, test, build-crates, security-audit, docs, ffi-headers]
+    needs: [fmt, clippy, test, build-crates, cargo-deny, security-audit, docs, ffi-headers]
     if: always()
     steps:
       - name: Check all jobs
@@ -318,6 +327,7 @@ jobs:
              [[ "${{ needs.clippy.result }}" != "success" ]] || \
              [[ "${{ needs.test.result }}" != "success" ]] || \
              [[ "${{ needs.build-crates.result }}" != "success" ]] || \
+             [[ "${{ needs.cargo-deny.result }}" != "success" ]] || \
              [[ "${{ needs.security-audit.result }}" != "success" ]] || \
              [[ "${{ needs.docs.result }}" != "success" ]] || \
              [[ "${{ needs.ffi-headers.result }}" != "success" ]]; then
