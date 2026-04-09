@@ -2,6 +2,7 @@
 name = "axiomvault-crypto"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [dependencies]
 axiomvault-common = { path = "../common" }
