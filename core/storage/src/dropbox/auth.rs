@@ -5,6 +5,7 @@ use oauth2::{
     basic::BasicClient, AuthUrl, ClientId, ClientSecret, RedirectUrl, TokenResponse, TokenUrl,
 };
 use serde::{Deserialize, Serialize};
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use axiomvault_common::{Error, Result};
 
@@ -24,13 +25,14 @@ const DROPBOX_TOKEN_URL: &str = "https://api.dropboxapi.com/oauth2/token";
 const REDIRECT_URL: &str = "http://localhost:8080/callback";
 
 /// OAuth2 tokens with expiration tracking.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
 pub struct DropboxTokens {
     /// Access token for API requests.
     pub access_token: String,
     /// Refresh token for obtaining new access tokens.
     pub refresh_token: String,
     /// When the access token expires.
+    #[zeroize(skip)]
     pub expires_at: DateTime<Utc>,
 }
 
@@ -42,13 +44,14 @@ impl DropboxTokens {
 }
 
 /// Configuration for Dropbox OAuth2 authentication.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
 pub struct DropboxAuthConfig {
     /// Dropbox app key (client ID).
     pub app_key: String,
     /// Dropbox app secret (client secret).
     pub app_secret: String,
     /// Redirect URL for OAuth2 callback.
+    #[zeroize(skip)]
     pub redirect_url: String,
 }
 

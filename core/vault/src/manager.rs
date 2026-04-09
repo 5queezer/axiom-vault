@@ -9,13 +9,14 @@ use axiomvault_common::{Error, Result, VaultId, VaultPath};
 use axiomvault_crypto::recovery::RecoveryKey;
 use axiomvault_crypto::KdfParams;
 use axiomvault_storage::{create_default_registry, ProviderRegistry, StorageProvider};
+use zeroize::Zeroizing;
 
 /// Result of vault creation, containing the session and recovery words.
 pub struct VaultCreation {
     /// Active session for the newly created vault.
     pub session: VaultSession,
     /// Recovery key encoded as 24 BIP39 words. Must be shown to user once.
-    pub recovery_words: String,
+    pub recovery_words: Zeroizing<String>,
 }
 
 /// Vault manager for creating and opening vaults.

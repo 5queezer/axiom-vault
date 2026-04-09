@@ -53,7 +53,7 @@ pub async fn create_vault(path: &str, password: &str) -> FFIResult<FFIVaultHandl
     Ok(FFIVaultHandle {
         service,
         path: abs_path,
-        recovery_words: std::sync::Mutex::new(Some(result.recovery_words)),
+        recovery_words: std::sync::Mutex::new(Some(String::from(&*result.recovery_words))),
         event_task: std::sync::Mutex::new(None),
     })
 }
@@ -205,6 +205,7 @@ pub async fn show_recovery_key(handle: &FFIVaultHandle) -> FFIResult<String> {
 
     recovery_key
         .to_mnemonic()
+        .map(|z| String::from(&*z))
         .map_err(|e| FFIError::VaultError(e.to_string()))
 }
 

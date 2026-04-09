@@ -27,3 +27,4 @@ chrono.workspace = true
 rpassword = "7.0"
 open.workspace = true
 url.workspace = true
+zeroize.workspace = true
