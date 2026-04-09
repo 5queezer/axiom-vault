@@ -130,23 +130,28 @@ impl VaultSession {
         let encrypted_bytes = provider.download(&tree_path).await?;
 
         let tree_key = master_key.derive_file_key(TREE_KEY_CONTEXT);
-        let mut tree_bytes = decrypt(tree_key.as_bytes(), &encrypted_bytes).map_err(|e| {
+        let tree_bytes = decrypt(tree_key.as_bytes(), &encrypted_bytes).map_err(|e| {
             Error::Crypto(format!(
                 "Failed to decrypt tree index (wrong password or corrupted vault): {}",
                 e
             ))
         })?;
 
-        let tree_json = String::from_utf8(tree_bytes.clone())
-            .map_err(|e| Error::Serialization(format!("Invalid UTF-8 in tree data: {}", e)));
+        let mut tree_json = String::from_utf8(tree_bytes).map_err(|e| {
+            // Zeroize the bytes recovered from the conversion error.
+            use zeroize::Zeroize;
+            let mut bytes = e.into_bytes();
+            bytes.zeroize();
+            Error::Serialization("Invalid UTF-8 in tree data".to_string())
+        })?;
 
-        // Best-effort: wipe decrypted tree bytes (contains vault structure metadata).
+        let tree = VaultTree::from_json(&tree_json);
+
+        // Zeroize the JSON string containing decrypted filenames/metadata.
         use zeroize::Zeroize;
-        tree_bytes.zeroize();
+        tree_json.zeroize();
 
-        let tree_json = tree_json?;
-
-        VaultTree::from_json(&tree_json)
+        tree
     }
 
     /// Get the session handle.
