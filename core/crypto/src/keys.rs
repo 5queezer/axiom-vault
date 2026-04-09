@@ -103,9 +103,9 @@ impl FileKey {
     /// Generate a random file key.
     pub fn generate() -> Self {
         use rand::RngExt;
-        let mut key = [0u8; KEY_LENGTH];
+        let mut key = Zeroizing::new([0u8; KEY_LENGTH]);
         rand::rng().fill(&mut key[..]);
-        Self { key }
+        Self::from_bytes(*key)
     }
 }
 
@@ -135,9 +135,9 @@ impl DirectoryKey {
     /// Generate a random directory key.
     pub fn generate() -> Self {
         use rand::RngExt;
-        let mut key = [0u8; KEY_LENGTH];
+        let mut key = Zeroizing::new([0u8; KEY_LENGTH]);
         rand::rng().fill(&mut key[..]);
-        Self { key }
+        Self::from_bytes(*key)
     }
 }
 
@@ -155,9 +155,9 @@ impl Salt {
     /// Generate a random salt.
     pub fn generate() -> Self {
         use rand::RngExt;
-        let mut salt = [0u8; 32];
+        let mut salt = Zeroizing::new([0u8; 32]);
         rand::rng().fill(&mut salt[..]);
-        Self(salt)
+        Self(*salt)
     }
 
     /// Create from bytes.

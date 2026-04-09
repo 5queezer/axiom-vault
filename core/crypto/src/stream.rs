@@ -95,8 +95,11 @@ impl<'a> EncryptingStream<'a> {
             plaintext.extend_from_slice(&buffer[..bytes_read]);
 
             let encrypted = encrypt(self.key, &plaintext)?;
+            plaintext.zeroize();
             encrypted_chunks.push(encrypted);
         }
+
+        buffer.zeroize();
 
         // Write header
         writer.write_all(&[STREAM_VERSION])?;

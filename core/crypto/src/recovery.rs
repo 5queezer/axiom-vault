@@ -110,9 +110,9 @@ impl std::fmt::Debug for RecoveryKey {
 /// Generate a new random master key.
 pub fn generate_master_key() -> MasterKey {
     use rand::RngExt;
-    let mut key = [0u8; KEY_LENGTH];
+    let mut key = Zeroizing::new([0u8; KEY_LENGTH]);
     rand::rng().fill(&mut key[..]);
-    MasterKey::from_bytes(key)
+    MasterKey::from_bytes(*key)
 }
 
 /// Wrap (encrypt) a master key with a key-encryption key.
