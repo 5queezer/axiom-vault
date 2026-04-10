@@ -19,13 +19,13 @@ const USER_AGENT: &str = "AxiomVault/0.1";
 
 /// Build an HTTP client with standard settings for cloud API usage.
 ///
-/// Configures a consistent User-Agent header, connection timeout (10s),
-/// and request timeout (30s).
+/// Configures a consistent User-Agent header and connection timeout (10s).
+/// No total request timeout is set because cloud providers handle both
+/// small metadata requests and large file transfers through the same client.
 pub fn build_http_client() -> Result<Client, Error> {
     Client::builder()
         .user_agent(USER_AGENT)
         .connect_timeout(Duration::from_secs(10))
-        .timeout(Duration::from_secs(30))
         .build()
         .map_err(|e| Error::Network(format!("Failed to create HTTP client: {}", e)))
 }
