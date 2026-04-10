@@ -1191,7 +1191,7 @@ async fn cmd_check(path: &Path, shallow: bool) -> Result<()> {
 
 /// Print a health report to stdout.
 fn print_health_report(report: &axiomvault_vault::HealthReport) {
-    println!("Vault Health Report: {}", report.vault_path);
+    println!("Vault Health Report: {}", report.component);
     println!("{}", "=".repeat(50));
 
     for result in &report.results {
@@ -1207,11 +1207,7 @@ fn print_health_report(report: &axiomvault_vault::HealthReport) {
     }
 
     println!();
-    if report.has_errors() {
-        println!("Result: ERRORS FOUND");
-    } else {
-        println!("Result: HEALTHY");
-    }
+    println!("Result: {}", report.status);
 }
 
 /// Authenticate with Google Drive and save tokens.
@@ -2183,7 +2179,7 @@ async fn cmd_raid_status(vault_path: &Path) -> Result<()> {
                 let status = match h.status {
                     HealthStatus::Healthy => "Healthy",
                     HealthStatus::Degraded => "Degraded",
-                    HealthStatus::Offline => "Offline",
+                    HealthStatus::Unhealthy => "Unhealthy",
                 };
                 let last = h
                     .last_success

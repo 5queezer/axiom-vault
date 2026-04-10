@@ -4,7 +4,9 @@
 //! ensuring consistency and type safety.
 
 pub mod error;
+pub mod health;
 pub mod types;
 
 pub use error::{Error, Result};
+pub use health::{DiagnosticResult, HealthReport, HealthStatus, Severity};
 pub use types::{VaultId, VaultPath};
