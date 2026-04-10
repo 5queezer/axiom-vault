@@ -11,6 +11,7 @@ use std::sync::Arc;
 use axiomvault_common::{Error, Result};
 
 use super::auth::DropboxTokenManager;
+use crate::http_client;
 
 /// Dropbox API base URL for metadata operations.
 const API_BASE: &str = "https://api.dropboxapi.com/2";
@@ -83,17 +84,17 @@ pub struct DropboxClient {
 
 impl DropboxClient {
     /// Create a new Dropbox API client.
-    pub fn new(token_manager: Arc<DropboxTokenManager>) -> Self {
-        Self {
-            http: Client::new(),
+    pub fn new(token_manager: Arc<DropboxTokenManager>) -> axiomvault_common::Result<Self> {
+        Ok(Self {
+            http: http_client::build_http_client()?,
             token_manager,
-        }
+        })
     }
 
     /// Get an authorization header value.
     async fn auth_header(&self) -> Result<String> {
         let token = self.token_manager.get_access_token().await?;
-        Ok(format!("Bearer {}", token))
+        Ok(http_client::bearer_header(&token))
     }
 
     /// Handle a Dropbox API error response.

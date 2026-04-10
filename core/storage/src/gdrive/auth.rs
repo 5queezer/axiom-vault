@@ -1,14 +1,22 @@
 //! OAuth2 authentication and token management for Google Drive.
 
-use chrono::{DateTime, Duration, Utc};
+use async_trait::async_trait;
+use chrono::{Duration, Utc};
 use oauth2::{
     basic::BasicClient, AuthUrl, ClientId, ClientSecret, RedirectUrl, Scope, TokenResponse,
     TokenUrl,
 };
 use serde::{Deserialize, Serialize};
-use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use axiomvault_common::{Error, Result};
+
+use crate::cloud_auth::{CloudTokenManager, CloudTokens, TokenRefresher};
+
+/// Re-export `CloudTokens` as `Tokens` for backward compatibility.
+pub type Tokens = CloudTokens;
+
+/// Re-export `CloudTokenManager<AuthManager>` as `TokenManager`.
+pub type TokenManager = CloudTokenManager<AuthManager>;
 
 type OAuthClient = BasicClient<
     oauth2::EndpointSet,
@@ -27,26 +35,6 @@ const REDIRECT_URL: &str = "http://localhost:8080/callback";
 
 /// Google Drive OAuth2 scopes.
 const DRIVE_SCOPE: &str = "https://www.googleapis.com/auth/drive.file";
-
-/// OAuth2 tokens with expiration tracking.
-#[derive(Debug, Clone, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
-pub struct Tokens {
-    /// Access token for API requests.
-    pub access_token: String,
-    /// Refresh token for obtaining new access tokens.
-    pub refresh_token: String,
-    /// When the access token expires.
-    #[zeroize(skip)]
-    pub expires_at: DateTime<Utc>,
-}
-
-impl Tokens {
-    /// Check if the access token is expired or about to expire.
-    pub fn is_expired(&self) -> bool {
-        // Consider expired if less than 5 minutes remaining
-        self.expires_at < Utc::now() + Duration::minutes(5)
-    }
-}
 
 /// Configuration for OAuth2 authentication.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -95,6 +83,7 @@ impl AuthConfig {
 /// OAuth2 authentication manager for Google Drive.
 pub struct AuthManager {
     client: OAuthClient,
+    #[cfg_attr(not(test), allow(dead_code))]
     config: AuthConfig,
 }
 
@@ -193,18 +182,17 @@ impl AuthManager {
         })
     }
 
+    /// Get the current configuration (test-only).
+    #[cfg(test)]
+    pub(crate) fn config(&self) -> &AuthConfig {
+        &self.config
+    }
+}
+
+#[async_trait]
+impl TokenRefresher for AuthManager {
     /// Refresh an access token using the refresh token.
-    ///
-    /// # Preconditions
-    /// - `refresh_token` is a valid refresh token
-    ///
-    /// # Postconditions
-    /// - Returns new tokens (access token is refreshed)
-    ///
-    /// # Errors
-    /// - Invalid or revoked refresh token
-    /// - Network errors
-    pub async fn refresh_token(&self, refresh_token: &str) -> Result<Tokens> {
+    async fn refresh(&self, refresh_token: &str) -> Result<CloudTokens> {
         use oauth2::RefreshToken;
 
         let http_client = oauth2::reqwest::ClientBuilder::new()
@@ -235,78 +223,11 @@ impl AuthManager {
         let expires_at =
             Utc::now() + Duration::from_std(expires_in).unwrap_or_else(|_| Duration::hours(1));
 
-        Ok(Tokens {
+        Ok(CloudTokens {
             access_token,
             refresh_token: new_refresh_token,
             expires_at,
         })
-    }
-
-    /// Get the current configuration.
-    pub fn config(&self) -> &AuthConfig {
-        &self.config
-    }
-}
-
-/// Token manager that automatically refreshes expired tokens.
-pub struct TokenManager {
-    auth_manager: AuthManager,
-    tokens: tokio::sync::RwLock<Tokens>,
-}
-
-impl TokenManager {
-    /// Create a new token manager with initial tokens.
-    pub fn new(auth_manager: AuthManager, tokens: Tokens) -> Self {
-        Self {
-            auth_manager,
-            tokens: tokio::sync::RwLock::new(tokens),
-        }
-    }
-
-    /// Get a valid access token, refreshing if necessary.
-    ///
-    /// # Postconditions
-    /// - Returns a valid (non-expired) access token
-    ///
-    /// # Errors
-    /// - Token refresh failed
-    pub async fn get_access_token(&self) -> Result<String> {
-        let tokens = self.tokens.read().await;
-
-        if !tokens.is_expired() {
-            return Ok(tokens.access_token.clone());
-        }
-
-        drop(tokens);
-
-        // Need to refresh
-        let mut tokens = self.tokens.write().await;
-
-        // Double-check after acquiring write lock
-        if !tokens.is_expired() {
-            return Ok(tokens.access_token.clone());
-        }
-
-        tracing::info!("Refreshing expired access token");
-
-        let new_tokens = self
-            .auth_manager
-            .refresh_token(&tokens.refresh_token)
-            .await?;
-
-        *tokens = new_tokens;
-
-        Ok(tokens.access_token.clone())
-    }
-
-    /// Get the current tokens.
-    pub async fn get_tokens(&self) -> Tokens {
-        self.tokens.read().await.clone()
-    }
-
-    /// Update tokens (e.g., after manual refresh).
-    pub async fn update_tokens(&self, tokens: Tokens) {
-        *self.tokens.write().await = tokens;
     }
 }
 
