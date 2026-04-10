@@ -10,6 +10,7 @@ use std::pin::Pin;
 use axiomvault_common::{Error, Result};
 
 use super::auth::TokenManager;
+use crate::http_client;
 
 /// Google Drive API base URL.
 const DRIVE_API_BASE: &str = "https://www.googleapis.com/drive/v3";
@@ -79,13 +80,8 @@ pub struct DriveClient {
 impl DriveClient {
     /// Create a new Drive client.
     pub fn new(token_manager: std::sync::Arc<TokenManager>) -> Self {
-        let http = Client::builder()
-            .user_agent("AxiomVault/0.1")
-            .build()
-            .expect("Failed to create HTTP client");
-
         Self {
-            http,
+            http: http_client::build_http_client(),
             token_manager,
         }
     }
@@ -117,7 +113,7 @@ impl DriveClient {
     /// Get authorization header.
     async fn auth_header(&self) -> Result<String> {
         let token = self.token_manager.get_access_token().await?;
-        Ok(format!("Bearer {}", token))
+        Ok(http_client::bearer_header(&token))
     }
 
     /// Get file metadata by ID.
@@ -634,25 +630,7 @@ impl DriveClient {
         &self,
         response: reqwest::Response,
     ) -> Result<T> {
-        let status = response.status();
-
-        if status.is_success() {
-            response
-                .json()
-                .await
-                .map_err(|e| Error::Network(format!("Failed to parse response: {}", e)))
-        } else if status == StatusCode::NOT_FOUND {
-            Err(Error::NotFound("Resource not found".to_string()))
-        } else if status == StatusCode::UNAUTHORIZED {
-            Err(Error::Authentication(
-                "Invalid or expired token".to_string(),
-            ))
-        } else if status == StatusCode::FORBIDDEN {
-            Err(Error::NotPermitted("Access denied".to_string()))
-        } else {
-            let body = response.text().await.unwrap_or_default();
-            Err(Error::Network(format!("API error: {} - {}", status, body)))
-        }
+        http_client::handle_json_response(response).await
     }
 }
 

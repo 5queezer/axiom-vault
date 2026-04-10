@@ -10,10 +10,12 @@
 //! - Streaming support: Large files are handled via streams
 //! - Unified error semantics: Consistent error types across providers
 
+pub mod cloud_auth;
 pub mod composite;
 pub mod dropbox;
 pub mod gdrive;
 pub mod health;
+pub mod http_client;
 pub mod icloud;
 pub mod local;
 pub mod memory;
@@ -23,6 +25,7 @@ pub mod rebuild;
 pub mod registry;
 pub mod shard_map;
 
+pub use cloud_auth::{CloudTokenManager, CloudTokens, TokenRefresher};
 pub use composite::{CompositeConfig, CompositeStorageProvider, RaidMode};
 pub use dropbox::{DropboxConfig, DropboxProvider};
 pub use gdrive::{GDriveConfig, GDriveProvider};
