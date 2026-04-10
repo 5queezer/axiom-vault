@@ -91,7 +91,7 @@ cli:
 
 # Core libraries
 core:
-	$(CARGO) build --workspace --exclude axiomvault-cli
+	$(CARGO) build --workspace --exclude axiomvault-cli --exclude axiomvault-linux
 
 # Install targets
 install: install-linux

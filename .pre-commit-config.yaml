@@ -30,14 +30,14 @@ repos:
       - id: cargo-clippy
         name: cargo clippy (lint check)
         language: system
-        entry: cargo clippy --workspace --exclude axiomvault-linux --all-targets --all-features -- -D warnings
+        entry: bash -c 'if [ "$(uname)" = "Darwin" ]; then cargo clippy --workspace --exclude axiomvault-linux --all-targets --all-features -- -D warnings; else cargo clippy --workspace --all-targets --all-features -- -D warnings; fi'
         pass_filenames: false
         types: [rust]
 
       - id: cargo-deny-warnings
         name: cargo build (deny warnings)
         language: system
-        entry: bash -c 'RUSTFLAGS="-D warnings" cargo build --workspace --exclude axiomvault-linux --all-features 2>&1'
+        entry: bash -c 'if [ "$(uname)" = "Darwin" ]; then RUSTFLAGS="-D warnings" cargo build --workspace --exclude axiomvault-linux --all-features 2>&1; else RUSTFLAGS="-D warnings" cargo build --workspace --all-features 2>&1; fi'
         pass_filenames: false
         types: [rust]
 

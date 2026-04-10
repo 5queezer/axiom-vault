@@ -6,8 +6,9 @@ Cross-platform encrypted vault with client-side encryption. Files are encrypted 
 
 - **Language:** Rust 2021 edition, MSRV 1.85.0
 - **Crypto:** XChaCha20-Poly1305 (AEAD), Argon2id (KDF), Blake2b (hashing)
-- **Desktop:** GTK4/libadwaita (Linux native)
-- **Mobile:** C-ABI FFI via `core/ffi` + cbindgen → Swift (iOS/macOS), Kotlin (Android)
+- **Desktop (Linux):** GTK4/libadwaita (native)
+- **Desktop/Mobile (macOS/iOS):** SwiftUI via C-ABI FFI (`core/ffi` + cbindgen)
+- **Mobile (Android):** Kotlin Compose via C-ABI FFI
 - **Filesystem:** FUSE via `fuser` crate for virtual mount
 - **Storage:** Google Drive (OAuth2), extensible via storage provider trait
 - **DB:** SQLite via `rusqlite` (bundled)
