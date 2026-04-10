@@ -303,7 +303,7 @@ The transition from the current state to this architecture:
 5. **Build Linux skeleton** — GTK4 app consuming the facade directly (#104)
 6. **Packaging** — platform-specific distribution (DMG, Flatpak/deb, etc.) (#105)
 
-The Tauri desktop client (`clients/desktop`) remains functional only as a migration path and should be treated as legacy. Once the Linux GTK client reaches feature parity for required desktop workflows, the Tauri client should be deprecated and removed from the primary product path.
+The legacy Tauri desktop client has been removed. The Linux GTK4 client is the primary desktop client going forward.
 
 ## Crate Dependency Graph (target state)
 
