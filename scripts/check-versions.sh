@@ -48,10 +48,6 @@ check "clients/apple/project.yml" "MARKETING_VERSION" "$APPLE_MARKETING"
 ANDROID_VERSION=$(sed -n 's/.*versionName *= *"\(.*\)"/\1/p' "$REPO_ROOT/clients/android/app/build.gradle.kts")
 check "clients/android/app/build.gradle.kts" "versionName" "$ANDROID_VERSION"
 
-# Tauri version
-TAURI_VERSION=$(jq -r '.version' "$REPO_ROOT/clients/desktop/src-tauri/tauri.conf.json")
-check "clients/desktop/src-tauri/tauri.conf.json" "version" "$TAURI_VERSION"
-
 echo "---"
 if [ "$ERRORS" -gt 0 ]; then
     echo "FAILED: $ERRORS version(s) out of sync"

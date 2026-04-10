@@ -254,6 +254,6 @@ Pre-release detection (existing): tags containing `alpha`, `beta`, or `rc` are m
 - Hardened Runtime is required for notarization
 
 ### General
-- The Tauri desktop client (`clients/desktop`) is not part of this packaging strategy and will be deprecated once native clients reach feature parity
+- The legacy Tauri desktop client has been removed
 - Windows packaging is deferred (see architecture doc)
 - Mobile distribution (iOS App Store, Google Play) is handled separately

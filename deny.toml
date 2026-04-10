@@ -15,39 +15,10 @@ all-features = true
 # ============================================================================
 [advisories]
 # Advisories to ignore (add RUSTSEC IDs here with justification).
-# All entries below are "unmaintained" advisories from transitive dependencies
-# that we cannot update (they come from Tauri 2.x and its GTK3 bindings).
-# None are known security vulnerabilities.
 ignore = [
-    # gtk-rs GTK3 bindings -- transitive deps of Tauri 2.x (legacy desktop client).
-    # Tauri uses GTK3 internally; we use GTK4 for our native Linux client.
-    # These will be resolved when Tauri migrates off GTK3.
-    { id = "RUSTSEC-2024-0411", reason = "Tauri 2.x transitive dep (atk)" },
-    { id = "RUSTSEC-2024-0412", reason = "Tauri 2.x transitive dep (gdk)" },
-    { id = "RUSTSEC-2024-0413", reason = "Tauri 2.x transitive dep (gdkx11-sys)" },
-    { id = "RUSTSEC-2024-0414", reason = "Tauri 2.x transitive dep (gdk-sys)" },
-    { id = "RUSTSEC-2024-0415", reason = "Tauri 2.x transitive dep (gtk)" },
-    { id = "RUSTSEC-2024-0416", reason = "Tauri 2.x transitive dep (gdkx11)" },
-    { id = "RUSTSEC-2024-0417", reason = "Tauri 2.x transitive dep (gtk-sys)" },
-    { id = "RUSTSEC-2024-0418", reason = "Tauri 2.x transitive dep (atk-sys)" },
-    { id = "RUSTSEC-2024-0419", reason = "Tauri 2.x transitive dep (pango)" },
-    { id = "RUSTSEC-2024-0420", reason = "Tauri 2.x transitive dep (pango-sys)" },
-
-    # instant -- unmaintained, pulled in by Tauri's transitive deps.
-    { id = "RUSTSEC-2024-0384", reason = "transitive dep via Tauri/parking_lot; no security impact" },
-
-    # proc-macro-error -- unmaintained, pulled in transitively by several crates.
-    { id = "RUSTSEC-2024-0370", reason = "transitive dep via clap/others; proc-macro only, no runtime impact" },
-
-    # fxhash -- unmaintained, used by selectors/html5ever (Tauri dependency).
-    { id = "RUSTSEC-2025-0057", reason = "transitive dep via Tauri (html5ever); non-cryptographic hash, no security impact" },
-
-    # unic-* crates -- unmaintained, pulled in transitively by Tauri's unicode handling.
-    { id = "RUSTSEC-2025-0075", reason = "transitive dep via Tauri (unic-char-range); unicode data only" },
-    { id = "RUSTSEC-2025-0080", reason = "transitive dep via Tauri (unic-common); unicode data only" },
-    { id = "RUSTSEC-2025-0081", reason = "transitive dep via Tauri (unic-char-property); unicode data only" },
-    { id = "RUSTSEC-2025-0098", reason = "transitive dep via Tauri (unic-ucd-version); unicode data only" },
-    { id = "RUSTSEC-2025-0100", reason = "transitive dep via Tauri (unic-ucd-ident); unicode data only" },
+    # instant -- unmaintained, pulled in transitively via reed-solomon-erasure → parking_lot 0.11.
+    # reed-solomon-erasure pins an old parking_lot; no alternative available yet.
+    { id = "RUSTSEC-2024-0384", reason = "transitive dep via reed-solomon-erasure; no update available" },
 ]
 
 # ============================================================================

@@ -29,7 +29,9 @@ pub use cloud_auth::{CloudTokenManager, CloudTokens, TokenRefresher};
 pub use composite::{CompositeConfig, CompositeStorageProvider, RaidMode};
 pub use dropbox::{DropboxConfig, DropboxProvider};
 pub use gdrive::{GDriveConfig, GDriveProvider};
-pub use health::{HealthConfig, HealthStatus, ProviderHealth};
+// Re-export unified HealthStatus from common alongside storage-specific health types.
+pub use axiomvault_common::health::HealthStatus;
+pub use health::{HealthConfig, ProviderHealth};
 pub use icloud::{ICloudConfig, ICloudProvider};
 pub use local::LocalProvider;
 pub use memory::MemoryProvider;
