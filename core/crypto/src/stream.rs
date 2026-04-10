@@ -256,6 +256,148 @@ pub fn decrypt_bytes(key: &[u8], data: &[u8]) -> Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        /// Property: encrypt then decrypt always roundtrips for arbitrary data.
+        #[test]
+        fn stream_roundtrip_arbitrary_data(data in prop::collection::vec(any::<u8>(), 0..4096)) {
+            let key = [42u8; KEY_LENGTH];
+            let encrypted = encrypt_bytes(&key, &data).unwrap();
+            let decrypted = decrypt_bytes(&key, &encrypted).unwrap();
+            prop_assert_eq!(decrypted, data);
+        }
+
+        /// Property: encrypt then decrypt roundtrips with various chunk sizes.
+        #[test]
+        fn stream_roundtrip_various_chunk_sizes(
+            data in prop::collection::vec(any::<u8>(), 1..2048),
+            chunk_size in 1usize..512,
+        ) {
+            let key = [7u8; KEY_LENGTH];
+            let stream = EncryptingStream::new(&key).unwrap().with_chunk_size(chunk_size);
+            let mut encrypted = Vec::new();
+            stream.encrypt_stream(&data[..], &mut encrypted).unwrap();
+
+            let decrypted = decrypt_bytes(&key, &encrypted).unwrap();
+            prop_assert_eq!(decrypted, data);
+        }
+    }
+
+    /// Truncated ciphertext must return an error, never panic.
+    #[test]
+    fn test_truncated_ciphertext_returns_error() {
+        let key = [42u8; KEY_LENGTH];
+        let plaintext = b"Sensitive data for truncation test";
+        let encrypted = encrypt_bytes(&key, plaintext).unwrap();
+
+        // Truncate at various points
+        for truncate_at in [
+            0,
+            1,
+            5,
+            HEADER_SIZE - 1,
+            HEADER_SIZE,
+            HEADER_SIZE + 1,
+            encrypted.len() / 2,
+            encrypted.len() - 1,
+        ] {
+            if truncate_at >= encrypted.len() {
+                continue;
+            }
+            let truncated = &encrypted[..truncate_at];
+            let result = decrypt_bytes(&key, truncated);
+            assert!(
+                result.is_err(),
+                "Expected error for truncation at byte {}",
+                truncate_at
+            );
+        }
+    }
+
+    /// Corrupted chunk data must return an error, never panic.
+    #[test]
+    fn test_corrupted_chunk_data_returns_error() {
+        let key = [42u8; KEY_LENGTH];
+        let plaintext = b"Data to be corrupted in chunk body";
+        let encrypted = encrypt_bytes(&key, plaintext).unwrap();
+
+        // Corrupt a byte in the chunk body (after the header)
+        if encrypted.len() > HEADER_SIZE + 5 {
+            let mut corrupted = encrypted.clone();
+            corrupted[HEADER_SIZE + 5] ^= 0xFF;
+            let result = decrypt_bytes(&key, &corrupted);
+            assert!(result.is_err(), "Expected error for corrupted chunk data");
+        }
+    }
+
+    /// Invalid version byte in header must return an error.
+    #[test]
+    fn test_invalid_version_returns_error() {
+        let key = [42u8; KEY_LENGTH];
+        let plaintext = b"Version check data";
+        let mut encrypted = encrypt_bytes(&key, plaintext).unwrap();
+
+        // Set version to unsupported value
+        encrypted[0] = 99;
+        let result = decrypt_bytes(&key, &encrypted);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("Unsupported stream version"),
+            "Expected version error, got: {}",
+            err_msg
+        );
+    }
+
+    /// Bad chunk count (higher than actual data) must return an error.
+    #[test]
+    fn test_bad_chunk_count_returns_error() {
+        let key = [42u8; KEY_LENGTH];
+        let plaintext = b"Chunk count test";
+        let mut encrypted = encrypt_bytes(&key, plaintext).unwrap();
+
+        // Set total_chunks to a large number (header bytes 5..13)
+        let bogus_count: u64 = 9999;
+        encrypted[5..13].copy_from_slice(&bogus_count.to_le_bytes());
+        let result = decrypt_bytes(&key, &encrypted);
+        assert!(result.is_err(), "Expected error for bad chunk count");
+    }
+
+    /// Empty input (zero bytes) must be handled gracefully.
+    #[test]
+    fn test_empty_input_decrypt_returns_error() {
+        let key = [42u8; KEY_LENGTH];
+        let result = decrypt_bytes(&key, &[]);
+        assert!(result.is_err(), "Expected error for empty ciphertext input");
+    }
+
+    /// Header-only input (no chunk data, but claims 1 chunk) must error.
+    #[test]
+    fn test_header_only_with_nonzero_chunks_returns_error() {
+        let key = [42u8; KEY_LENGTH];
+        let mut header = vec![STREAM_VERSION];
+        header.extend_from_slice(&(DEFAULT_CHUNK_SIZE as u32).to_le_bytes());
+        header.extend_from_slice(&1u64.to_le_bytes()); // claims 1 chunk but no data follows
+        let result = decrypt_bytes(&key, &header);
+        assert!(
+            result.is_err(),
+            "Expected error for header-only input with nonzero chunk count"
+        );
+    }
+
+    /// Header with zero total_chunks should decrypt to empty output.
+    #[test]
+    fn test_zero_chunk_count_header() {
+        let key = [42u8; KEY_LENGTH];
+        let mut header = vec![STREAM_VERSION];
+        header.extend_from_slice(&(DEFAULT_CHUNK_SIZE as u32).to_le_bytes());
+        header.extend_from_slice(&0u64.to_le_bytes()); // 0 chunks
+        let result = decrypt_bytes(&key, &header);
+        // 0 chunks means empty file — should succeed with empty output
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_empty());
+    }
 
     #[test]
     fn test_stream_encrypt_decrypt_roundtrip() {

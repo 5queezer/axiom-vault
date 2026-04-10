@@ -322,6 +322,91 @@ impl Default for VaultTree {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
+
+    /// Strategy for generating valid file/directory names.
+    /// Excludes '/', '\', '.', '..', and empty strings.
+    fn valid_name_strategy() -> impl Strategy<Value = String> {
+        "[a-zA-Z0-9_-]{1,32}".prop_filter("must not be . or ..", |s| s != "." && s != "..")
+    }
+
+    proptest! {
+        /// Property: serializing a VaultTree to JSON and deserializing it back
+        /// produces an equivalent tree (all files and directories preserved).
+        #[test]
+        fn tree_json_roundtrip(
+            dirs in prop::collection::vec(valid_name_strategy(), 0..5),
+            files in prop::collection::vec(
+                (valid_name_strategy(), 0u64..1_000_000),
+                0..10,
+            ),
+        ) {
+            let mut tree = VaultTree::new();
+
+            // Create directories at root level
+            for dir_name in &dirs {
+                let path = VaultPath::parse(&format!("/{}", dir_name)).unwrap();
+                // Ignore AlreadyExists errors from duplicate names
+                let _ = tree.create_directory(&path, format!("enc_{}", dir_name));
+            }
+
+            // Create files at root level
+            for (file_name, size) in &files {
+                let path = VaultPath::parse(&format!("/{}", file_name)).unwrap();
+                // Ignore errors (duplicate names, etc.)
+                let _ = tree.create_file(&path, format!("enc_{}", file_name), *size);
+            }
+
+            let json = tree.to_json().unwrap();
+            let restored = VaultTree::from_json(&json).unwrap();
+
+            // Verify structure is preserved
+            prop_assert_eq!(tree.count_files(), restored.count_files());
+            prop_assert_eq!(tree.total_size(), restored.total_size());
+
+            // Verify each node that was created exists in the restored tree
+            let root_children: Vec<String> = tree.root().list_children();
+            for name in &root_children {
+                let path = VaultPath::parse(&format!("/{}", name)).unwrap();
+                let original = tree.get_node(&path).unwrap();
+                let restored_node = restored.get_node(&path).unwrap();
+                prop_assert_eq!(original.metadata.name.as_str(), restored_node.metadata.name.as_str());
+                prop_assert_eq!(original.metadata.node_type, restored_node.metadata.node_type);
+                prop_assert_eq!(original.metadata.size, restored_node.metadata.size);
+                prop_assert_eq!(
+                    original.metadata.encrypted_name.as_str(),
+                    restored_node.metadata.encrypted_name.as_str()
+                );
+            }
+        }
+
+        /// Property: nested directory trees roundtrip through JSON correctly.
+        #[test]
+        fn tree_nested_json_roundtrip(
+            dir_name in valid_name_strategy(),
+            file_names in prop::collection::vec(valid_name_strategy(), 1..5),
+            sizes in prop::collection::vec(0u64..10_000, 1..5),
+        ) {
+            let mut tree = VaultTree::new();
+            let dir_path = VaultPath::parse(&format!("/{}", dir_name)).unwrap();
+            tree.create_directory(&dir_path, format!("enc_{}", dir_name)).unwrap();
+
+            let count = file_names.len().min(sizes.len());
+            let mut created = 0;
+            for i in 0..count {
+                let file_path = VaultPath::parse(&format!("/{}/{}", dir_name, file_names[i])).unwrap();
+                if tree.create_file(&file_path, format!("enc_{}", file_names[i]), sizes[i]).is_ok() {
+                    created += 1;
+                }
+            }
+
+            let json = tree.to_json().unwrap();
+            let restored = VaultTree::from_json(&json).unwrap();
+
+            prop_assert_eq!(tree.count_files(), restored.count_files());
+            prop_assert_eq!(created, restored.count_files());
+        }
+    }
 
     #[test]
     fn test_tree_creation() {

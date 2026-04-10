@@ -416,6 +416,17 @@ enum Commands {
         target: Option<usize>,
     },
 
+    /// Serve vault contents over WebDAV on the loopback interface.
+    Webdav {
+        /// Path to the vault.
+        #[arg(short, long)]
+        path: PathBuf,
+
+        /// Port to listen on (default: 8080).
+        #[arg(long, default_value_t = 8080)]
+        port: u16,
+    },
+
     /// Configure or change the RAID mode.
     RaidConfigure {
         /// Path to the vault.
@@ -565,6 +576,8 @@ async fn main() -> Result<()> {
             data_shards,
             parity_shards,
         } => cmd_raid_configure(&vault_path, mode, data_shards, parity_shards).await,
+
+        Commands::Webdav { path, port } => cmd_webdav(&path, port).await,
     }
 }
 
@@ -708,7 +721,7 @@ fn install_completions(shell: Shell) -> Result<()> {
 
 /// Create a new vault.
 async fn cmd_create(name: &str, path: &Path, strength: KdfStrength) -> Result<()> {
-    info!("Creating new vault: {}", name);
+    info!("Creating new vault");
 
     let kdf_params = kdf_params_from(strength);
 
@@ -745,7 +758,7 @@ async fn cmd_create(name: &str, path: &Path, strength: KdfStrength) -> Result<()
 
 /// Open vault for interactive session.
 async fn cmd_open(path: &Path) -> Result<()> {
-    info!("Opening vault at: {}", path.display());
+    info!("Opening vault");
 
     let password = prompt_password("Enter password: ")?;
     let vault_path = path.to_string_lossy().to_string();
@@ -889,7 +902,7 @@ async fn cmd_extract(vault_path: &Path, source: &str, dest: &Path) -> Result<()>
 
 /// Create a directory in the vault.
 async fn cmd_mkdir(vault_path: &Path, dir: &str) -> Result<()> {
-    info!("Creating directory: {}", dir);
+    info!("Creating directory");
 
     let password = prompt_password("Enter password: ")?;
     let path_str = vault_path.to_string_lossy().to_string();
@@ -918,7 +931,7 @@ async fn cmd_mkdir(vault_path: &Path, dir: &str) -> Result<()> {
 
 /// Remove a file from the vault.
 async fn cmd_remove(vault_path: &Path, file: &str) -> Result<()> {
-    info!("Removing: {}", file);
+    info!("Removing file from vault");
 
     let password = prompt_password("Enter password: ")?;
     let path_str = vault_path.to_string_lossy().to_string();
@@ -947,7 +960,7 @@ async fn cmd_remove(vault_path: &Path, file: &str) -> Result<()> {
 
 /// Show vault information.
 async fn cmd_info(path: &Path) -> Result<()> {
-    info!("Getting vault info: {}", path.display());
+    info!("Getting vault info");
 
     let password = prompt_password("Enter password: ")?;
     let path_str = path.to_string_lossy().to_string();
@@ -2397,6 +2410,43 @@ async fn cmd_raid_configure(
     }
 
     Ok(())
+}
+
+/// Serve vault contents over WebDAV.
+async fn cmd_webdav(path: &Path, port: u16) -> Result<()> {
+    info!("Starting WebDAV server for vault at: {}", path.display());
+
+    let password = prompt_password("Enter password: ")?;
+    let vault_path = path.to_string_lossy().to_string();
+
+    let manager = VaultManager::new();
+    let provider_config = serde_json::json!({
+        "root": vault_path
+    });
+
+    let session = manager
+        .open_vault("local", provider_config, &password)
+        .await
+        .context("Failed to open vault")?;
+
+    let session = Arc::new(session);
+
+    let config = axiomvault_webdav::WebDavConfig {
+        bind_address: "127.0.0.1".to_string(),
+        port,
+        ..Default::default()
+    };
+
+    let server = axiomvault_webdav::WebDavServer::new(session, config);
+    let url = server.url();
+
+    println!("WebDAV server running at {}/", url);
+    println!("Press Ctrl+C to stop.");
+
+    server
+        .start()
+        .await
+        .map_err(|e| anyhow::anyhow!("WebDAV server error: {}", e))
 }
 
 #[cfg(test)]

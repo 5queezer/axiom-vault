@@ -9,6 +9,7 @@ members = [
     "core/app",
     "core/ffi",
     "core/fuse",
+    "core/webdav",
     "tools/cli",
     "clients/desktop/src-tauri",
     "clients/linux",

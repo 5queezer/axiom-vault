@@ -71,7 +71,7 @@ pub async fn create_vault(
     password: String,
     provider_type: String,
 ) -> Result<VaultCreationResult, String> {
-    info!("Creating vault: {}", id);
+    info!("Creating vault");
 
     let storage_root = state.data_dir.join(&id).join("storage");
     let provider_config = serde_json::json!({
@@ -112,7 +112,7 @@ pub async fn unlock_vault(
     id: String,
     password: String,
 ) -> Result<VaultInfo, String> {
-    info!("Unlocking vault: {}", id);
+    info!("Unlocking vault");
 
     let storage_root = state.data_dir.join(&id).join("storage");
     let provider_config = serde_json::json!({
@@ -144,7 +144,7 @@ pub async fn unlock_vault(
 /// Lock a vault.
 #[tauri::command]
 pub async fn lock_vault(state: State<'_, Arc<AppState>>, id: String) -> Result<(), String> {
-    info!("Locking vault: {}", id);
+    info!("Locking vault");
 
     {
         let mut mounts = state.mounts.write().await;
@@ -201,7 +201,7 @@ pub async fn mount_vault(
 /// Unmount a vault.
 #[tauri::command]
 pub async fn unmount_vault(state: State<'_, Arc<AppState>>, id: String) -> Result<(), String> {
-    info!("Unmounting vault: {}", id);
+    info!("Unmounting vault");
 
     let mut mounts = state.mounts.write().await;
     if mounts.remove(&id).is_some() {
