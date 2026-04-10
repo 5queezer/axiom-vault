@@ -1,72 +1,24 @@
 //! Vault health check and integrity verification.
 //!
 //! Provides diagnostics for vault structure, tree index integrity,
-//! orphaned files, and missing files.
+//! orphaned files, and missing files. Uses the unified health types
+//! from [`axiomvault_common::health`].
 
 use std::collections::HashSet;
 
-use serde::Serialize;
 use tracing::{debug, warn};
 
 use crate::config::{
     VaultConfig, VaultVersion, CONFIG_FILENAME, DATA_DIRNAME, META_DIRNAME, TREE_FILENAME,
 };
 use crate::tree::{NodeType, TreeNode, VaultTree};
+use axiomvault_common::health::{DiagnosticResult, HealthReport, Severity};
 use axiomvault_common::{Error, Result, VaultPath};
 use axiomvault_crypto::{decrypt, MasterKey};
 use axiomvault_storage::StorageProvider;
 
 /// Context tag for tree index key derivation (must match session.rs).
 const TREE_KEY_CONTEXT: &[u8] = b"vault_tree_index_v1";
-
-/// Severity level for a diagnostic result.
-#[derive(Debug, Clone, Serialize)]
-pub enum Severity {
-    /// Informational finding, no action needed.
-    Info,
-    /// Potential problem that may need attention.
-    Warning,
-    /// Definite problem that affects vault integrity.
-    Error,
-}
-
-/// A single diagnostic finding from a health check.
-#[derive(Debug, Clone, Serialize)]
-pub struct DiagnosticResult {
-    /// Name of the check that produced this result.
-    pub check_name: String,
-    /// Severity of the finding.
-    pub severity: Severity,
-    /// Human-readable description of the finding.
-    pub message: String,
-    /// Whether this issue can be automatically fixed.
-    pub auto_fixable: bool,
-}
-
-/// Complete health report for a vault.
-#[derive(Debug, Clone, Serialize)]
-pub struct HealthReport {
-    /// Individual diagnostic results.
-    pub results: Vec<DiagnosticResult>,
-    /// Path or identifier for the vault that was checked.
-    pub vault_path: String,
-}
-
-impl HealthReport {
-    /// Returns `true` if any diagnostic result has `Severity::Error`.
-    pub fn has_errors(&self) -> bool {
-        self.results
-            .iter()
-            .any(|r| matches!(r.severity, Severity::Error))
-    }
-
-    /// Serialize the report to a JSON string.
-    pub fn to_json(&self) -> String {
-        serde_json::to_string_pretty(self).unwrap_or_else(|e| {
-            format!(r#"{{"error": "Failed to serialize health report: {}"}}"#, e)
-        })
-    }
-}
 
 /// Run a shallow health check that does not require a password.
 ///
@@ -189,10 +141,7 @@ pub async fn check_vault_structure(
         _ => {}
     }
 
-    Ok(HealthReport {
-        results,
-        vault_path: vault_path.to_string(),
-    })
+    Ok(HealthReport::new(vault_path, results))
 }
 
 /// Run all health checks on a vault.
@@ -223,10 +172,7 @@ pub async fn check_vault_health(
         }
     }
 
-    Ok(HealthReport {
-        results,
-        vault_path: vault_path.to_string(),
-    })
+    Ok(HealthReport::new(vault_path, results))
 }
 
 /// Validate the vault configuration.
@@ -630,18 +576,32 @@ mod tests {
 
     #[test]
     fn test_health_report_json() {
-        let report = HealthReport {
-            results: vec![DiagnosticResult {
+        let report = HealthReport::new(
+            "/tmp/test",
+            vec![DiagnosticResult {
                 check_name: "test".to_string(),
                 severity: Severity::Info,
                 message: "All good".to_string(),
                 auto_fixable: false,
             }],
-            vault_path: "/tmp/test".to_string(),
-        };
+        );
 
-        let json = report.to_json();
+        let json = report.to_json().unwrap();
         assert!(json.contains("test"));
         assert!(json.contains("All good"));
+    }
+
+    #[tokio::test]
+    async fn test_health_report_status_computed() {
+        let (provider, config, master_key) = setup_vault().await;
+
+        let report = check_vault_health(provider.as_ref(), &config, &master_key, "/tmp/test")
+            .await
+            .unwrap();
+
+        // Empty vault has a warning ("tree index does not exist") so status is Degraded
+        assert!(!report.has_errors());
+        assert!(report.has_warnings());
+        assert_eq!(report.status, axiomvault_common::HealthStatus::Degraded);
     }
 }

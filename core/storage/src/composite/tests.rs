@@ -896,7 +896,7 @@ async fn test_health_degraded_after_consecutive_failures() {
         mode: RaidMode::Mirror,
         health: HealthConfig {
             failure_threshold: 3,
-            offline_threshold: 10,
+            unhealthy_threshold: 10,
             recovery_interval_secs: 3600,
         },
     };
@@ -936,7 +936,7 @@ async fn test_health_degraded_skipped_for_reads() {
         mode: RaidMode::Mirror,
         health: HealthConfig {
             failure_threshold: 2,
-            offline_threshold: 10,
+            unhealthy_threshold: 10,
             recovery_interval_secs: 3600,
         },
     };
@@ -970,7 +970,7 @@ async fn test_health_recovery_on_success() {
         mode: RaidMode::Mirror,
         health: HealthConfig {
             failure_threshold: 2,
-            offline_threshold: 10,
+            unhealthy_threshold: 10,
             recovery_interval_secs: 3600,
         },
     };
@@ -1011,7 +1011,7 @@ async fn test_health_transition_to_offline() {
         mode: RaidMode::Mirror,
         health: HealthConfig {
             failure_threshold: 2,
-            offline_threshold: 5,
+            unhealthy_threshold: 5,
             recovery_interval_secs: 3600,
         },
     };
@@ -1028,7 +1028,7 @@ async fn test_health_transition_to_offline() {
     }
 
     let h0 = provider.backend_health(0).await.unwrap();
-    assert_eq!(h0.status, HealthStatus::Offline);
+    assert_eq!(h0.status, HealthStatus::Unhealthy);
     assert_eq!(h0.consecutive_failures, 5);
 }
 
@@ -1043,7 +1043,7 @@ async fn test_health_all_degraded_fallback_reads() {
         mode: RaidMode::Mirror,
         health: HealthConfig {
             failure_threshold: 1,
-            offline_threshold: 10,
+            unhealthy_threshold: 10,
             recovery_interval_secs: 3600,
         },
     };
@@ -1079,7 +1079,7 @@ async fn test_health_intermittent_failures_dont_degrade() {
         mode: RaidMode::Mirror,
         health: HealthConfig {
             failure_threshold: 3,
-            offline_threshold: 10,
+            unhealthy_threshold: 10,
             recovery_interval_secs: 3600,
         },
     };
@@ -1132,7 +1132,7 @@ async fn test_health_probe_recovers_degraded_backend() {
         mode: RaidMode::Mirror,
         health: HealthConfig {
             failure_threshold: 1,
-            offline_threshold: 10,
+            unhealthy_threshold: 10,
             // Very short recovery interval so the probe fires immediately
             recovery_interval_secs: 0,
         },
@@ -1170,6 +1170,6 @@ async fn test_config_serde_backward_compat() {
     let config: CompositeConfig = serde_json::from_str(json).unwrap();
     assert_eq!(config.mode, RaidMode::Mirror);
     assert_eq!(config.health.failure_threshold, 3);
-    assert_eq!(config.health.offline_threshold, 10);
+    assert_eq!(config.health.unhealthy_threshold, 10);
     assert_eq!(config.health.recovery_interval_secs, 60);
 }

@@ -289,7 +289,9 @@ pub async fn health_check(path: &str, password: Option<&str>) -> FFIResult<Strin
             let report = check_vault_structure(provider.as_ref(), &abs_path)
                 .await
                 .map_err(|e| FFIError::VaultError(e.to_string()))?;
-            Ok(report.to_json())
+            Ok(report
+                .to_json()
+                .map_err(|e| FFIError::VaultError(e.to_string()))?)
         }
         Some(pw) => {
             let session = manager
@@ -305,7 +307,9 @@ pub async fn health_check(path: &str, password: Option<&str>) -> FFIResult<Strin
                 check_vault_health(provider.as_ref(), session.config(), master_key, &abs_path)
                     .await
                     .map_err(|e| FFIError::VaultError(e.to_string()))?;
-            Ok(report.to_json())
+            Ok(report
+                .to_json()
+                .map_err(|e| FFIError::VaultError(e.to_string()))?)
         }
     }
 }

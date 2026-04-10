@@ -55,7 +55,7 @@ impl GDriveProvider {
 
         let auth_manager = AuthManager::new(auth_config)?;
         let token_manager = Arc::new(TokenManager::new(auth_manager, config.tokens.clone()));
-        let client = DriveClient::new(token_manager.clone());
+        let client = DriveClient::new(token_manager.clone())?;
 
         let mut path_cache = HashMap::new();
         // Cache root mapping

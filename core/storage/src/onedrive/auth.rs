@@ -1,6 +1,7 @@
 //! OAuth2 authentication and token management for OneDrive.
 
-use chrono::{DateTime, Duration, Utc};
+use async_trait::async_trait;
+use chrono::{Duration, Utc};
 use oauth2::{
     basic::BasicClient, AuthUrl, ClientId, ClientSecret, RedirectUrl, Scope, TokenResponse,
     TokenUrl,
@@ -9,6 +10,14 @@ use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use axiomvault_common::{Error, Result};
+
+use crate::cloud_auth::{CloudTokenManager, CloudTokens, TokenRefresher};
+
+/// Re-export `CloudTokens` as `OneDriveTokens` for backward compatibility.
+pub type OneDriveTokens = CloudTokens;
+
+/// Re-export `CloudTokenManager<OneDriveAuthManager>` as `OneDriveTokenManager`.
+pub type OneDriveTokenManager = CloudTokenManager<OneDriveAuthManager>;
 
 type OAuthClient = BasicClient<
     oauth2::EndpointSet,
@@ -27,25 +36,6 @@ const REDIRECT_URL: &str = "http://localhost:8080/callback";
 
 /// Required scopes for OneDrive file access.
 const ONEDRIVE_SCOPES: &[&str] = &["Files.ReadWrite", "offline_access"];
-
-/// OAuth2 tokens with expiration tracking.
-#[derive(Debug, Clone, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
-pub struct OneDriveTokens {
-    /// Access token for API requests.
-    pub access_token: String,
-    /// Refresh token for obtaining new access tokens.
-    pub refresh_token: String,
-    /// When the access token expires.
-    #[zeroize(skip)]
-    pub expires_at: DateTime<Utc>,
-}
-
-impl OneDriveTokens {
-    /// Check if the access token is expired or about to expire.
-    pub fn is_expired(&self) -> bool {
-        self.expires_at < Utc::now() + Duration::minutes(5)
-    }
-}
 
 /// Configuration for OneDrive OAuth2 authentication.
 #[derive(Debug, Clone, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
@@ -95,6 +85,7 @@ impl OneDriveAuthConfig {
 /// OAuth2 authentication manager for OneDrive.
 pub struct OneDriveAuthManager {
     client: OAuthClient,
+    #[cfg_attr(not(test), allow(dead_code))]
     config: OneDriveAuthConfig,
 }
 
@@ -173,8 +164,17 @@ impl OneDriveAuthManager {
         })
     }
 
+    /// Get the current configuration (test-only).
+    #[cfg(test)]
+    pub(crate) fn config(&self) -> &OneDriveAuthConfig {
+        &self.config
+    }
+}
+
+#[async_trait]
+impl TokenRefresher for OneDriveAuthManager {
     /// Refresh an access token using the refresh token.
-    pub async fn refresh_token(&self, refresh_token: &str) -> Result<OneDriveTokens> {
+    async fn refresh(&self, refresh_token: &str) -> Result<CloudTokens> {
         use oauth2::RefreshToken;
 
         let http_client = oauth2::reqwest::ClientBuilder::new()
@@ -203,59 +203,11 @@ impl OneDriveAuthManager {
         let expires_at =
             Utc::now() + Duration::from_std(expires_in).unwrap_or_else(|_| Duration::hours(1));
 
-        Ok(OneDriveTokens {
+        Ok(CloudTokens {
             access_token,
             refresh_token: new_refresh_token,
             expires_at,
         })
-    }
-
-    /// Get the current configuration.
-    pub fn config(&self) -> &OneDriveAuthConfig {
-        &self.config
-    }
-}
-
-/// Token manager that automatically refreshes expired tokens.
-pub struct OneDriveTokenManager {
-    auth_manager: OneDriveAuthManager,
-    tokens: tokio::sync::RwLock<OneDriveTokens>,
-}
-
-impl OneDriveTokenManager {
-    /// Create a new token manager with initial tokens.
-    pub fn new(auth_manager: OneDriveAuthManager, tokens: OneDriveTokens) -> Self {
-        Self {
-            auth_manager,
-            tokens: tokio::sync::RwLock::new(tokens),
-        }
-    }
-
-    /// Get a valid access token, refreshing if necessary.
-    pub async fn get_access_token(&self) -> Result<String> {
-        let tokens = self.tokens.read().await;
-        if !tokens.is_expired() {
-            return Ok(tokens.access_token.clone());
-        }
-        drop(tokens);
-
-        let mut tokens = self.tokens.write().await;
-        if !tokens.is_expired() {
-            return Ok(tokens.access_token.clone());
-        }
-
-        tracing::info!("Refreshing expired OneDrive access token");
-        let new_tokens = self
-            .auth_manager
-            .refresh_token(&tokens.refresh_token)
-            .await?;
-        *tokens = new_tokens;
-        Ok(tokens.access_token.clone())
-    }
-
-    /// Get the current tokens.
-    pub async fn get_tokens(&self) -> OneDriveTokens {
-        self.tokens.read().await.clone()
     }
 }
 

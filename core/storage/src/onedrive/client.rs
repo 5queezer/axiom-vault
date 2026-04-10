@@ -11,6 +11,7 @@ use std::sync::Arc;
 use axiomvault_common::{Error, Result};
 
 use super::auth::OneDriveTokenManager;
+use crate::http_client;
 
 /// Microsoft Graph API base URL for OneDrive.
 const GRAPH_BASE: &str = "https://graph.microsoft.com/v1.0/me/drive";
@@ -123,22 +124,17 @@ pub struct OneDriveClient {
 
 impl OneDriveClient {
     /// Create a new OneDrive client.
-    pub fn new(token_manager: Arc<OneDriveTokenManager>) -> Self {
-        let http = Client::builder()
-            .user_agent("AxiomVault/0.1")
-            .build()
-            .expect("Failed to create HTTP client");
-
-        Self {
-            http,
+    pub fn new(token_manager: Arc<OneDriveTokenManager>) -> axiomvault_common::Result<Self> {
+        Ok(Self {
+            http: http_client::build_http_client()?,
             token_manager,
-        }
+        })
     }
 
     /// Get authorization header.
     async fn auth_header(&self) -> Result<String> {
         let token = self.token_manager.get_access_token().await?;
-        Ok(format!("Bearer {}", token))
+        Ok(http_client::bearer_header(&token))
     }
 
     /// Encode a path for use in the Graph API URL.
@@ -484,16 +480,7 @@ impl OneDriveClient {
         &self,
         response: reqwest::Response,
     ) -> Result<T> {
-        let status = response.status();
-
-        if status.is_success() {
-            response
-                .json()
-                .await
-                .map_err(|e| Error::Network(format!("Failed to parse response: {}", e)))
-        } else {
-            self.handle_error(response).await
-        }
+        http_client::handle_json_response(response).await
     }
 
     /// Handle the raw response body (same as handle_response but avoids move).
@@ -509,25 +496,7 @@ impl OneDriveClient {
 
     /// Convert an error response into an appropriate error.
     async fn handle_error<T>(&self, response: reqwest::Response) -> Result<T> {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-
-        if status == StatusCode::NOT_FOUND {
-            Err(Error::NotFound(format!("Resource not found: {}", body)))
-        } else if status == StatusCode::UNAUTHORIZED {
-            Err(Error::Authentication(
-                "Invalid or expired token".to_string(),
-            ))
-        } else if status == StatusCode::FORBIDDEN {
-            Err(Error::NotPermitted("Access denied".to_string()))
-        } else if status == StatusCode::CONFLICT {
-            Err(Error::AlreadyExists(format!(
-                "Resource already exists: {}",
-                body
-            )))
-        } else {
-            Err(Error::Network(format!("API error: {} - {}", status, body)))
-        }
+        http_client::handle_error_response(response).await
     }
 }
 

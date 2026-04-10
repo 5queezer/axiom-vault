@@ -42,7 +42,7 @@ impl OneDriveProvider {
             auth_manager,
             config.tokens.clone(),
         ));
-        let client = OneDriveClient::new(token_manager);
+        let client = OneDriveClient::new(token_manager)?;
 
         Ok(Self { config, client })
     }
