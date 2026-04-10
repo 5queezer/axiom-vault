@@ -75,7 +75,7 @@ WorkManager for periodic sync.
 Secure storage of tokens in Android Keystore.
 
 5.8 Linux/Desktop
-Use Tauri or native Rust GUI.
+Use native Rust GUI (GTK4/libadwaita).
 FUSE mount on Linux.
 macFUSE on macOS.
 Local index persisted to SQLite or simple binary storage.

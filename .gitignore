@@ -21,9 +21,6 @@ Thumbs.db
 /test_vaults/
 *.vault/
 
-# Tauri generated files
-**/src-tauri/gen/
-
 # Claude Code
 .claude/worktrees/
 .claude/settings.local.json

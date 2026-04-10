@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="clients/desktop/axiomvault.svg" alt="AxiomVault" width="120">
-</p>
-
 <h1 align="center">AxiomVault</h1>
 
 <p align="center">
@@ -25,7 +21,7 @@
 AxiomVault encrypts your files locally before they touch any cloud service. A single Rust core powers every platform &mdash; no JVM, no Electron, just native performance with native UIs.
 
 **Platforms:** Linux, macOS, iOS, Android
-**Clients:** CLI, Linux (GTK4/libadwaita), macOS (SwiftUI), iOS (SwiftUI), Android (Compose), Desktop (Tauri, legacy migration path)
+**Clients:** CLI, Linux (GTK4/libadwaita), macOS (SwiftUI), iOS (SwiftUI), Android (Compose)
 
 ## Features
 
@@ -78,12 +74,6 @@ AxiomVault encrypts your files locally before they touch any cloud service. A si
 sudo apt-get install -y libfuse3-dev libgtk-4-dev libadwaita-1-dev
 ```
 
-**Linux (legacy Tauri client, Debian/Ubuntu):**
-```bash
-sudo apt-get install -y libfuse3-dev libgtk-3-dev libwebkit2gtk-4.1-dev \
-    libappindicator3-dev librsvg2-dev patchelf
-```
-
 **macOS:**
 ```bash
 brew install --cask macfuse
@@ -100,9 +90,6 @@ cargo build --release -p axiomvault-cli
 
 # Linux native desktop (GTK4/libadwaita)
 cargo build --release -p axiomvault-linux
-
-# Legacy desktop (Tauri, migration path only)
-cargo build --release --package axiomvault-desktop --features axiomvault-fuse/fuse
 
 # Apple clients (requires Xcode + XcodeGen)
 cd clients/apple
@@ -197,8 +184,7 @@ axiom-vault/
 ├── clients/
 │   ├── apple/            # Unified iOS + macOS (SwiftUI, XcodeGen)
 │   ├── android/          # Android (Kotlin Compose)
-│   ├── linux/            # Linux native desktop (GTK4/libadwaita)
-│   └── desktop/          # Legacy desktop GUI (Tauri migration path)
+│   └── linux/            # Linux native desktop (GTK4/libadwaita)
 └── tools/
     └── cli/              # Command-line interface
 ```
