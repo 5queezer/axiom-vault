@@ -18,7 +18,7 @@ use axiomvault_common::Result;
 ///
 /// Common across all cloud providers. Contains the access token for API
 /// requests, a refresh token for renewal, and an expiration timestamp.
-#[derive(Debug, Clone, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
+#[derive(Clone, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
 pub struct CloudTokens {
     /// Access token for API requests.
     pub access_token: String,
@@ -29,13 +29,23 @@ pub struct CloudTokens {
     pub expires_at: DateTime<Utc>,
 }
 
+impl std::fmt::Debug for CloudTokens {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CloudTokens")
+            .field("access_token", &"[REDACTED]")
+            .field("refresh_token", &"[REDACTED]")
+            .field("expires_at", &self.expires_at)
+            .finish()
+    }
+}
+
 impl CloudTokens {
     /// Check if the access token is expired or about to expire.
     ///
     /// Uses a 5-minute buffer to avoid using a token that will expire
     /// during a request.
     pub fn is_expired(&self) -> bool {
-        self.expires_at < Utc::now() + Duration::minutes(5)
+        self.expires_at <= Utc::now() + Duration::minutes(5)
     }
 }
 

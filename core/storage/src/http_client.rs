@@ -8,6 +8,8 @@
 //! This module consolidates those patterns so individual providers
 //! don't duplicate them.
 
+use std::time::Duration;
+
 use reqwest::{Client, StatusCode};
 
 use axiomvault_common::Error;
@@ -17,12 +19,15 @@ const USER_AGENT: &str = "AxiomVault/0.1";
 
 /// Build an HTTP client with standard settings for cloud API usage.
 ///
-/// Configures a consistent User-Agent header.
-pub fn build_http_client() -> Client {
+/// Configures a consistent User-Agent header, connection timeout (10s),
+/// and request timeout (30s).
+pub fn build_http_client() -> Result<Client, Error> {
     Client::builder()
         .user_agent(USER_AGENT)
+        .connect_timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(30))
         .build()
-        .expect("Failed to create HTTP client")
+        .map_err(|e| Error::Network(format!("Failed to create HTTP client: {}", e)))
 }
 
 /// Format an access token as a Bearer authorization header value.
@@ -136,7 +141,7 @@ mod tests {
 
     #[test]
     fn test_build_http_client() {
-        // Just verify it doesn't panic
-        let _client = build_http_client();
+        let client = build_http_client();
+        assert!(client.is_ok());
     }
 }

@@ -84,11 +84,11 @@ pub struct DropboxClient {
 
 impl DropboxClient {
     /// Create a new Dropbox API client.
-    pub fn new(token_manager: Arc<DropboxTokenManager>) -> Self {
-        Self {
-            http: http_client::build_http_client(),
+    pub fn new(token_manager: Arc<DropboxTokenManager>) -> axiomvault_common::Result<Self> {
+        Ok(Self {
+            http: http_client::build_http_client()?,
             token_manager,
-        }
+        })
     }
 
     /// Get an authorization header value.

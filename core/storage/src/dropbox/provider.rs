@@ -42,7 +42,7 @@ impl DropboxProvider {
             auth_manager,
             config.tokens.clone(),
         ));
-        let client = DropboxClient::new(token_manager);
+        let client = DropboxClient::new(token_manager)?;
 
         Ok(Self { config, client })
     }

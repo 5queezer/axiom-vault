@@ -81,6 +81,7 @@ impl DropboxAuthConfig {
 /// OAuth2 authentication manager for Dropbox.
 pub struct DropboxAuthManager {
     client: OAuthClient,
+    #[cfg_attr(not(test), allow(dead_code))]
     config: DropboxAuthConfig,
 }
 
@@ -158,8 +159,9 @@ impl DropboxAuthManager {
         })
     }
 
-    /// Get the current configuration.
-    pub fn config(&self) -> &DropboxAuthConfig {
+    /// Get the current configuration (test-only).
+    #[cfg(test)]
+    pub(crate) fn config(&self) -> &DropboxAuthConfig {
         &self.config
     }
 }

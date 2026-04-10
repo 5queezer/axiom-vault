@@ -85,6 +85,7 @@ impl OneDriveAuthConfig {
 /// OAuth2 authentication manager for OneDrive.
 pub struct OneDriveAuthManager {
     client: OAuthClient,
+    #[cfg_attr(not(test), allow(dead_code))]
     config: OneDriveAuthConfig,
 }
 
@@ -163,8 +164,9 @@ impl OneDriveAuthManager {
         })
     }
 
-    /// Get the current configuration.
-    pub fn config(&self) -> &OneDriveAuthConfig {
+    /// Get the current configuration (test-only).
+    #[cfg(test)]
+    pub(crate) fn config(&self) -> &OneDriveAuthConfig {
         &self.config
     }
 }

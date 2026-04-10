@@ -79,11 +79,11 @@ pub struct DriveClient {
 
 impl DriveClient {
     /// Create a new Drive client.
-    pub fn new(token_manager: std::sync::Arc<TokenManager>) -> Self {
-        Self {
-            http: http_client::build_http_client(),
+    pub fn new(token_manager: std::sync::Arc<TokenManager>) -> axiomvault_common::Result<Self> {
+        Ok(Self {
+            http: http_client::build_http_client()?,
             token_manager,
-        }
+        })
     }
 
     /// Escape a value for use in a Google Drive API query string.

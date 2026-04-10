@@ -83,6 +83,7 @@ impl AuthConfig {
 /// OAuth2 authentication manager for Google Drive.
 pub struct AuthManager {
     client: OAuthClient,
+    #[cfg_attr(not(test), allow(dead_code))]
     config: AuthConfig,
 }
 
@@ -181,8 +182,9 @@ impl AuthManager {
         })
     }
 
-    /// Get the current configuration.
-    pub fn config(&self) -> &AuthConfig {
+    /// Get the current configuration (test-only).
+    #[cfg(test)]
+    pub(crate) fn config(&self) -> &AuthConfig {
         &self.config
     }
 }

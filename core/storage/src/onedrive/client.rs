@@ -124,11 +124,11 @@ pub struct OneDriveClient {
 
 impl OneDriveClient {
     /// Create a new OneDrive client.
-    pub fn new(token_manager: Arc<OneDriveTokenManager>) -> Self {
-        Self {
-            http: http_client::build_http_client(),
+    pub fn new(token_manager: Arc<OneDriveTokenManager>) -> axiomvault_common::Result<Self> {
+        Ok(Self {
+            http: http_client::build_http_client()?,
             token_manager,
-        }
+        })
     }
 
     /// Get authorization header.
