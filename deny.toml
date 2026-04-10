@@ -16,8 +16,9 @@ all-features = true
 [advisories]
 # Advisories to ignore (add RUSTSEC IDs here with justification).
 ignore = [
-    # proc-macro-error -- unmaintained, pulled in transitively by several crates.
-    { id = "RUSTSEC-2024-0370", reason = "transitive dep via clap/others; proc-macro only, no runtime impact" },
+    # instant -- unmaintained, pulled in transitively via reed-solomon-erasure → parking_lot 0.11.
+    # reed-solomon-erasure pins an old parking_lot; no alternative available yet.
+    { id = "RUSTSEC-2024-0384", reason = "transitive dep via reed-solomon-erasure; no update available" },
 ]
 
 # ============================================================================
