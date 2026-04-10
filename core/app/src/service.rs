@@ -298,7 +298,7 @@ impl AppService {
     /// Get info about the current vault.
     pub async fn vault_info(&self) -> AppResult<VaultInfoDto> {
         let guard = self.active_vault().await?;
-        let active = guard.as_ref().unwrap();
+        let active = guard.as_ref().ok_or(AppError::NoOpenVault)?;
         Ok(VaultInfoDto {
             id: active.session.vault_id().to_string(),
             provider_type: active.provider_type.clone(),
@@ -324,7 +324,7 @@ impl AppService {
     /// access and will fail if a FUSE mount still holds a reference.
     pub async fn vault_session(&self) -> AppResult<Arc<VaultSession>> {
         let guard = self.active_vault().await?;
-        let active = guard.as_ref().unwrap();
+        let active = guard.as_ref().ok_or(AppError::NoOpenVault)?;
         Ok(Arc::clone(&active.session))
     }
 
@@ -334,7 +334,7 @@ impl AppService {
     pub async fn create_file(&self, path: &str, content: &[u8]) -> AppResult<()> {
         let vault_path = Self::parse_path(path)?;
         let guard = self.active_vault().await?;
-        let active = guard.as_ref().unwrap();
+        let active = guard.as_ref().ok_or(AppError::NoOpenVault)?;
         let ops = Self::ops(active)?;
 
         ops.create_file(&vault_path, content)
@@ -363,7 +363,7 @@ impl AppService {
     pub async fn read_file(&self, path: &str) -> AppResult<Vec<u8>> {
         let vault_path = Self::parse_path(path)?;
         let guard = self.active_vault().await?;
-        let active = guard.as_ref().unwrap();
+        let active = guard.as_ref().ok_or(AppError::NoOpenVault)?;
         let ops = Self::ops(active)?;
 
         ops.read_file(&vault_path).await.map_err(AppError::from)
@@ -373,7 +373,7 @@ impl AppService {
     pub async fn update_file(&self, path: &str, content: &[u8]) -> AppResult<()> {
         let vault_path = Self::parse_path(path)?;
         let guard = self.active_vault().await?;
-        let active = guard.as_ref().unwrap();
+        let active = guard.as_ref().ok_or(AppError::NoOpenVault)?;
         let ops = Self::ops(active)?;
 
         ops.update_file(&vault_path, content)
@@ -402,7 +402,7 @@ impl AppService {
     pub async fn delete_file(&self, path: &str) -> AppResult<()> {
         let vault_path = Self::parse_path(path)?;
         let guard = self.active_vault().await?;
-        let active = guard.as_ref().unwrap();
+        let active = guard.as_ref().ok_or(AppError::NoOpenVault)?;
         let ops = Self::ops(active)?;
 
         ops.delete_file(&vault_path).await.map_err(AppError::from)?;
@@ -424,7 +424,7 @@ impl AppService {
     pub async fn create_directory(&self, path: &str) -> AppResult<()> {
         let vault_path = Self::parse_path(path)?;
         let guard = self.active_vault().await?;
-        let active = guard.as_ref().unwrap();
+        let active = guard.as_ref().ok_or(AppError::NoOpenVault)?;
         let ops = Self::ops(active)?;
 
         ops.create_directory(&vault_path)
@@ -453,7 +453,7 @@ impl AppService {
     pub async fn list_directory(&self, path: &str) -> AppResult<Vec<DirectoryEntryDto>> {
         let vault_path = Self::parse_path(path)?;
         let guard = self.active_vault().await?;
-        let active = guard.as_ref().unwrap();
+        let active = guard.as_ref().ok_or(AppError::NoOpenVault)?;
         let ops = Self::ops(active)?;
 
         let entries = ops
@@ -491,7 +491,7 @@ impl AppService {
     pub async fn delete_directory(&self, path: &str) -> AppResult<()> {
         let vault_path = Self::parse_path(path)?;
         let guard = self.active_vault().await?;
-        let active = guard.as_ref().unwrap();
+        let active = guard.as_ref().ok_or(AppError::NoOpenVault)?;
         let ops = Self::ops(active)?;
 
         ops.delete_directory(&vault_path)
@@ -513,7 +513,7 @@ impl AppService {
     pub async fn exists(&self, path: &str) -> AppResult<bool> {
         let vault_path = Self::parse_path(path)?;
         let guard = self.active_vault().await?;
-        let active = guard.as_ref().unwrap();
+        let active = guard.as_ref().ok_or(AppError::NoOpenVault)?;
         let ops = Self::ops(active)?;
 
         Ok(ops.exists(&vault_path).await)
@@ -523,7 +523,7 @@ impl AppService {
     pub async fn metadata(&self, path: &str) -> AppResult<FileMetadataDto> {
         let vault_path = Self::parse_path(path)?;
         let guard = self.active_vault().await?;
-        let active = guard.as_ref().unwrap();
+        let active = guard.as_ref().ok_or(AppError::NoOpenVault)?;
         let ops = Self::ops(active)?;
 
         let (name, is_directory, size) = ops.metadata(&vault_path).await.map_err(AppError::from)?;
