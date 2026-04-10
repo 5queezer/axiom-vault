@@ -1,23 +1,15 @@
 //! Provider health tracking for multi-backend storage.
 //!
 //! Monitors the availability of each backend with success/failure counts,
-//! latency metrics, and automatic state transitions (Healthy → Degraded → Offline).
+//! latency metrics, and automatic state transitions (Healthy -> Degraded -> Unhealthy).
 //! Degraded backends are skipped for reads but still attempted for writes.
+//!
+//! Uses the unified [`HealthStatus`] from [`axiomvault_common::health`].
 
+pub use axiomvault_common::health::HealthStatus;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
-
-/// Health status of a single storage backend.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum HealthStatus {
-    /// Backend is operating normally.
-    Healthy,
-    /// Backend has exceeded the failure threshold; skipped for reads.
-    Degraded,
-    /// Backend has exceeded the offline threshold; skipped for reads.
-    Offline,
-}
 
 /// Configuration for health tracking behavior.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -25,10 +17,10 @@ pub struct HealthConfig {
     /// Consecutive failures before marking a backend as degraded (default: 3).
     #[serde(default = "default_failure_threshold")]
     pub failure_threshold: u32,
-    /// Consecutive failures before marking a backend as offline (default: 10).
-    #[serde(default = "default_offline_threshold")]
-    pub offline_threshold: u32,
-    /// Seconds to wait before attempting a recovery probe on a degraded/offline
+    /// Consecutive failures before marking a backend as unhealthy (default: 10).
+    #[serde(default = "default_unhealthy_threshold", alias = "offline_threshold")]
+    pub unhealthy_threshold: u32,
+    /// Seconds to wait before attempting a recovery probe on a degraded/unhealthy
     /// backend (default: 60).
     #[serde(default = "default_recovery_interval_secs")]
     pub recovery_interval_secs: u64,
@@ -37,7 +29,7 @@ pub struct HealthConfig {
 fn default_failure_threshold() -> u32 {
     3
 }
-fn default_offline_threshold() -> u32 {
+fn default_unhealthy_threshold() -> u32 {
     10
 }
 fn default_recovery_interval_secs() -> u64 {
@@ -48,7 +40,7 @@ impl Default for HealthConfig {
     fn default() -> Self {
         Self {
             failure_threshold: default_failure_threshold(),
-            offline_threshold: default_offline_threshold(),
+            unhealthy_threshold: default_unhealthy_threshold(),
             recovery_interval_secs: default_recovery_interval_secs(),
         }
     }
@@ -57,13 +49,13 @@ impl Default for HealthConfig {
 impl HealthConfig {
     /// Validate that the config is consistent.
     ///
-    /// Returns an error if `failure_threshold > offline_threshold`, since
-    /// `record_failure` assumes degraded transitions happen before offline.
+    /// Returns an error if `failure_threshold > unhealthy_threshold`, since
+    /// `record_failure` assumes degraded transitions happen before unhealthy.
     pub fn validate(&self) -> Result<(), String> {
-        if self.failure_threshold > self.offline_threshold {
+        if self.failure_threshold > self.unhealthy_threshold {
             return Err(format!(
-                "failure_threshold ({}) must be <= offline_threshold ({})",
-                self.failure_threshold, self.offline_threshold
+                "failure_threshold ({}) must be <= unhealthy_threshold ({})",
+                self.failure_threshold, self.unhealthy_threshold
             ));
         }
         Ok(())
@@ -125,13 +117,13 @@ impl ProviderHealth {
         }
     }
 
-    /// Record a failed operation. May transition to `Degraded` or `Offline`.
+    /// Record a failed operation. May transition to `Degraded` or `Unhealthy`.
     pub fn record_failure(&mut self, config: &HealthConfig) {
         self.consecutive_failures += 1;
         self.last_failure = Some(Utc::now());
 
-        if self.consecutive_failures >= config.offline_threshold {
-            self.status = HealthStatus::Offline;
+        if self.consecutive_failures >= config.unhealthy_threshold {
+            self.status = HealthStatus::Unhealthy;
         } else if self.consecutive_failures >= config.failure_threshold {
             self.status = HealthStatus::Degraded;
         }
@@ -139,7 +131,10 @@ impl ProviderHealth {
 
     /// Whether this backend should be skipped for read operations.
     pub fn should_skip_for_reads(&self) -> bool {
-        matches!(self.status, HealthStatus::Degraded | HealthStatus::Offline)
+        matches!(
+            self.status,
+            HealthStatus::Degraded | HealthStatus::Unhealthy
+        )
     }
 
     /// Whether this backend is eligible for a recovery probe.
@@ -179,7 +174,7 @@ mod tests {
     fn test_default_health_config() {
         let config = HealthConfig::default();
         assert_eq!(config.failure_threshold, 3);
-        assert_eq!(config.offline_threshold, 10);
+        assert_eq!(config.unhealthy_threshold, 10);
         assert_eq!(config.recovery_interval_secs, 60);
         assert_eq!(config.recovery_interval(), Duration::from_secs(60));
         assert!(config.validate().is_ok());
@@ -189,7 +184,7 @@ mod tests {
     fn test_health_config_validate_rejects_invalid_thresholds() {
         let config = HealthConfig {
             failure_threshold: 10,
-            offline_threshold: 3,
+            unhealthy_threshold: 3,
             ..HealthConfig::default()
         };
         assert!(config.validate().is_err());
@@ -199,7 +194,7 @@ mod tests {
     fn test_health_config_validate_equal_thresholds_ok() {
         let config = HealthConfig {
             failure_threshold: 5,
-            offline_threshold: 5,
+            unhealthy_threshold: 5,
             ..HealthConfig::default()
         };
         assert!(config.validate().is_ok());
@@ -209,13 +204,13 @@ mod tests {
     fn test_health_config_serde_roundtrip() {
         let config = HealthConfig {
             failure_threshold: 5,
-            offline_threshold: 15,
+            unhealthy_threshold: 15,
             recovery_interval_secs: 120,
         };
         let json = serde_json::to_string(&config).unwrap();
         let decoded: HealthConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded.failure_threshold, 5);
-        assert_eq!(decoded.offline_threshold, 15);
+        assert_eq!(decoded.unhealthy_threshold, 15);
         assert_eq!(decoded.recovery_interval_secs, 120);
     }
 
@@ -224,7 +219,7 @@ mod tests {
         // Empty JSON should use defaults
         let decoded: HealthConfig = serde_json::from_str("{}").unwrap();
         assert_eq!(decoded.failure_threshold, 3);
-        assert_eq!(decoded.offline_threshold, 10);
+        assert_eq!(decoded.unhealthy_threshold, 10);
         assert_eq!(decoded.recovery_interval_secs, 60);
     }
 
@@ -233,7 +228,7 @@ mod tests {
         for status in [
             HealthStatus::Healthy,
             HealthStatus::Degraded,
-            HealthStatus::Offline,
+            HealthStatus::Unhealthy,
         ] {
             let json = serde_json::to_string(&status).unwrap();
             let decoded: HealthStatus = serde_json::from_str(&json).unwrap();
@@ -272,14 +267,14 @@ mod tests {
     }
 
     #[test]
-    fn test_record_success_from_offline() {
+    fn test_record_success_from_unhealthy() {
         let config = HealthConfig::default();
         let mut h = ProviderHealth::new(0);
 
-        for _ in 0..config.offline_threshold {
+        for _ in 0..config.unhealthy_threshold {
             h.record_failure(&config);
         }
-        assert_eq!(h.status, HealthStatus::Offline);
+        assert_eq!(h.status, HealthStatus::Unhealthy);
 
         h.record_success(Duration::from_millis(10));
         assert_eq!(h.status, HealthStatus::Healthy);
@@ -302,15 +297,15 @@ mod tests {
     }
 
     #[test]
-    fn test_transition_degraded_to_offline() {
+    fn test_transition_degraded_to_unhealthy() {
         let config = HealthConfig::default();
         let mut h = ProviderHealth::new(0);
 
-        for _ in 0..config.offline_threshold {
+        for _ in 0..config.unhealthy_threshold {
             h.record_failure(&config);
         }
-        assert_eq!(h.status, HealthStatus::Offline);
-        assert_eq!(h.consecutive_failures, config.offline_threshold);
+        assert_eq!(h.status, HealthStatus::Unhealthy);
+        assert_eq!(h.consecutive_failures, config.unhealthy_threshold);
     }
 
     #[test]
@@ -325,10 +320,10 @@ mod tests {
         }
         assert!(h.should_skip_for_reads()); // Degraded
 
-        for _ in config.failure_threshold..config.offline_threshold {
+        for _ in config.failure_threshold..config.unhealthy_threshold {
             h.record_failure(&config);
         }
-        assert!(h.should_skip_for_reads()); // Offline
+        assert!(h.should_skip_for_reads()); // Unhealthy
     }
 
     #[test]
@@ -358,7 +353,7 @@ mod tests {
         h.status = HealthStatus::Degraded;
         h.last_failure = Some(Utc::now()); // Just failed
 
-        // Should NOT probe — recovery interval hasn't elapsed
+        // Should NOT probe -- recovery interval hasn't elapsed
         assert!(!h.should_probe(&config));
     }
 
@@ -406,7 +401,7 @@ mod tests {
         h.record_success(Duration::from_millis(10));
         assert_eq!(h.consecutive_failures, 0);
 
-        // 2 more failures — still healthy because counter was reset
+        // 2 more failures -- still healthy because counter was reset
         h.record_failure(&config);
         h.record_failure(&config);
         assert_eq!(h.status, HealthStatus::Healthy);
@@ -425,7 +420,7 @@ mod tests {
         // But probed just now
         h.last_probe = Some(Utc::now());
 
-        // Should NOT probe — last_probe is recent
+        // Should NOT probe -- last_probe is recent
         assert!(!h.should_probe(&config));
     }
 }

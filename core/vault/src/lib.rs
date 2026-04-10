@@ -19,9 +19,9 @@ pub mod session;
 pub mod tree;
 
 pub use config::{VaultConfig, VaultVersion};
-pub use health::{
-    check_vault_health, check_vault_structure, DiagnosticResult, HealthReport, Severity,
-};
+// Re-export unified health types from common alongside vault-specific check functions.
+pub use axiomvault_common::health::{DiagnosticResult, HealthReport, HealthStatus, Severity};
+pub use health::{check_vault_health, check_vault_structure};
 pub use manager::{VaultCreation, VaultManager};
 pub use migration::{check_migration_needed, Migration, MigrationRegistry, MigrationStatus};
 pub use operations::VaultOperations;
