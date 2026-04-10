@@ -75,7 +75,10 @@ pub async fn handle_json_response<T: serde::de::DeserializeOwned>(
             .await
             .map_err(|e| Error::Network(format!("Failed to parse response: {}", e)))
     } else {
-        let body = response.text().await.unwrap_or_default();
+        let body = response
+            .text()
+            .await
+            .map_err(|e| Error::Network(format!("Failed to read error response: {}", e)))?;
         Err(map_status_error(status, &body))
     }
 }
@@ -84,7 +87,10 @@ pub async fn handle_json_response<T: serde::de::DeserializeOwned>(
 /// response and mapping to an appropriate error. Always returns `Err`.
 pub async fn handle_error_response<T>(response: reqwest::Response) -> axiomvault_common::Result<T> {
     let status = response.status();
-    let body = response.text().await.unwrap_or_default();
+    let body = response
+        .text()
+        .await
+        .map_err(|e| Error::Network(format!("Failed to read error response: {}", e)))?;
     Err(map_status_error(status, &body))
 }
 
