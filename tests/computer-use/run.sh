@@ -18,8 +18,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-DESKTOP_DIR="$PROJECT_ROOT/clients/desktop"
-BINARY="$PROJECT_ROOT/target/debug/axiomvault-desktop"
+BINARY="$PROJECT_ROOT/target/debug/axiomvault-gtk"
 
 XVFB_DISPLAY=":99"
 XVFB_PID=""
@@ -85,8 +84,8 @@ check_deps() {
 # --- Build app if needed ---
 build_app() {
     if [ ! -f "$BINARY" ]; then
-        echo "Building AxiomVault desktop..."
-        cargo build -p axiomvault-desktop --manifest-path "$PROJECT_ROOT/Cargo.toml"
+        echo "Building AxiomVault GTK client..."
+        cargo build -p axiomvault-linux --manifest-path "$PROJECT_ROOT/Cargo.toml"
     fi
 }
 
@@ -104,14 +103,10 @@ start_xvfb() {
 
     export DISPLAY="$XVFB_DISPLAY"
 
-    # Force GTK/WebKit to use X11 instead of Wayland
+    # Force GTK to use X11 instead of Wayland
     export GDK_BACKEND=x11
     export XDG_SESSION_TYPE=x11
     unset WAYLAND_DISPLAY
-
-    # Prevent blank WebView in software-rendered Xvfb
-    export WEBKIT_DISABLE_COMPOSITING_MODE=1
-    export WEBKIT_DISABLE_DMABUF_RENDERER=1
 }
 
 # --- Launch AxiomVault ---
