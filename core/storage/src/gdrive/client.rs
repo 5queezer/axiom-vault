@@ -73,7 +73,10 @@ struct FileListResponse {
 
 /// Google Drive API client.
 pub struct DriveClient {
+    /// HTTP client for streaming uploads and downloads (no total timeout).
     http: Client,
+    /// HTTP client for short metadata requests (bounded total timeout).
+    metadata_http: Client,
     token_manager: std::sync::Arc<TokenManager>,
 }
 
@@ -82,6 +85,7 @@ impl DriveClient {
     pub fn new(token_manager: std::sync::Arc<TokenManager>) -> axiomvault_common::Result<Self> {
         Ok(Self {
             http: http_client::build_http_client()?,
+            metadata_http: http_client::build_metadata_http_client()?,
             token_manager,
         })
     }
@@ -122,7 +126,7 @@ impl DriveClient {
         let auth = self.auth_header().await?;
 
         let response = self
-            .http
+            .metadata_http
             .get(&url)
             .header(header::AUTHORIZATION, auth)
             .query(&[(
@@ -151,7 +155,7 @@ impl DriveClient {
         }
 
         let response = self
-            .http
+            .metadata_http
             .post(&url)
             .header(header::AUTHORIZATION, auth)
             .header(header::CONTENT_TYPE, "application/json")
@@ -184,7 +188,7 @@ impl DriveClient {
             );
 
             let mut request = self
-                .http
+                .metadata_http
                 .get(&url)
                 .header(header::AUTHORIZATION, auth)
                 .query(&[
@@ -228,7 +232,7 @@ impl DriveClient {
         );
 
         let response = self
-            .http
+            .metadata_http
             .get(&url)
             .header(header::AUTHORIZATION, auth)
             .query(&[
@@ -339,7 +343,7 @@ impl DriveClient {
         });
 
         let response = self
-            .http
+            .metadata_http
             .post(&url)
             .header(header::AUTHORIZATION, auth)
             .header(header::CONTENT_TYPE, "application/json")
@@ -531,7 +535,7 @@ impl DriveClient {
         let auth = self.auth_header().await?;
 
         let response = self
-            .http
+            .metadata_http
             .delete(&url)
             .header(header::AUTHORIZATION, auth)
             .send()
@@ -567,7 +571,7 @@ impl DriveClient {
         }
 
         let mut request = self
-            .http
+            .metadata_http
             .patch(&url)
             .header(header::AUTHORIZATION, auth)
             .header(header::CONTENT_TYPE, "application/json")
@@ -609,7 +613,7 @@ impl DriveClient {
         });
 
         let response = self
-            .http
+            .metadata_http
             .post(&url)
             .header(header::AUTHORIZATION, auth)
             .header(header::CONTENT_TYPE, "application/json")

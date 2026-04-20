@@ -10,6 +10,13 @@ use uuid::Uuid;
 use crate::provider::{ByteStream, Metadata, StorageProvider};
 use axiomvault_common::{Error, Result, VaultPath};
 
+/// File mode for vault files (owner read/write only).
+#[cfg(unix)]
+const FILE_MODE: u32 = 0o600;
+/// Directory mode for vault directories (owner read/write/execute only).
+#[cfg(unix)]
+const DIR_MODE: u32 = 0o700;
+
 /// Local filesystem storage provider.
 ///
 /// Stores vault data in a local directory structure.
@@ -26,6 +33,7 @@ impl LocalProvider {
     /// # Postconditions
     /// - Provider is ready to use
     /// - Root directory is created if it doesn't exist
+    /// - On Unix, a newly created root directory is restricted to mode `0o700`
     ///
     /// # Errors
     /// - Invalid path
@@ -33,9 +41,22 @@ impl LocalProvider {
     pub fn new(root: impl AsRef<Path>) -> Result<Self> {
         let root = root.as_ref().to_path_buf();
 
-        // Create root if it doesn't exist (sync for constructor)
+        // Create root if it doesn't exist (sync for constructor).
+        // On Unix, restrict mode to 0o700 so other local users cannot read
+        // wrapped keys, KDF parameters, or ciphertext sitting at rest.
         if !root.exists() {
-            std::fs::create_dir_all(&root)?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::DirBuilderExt;
+                std::fs::DirBuilder::new()
+                    .recursive(true)
+                    .mode(DIR_MODE)
+                    .create(&root)?;
+            }
+            #[cfg(not(unix))]
+            {
+                std::fs::create_dir_all(&root)?;
+            }
         }
 
         Ok(Self { root })
@@ -103,7 +124,37 @@ impl StorageProvider for LocalProvider {
             uuid::Uuid::new_v4()
         ));
 
-        fs::write(&tmp_path, &data).await?;
+        // Create the temp file with restrictive permissions on Unix so
+        // other local users cannot read ciphertext or vault config that
+        // contains wrapped keys / KDF parameters. On non-Unix targets we
+        // fall back to the default permissions (the file will inherit
+        // platform defaults).
+        #[cfg(unix)]
+        {
+            use tokio::io::AsyncWriteExt;
+
+            // tokio::fs::OpenOptions exposes `mode()` directly on Unix
+            // (cfg-gated to the unix targets), so no extension trait
+            // import is required.
+            let mut file = tokio::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(FILE_MODE)
+                .open(&tmp_path)
+                .await?;
+            if let Err(e) = file.write_all(&data).await {
+                let _ = std::fs::remove_file(&tmp_path);
+                return Err(e.into());
+            }
+            if let Err(e) = file.sync_all().await {
+                let _ = std::fs::remove_file(&tmp_path);
+                return Err(e.into());
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            fs::write(&tmp_path, &data).await?;
+        }
 
         if let Err(e) = fs::rename(&tmp_path, &fs_path).await {
             // Best-effort cleanup; ignore secondary error
@@ -221,6 +272,14 @@ impl StorageProvider for LocalProvider {
 
         fs::create_dir(&fs_path).await?;
 
+        // Restrict directory mode so other local users cannot list its
+        // contents (defence-in-depth around vault metadata layout).
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&fs_path, std::fs::Permissions::from_mode(DIR_MODE)).await?;
+        }
+
         let fs_meta = fs::metadata(&fs_path).await?;
         Ok(self.create_metadata(path, fs_meta))
     }
@@ -284,8 +343,18 @@ impl StorageProvider for LocalProvider {
 
         if from_path.is_dir() {
             fs::create_dir(&to_path).await?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(&to_path, std::fs::Permissions::from_mode(DIR_MODE)).await?;
+            }
         } else {
             fs::copy(&from_path, &to_path).await?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(&to_path, std::fs::Permissions::from_mode(FILE_MODE)).await?;
+            }
         }
 
         let fs_meta = fs::metadata(&to_path).await?;
@@ -319,6 +388,53 @@ mod tests {
 
         let metadata = provider.create_dir(&path).await.unwrap();
         assert!(metadata.is_directory);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_local_upload_sets_restrictive_file_mode() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = TempDir::new().unwrap();
+        let provider = LocalProvider::new(temp.path()).unwrap();
+        let path = VaultPath::parse("/secret.bin").unwrap();
+        provider
+            .upload(&path, b"ciphertext".to_vec())
+            .await
+            .unwrap();
+
+        let fs_path = temp.path().join("secret.bin");
+        let mode = std::fs::metadata(&fs_path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "uploaded file must be owner-only readable");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_local_create_dir_sets_restrictive_dir_mode() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = TempDir::new().unwrap();
+        let provider = LocalProvider::new(temp.path()).unwrap();
+        let path = VaultPath::parse("/private").unwrap();
+        provider.create_dir(&path).await.unwrap();
+
+        let fs_path = temp.path().join("private");
+        let mode = std::fs::metadata(&fs_path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o700, "created directory must be owner-only");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_local_new_creates_root_with_restrictive_dir_mode() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = TempDir::new().unwrap();
+        let root = temp.path().join("vault-root");
+        assert!(!root.exists());
+        LocalProvider::new(&root).unwrap();
+
+        let mode = std::fs::metadata(&root).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o700, "newly created vault root must be owner-only");
     }
 
     #[tokio::test]
