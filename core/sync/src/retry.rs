@@ -158,8 +158,21 @@ impl RetryExecutor {
     }
 
     /// Check if an error is retryable.
+    ///
+    /// Currently retried:
+    /// - `Network` and `Io`: classic transient failures.
+    /// - `Authentication`: an expired OAuth token surfaces as `Authentication`.
+    ///   The underlying `CloudTokenManager` refreshes proactively (5-minute
+    ///   buffer) so this is rarely seen, but if the buffer window is missed
+    ///   (e.g. wall-clock drift, slow scheduler tick) the retry gives the
+    ///   token manager a chance to refresh on the next attempt instead of
+    ///   surfacing a hard failure to the caller. See audit finding L-8
+    ///   (SECURITY_AUDIT_2026-04-21.md).
     fn is_retryable(&self, err: &Error) -> bool {
-        matches!(err, Error::Network(_) | Error::Io(_))
+        matches!(
+            err,
+            Error::Network(_) | Error::Io(_) | Error::Authentication(_)
+        )
     }
 
     /// Get the retry configuration.
@@ -331,5 +344,36 @@ mod tests {
     async fn test_convenience_retry_function() {
         let result: Result<String> = retry(|| async { Ok("success".to_string()) }).await;
         assert_eq!(result.unwrap(), "success");
+    }
+
+    /// Audit L-8: an `Authentication` error must trigger a retry so the
+    /// underlying token manager has a chance to refresh on the next attempt.
+    #[tokio::test]
+    async fn test_retry_on_authentication_error() {
+        let attempt_count = Arc::new(AtomicU32::new(0));
+        let count_clone = attempt_count.clone();
+
+        let config = RetryConfig::new(3)
+            .with_initial_delay(Duration::from_millis(1))
+            .with_jitter(false);
+        let executor = RetryExecutor::new(config);
+
+        let result: Result<i32> = executor
+            .execute(move || {
+                let count = count_clone.clone();
+                async move {
+                    let current = count.fetch_add(1, Ordering::SeqCst);
+                    if current < 1 {
+                        Err(Error::Authentication("token expired".to_string()))
+                    } else {
+                        Ok(7)
+                    }
+                }
+            })
+            .await;
+
+        assert_eq!(result.unwrap(), 7);
+        // First attempt failed with Authentication, second succeeded.
+        assert_eq!(attempt_count.load(Ordering::SeqCst), 2);
     }
 }

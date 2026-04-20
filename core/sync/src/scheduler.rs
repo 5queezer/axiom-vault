@@ -34,11 +34,18 @@ pub enum SyncRequest {
 }
 
 /// Sync result from the engine.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct SyncResult {
     pub files_synced: usize,
     pub files_failed: usize,
     pub conflicts_found: usize,
+    /// Number of remote downloads that succeeded but could not be persisted
+    /// locally because the engine has no wired-up local destination yet.
+    /// See `download_remote_changes` in `engine.rs` and audit finding H-1
+    /// (SECURITY_AUDIT_2026-04-21.md). This counter is reported separately
+    /// from `files_synced` to avoid silently masquerading dropped data as
+    /// success.
+    pub pending_persistence: usize,
     pub duration: Duration,
 }
 
@@ -309,6 +316,7 @@ mod tests {
                             files_synced: 1,
                             files_failed: 0,
                             conflicts_found: 0,
+                            pending_persistence: 0,
                             duration: Duration::from_millis(100),
                         })
                     }
