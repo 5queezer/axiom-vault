@@ -5,7 +5,7 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use zeroize::{Zeroize, ZeroizeOnDrop};
+use zeroize::Zeroizing;
 
 /// Information about an open vault.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -19,12 +19,17 @@ pub struct VaultInfoDto {
 }
 
 /// Result of vault creation, including the recovery words.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// `recovery_words` is wrapped in [`Zeroizing`] so the mnemonic is wiped
+/// from memory when this DTO (or any clone of it) is dropped. The field
+/// is intentionally not `Serialize`/`Deserialize`-able to discourage callers
+/// from logging or persisting the secret.
+#[derive(Debug)]
 pub struct VaultCreatedDto {
     /// Vault info.
     pub info: VaultInfoDto,
     /// BIP39 recovery words (24 words). Must be shown to user exactly once.
-    pub recovery_words: String,
+    pub recovery_words: Zeroizing<String>,
 }
 
 /// A single entry in a directory listing.
@@ -56,45 +61,48 @@ pub struct FileMetadataDto {
 }
 
 /// Parameters for creating a new vault.
-#[derive(Debug, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
+///
+/// `password` is held in [`Zeroizing`] so the secret is wiped from memory
+/// when the params are dropped. The struct intentionally does not implement
+/// `Serialize`/`Deserialize` because callers should never persist or log it.
+#[derive(Debug)]
 pub struct CreateVaultParams {
     /// Vault identifier.
-    #[zeroize(skip)]
     pub vault_id: String,
     /// Password for the vault.
-    pub password: String,
+    pub password: Zeroizing<String>,
     /// Storage provider type.
-    #[zeroize(skip)]
     pub provider_type: String,
     /// Provider-specific configuration.
-    #[zeroize(skip)]
     pub provider_config: serde_json::Value,
 }
 
 /// Parameters for opening an existing vault.
-#[derive(Debug, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
+///
+/// `password` is held in [`Zeroizing`] so the secret is wiped from memory
+/// when the params are dropped.
+#[derive(Debug)]
 pub struct OpenVaultParams {
     /// Password for the vault.
-    pub password: String,
+    pub password: Zeroizing<String>,
     /// Storage provider type.
-    #[zeroize(skip)]
     pub provider_type: String,
     /// Provider-specific configuration.
-    #[zeroize(skip)]
     pub provider_config: serde_json::Value,
 }
 
 /// Parameters for recovering a vault with recovery words.
-#[derive(Debug, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
+///
+/// Both `recovery_words` and `new_password` are held in [`Zeroizing`] so the
+/// secrets are wiped from memory when the params are dropped.
+#[derive(Debug)]
 pub struct RecoverVaultParams {
     /// BIP39 recovery words.
-    pub recovery_words: String,
+    pub recovery_words: Zeroizing<String>,
     /// New password.
-    pub new_password: String,
+    pub new_password: Zeroizing<String>,
     /// Storage provider type.
-    #[zeroize(skip)]
     pub provider_type: String,
     /// Provider-specific configuration.
-    #[zeroize(skip)]
     pub provider_config: serde_json::Value,
 }

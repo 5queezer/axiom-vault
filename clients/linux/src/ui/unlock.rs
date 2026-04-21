@@ -96,7 +96,7 @@ impl UnlockView {
                     move |service| async move {
                         service
                             .open_vault(OpenVaultParams {
-                                password,
+                                password: zeroize::Zeroizing::new(password),
                                 provider_type: "local".to_string(),
                                 provider_config: serde_json::json!({ "root": path }),
                             })
@@ -142,7 +142,7 @@ impl UnlockView {
                         service
                             .create_vault(axiomvault_app::CreateVaultParams {
                                 vault_id: vault_name,
-                                password,
+                                password: zeroize::Zeroizing::new(password),
                                 provider_type: "local".to_string(),
                                 provider_config: serde_json::json!({ "root": path }),
                             })
@@ -152,7 +152,7 @@ impl UnlockView {
                         Ok(created) => {
                             status.set_text(&format!(
                                 "Vault created. Recovery words:\n{}",
-                                created.recovery_words
+                                &*created.recovery_words
                             ));
                         }
                         Err(e) => status.set_text(&format!("Error: {}", e)),

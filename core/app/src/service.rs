@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::info;
+use zeroize::Zeroizing;
 
 use axiomvault_common::{VaultId, VaultPath};
 use axiomvault_crypto::KdfParams;
@@ -134,9 +135,11 @@ impl AppService {
             is_unlocked: true,
         };
 
+        // Move the mnemonic out of the manager response and into the DTO so the
+        // bytes are never copied into a non-zeroizing buffer.
         let dto = VaultCreatedDto {
             info: info.clone(),
-            recovery_words: String::from(&*creation.recovery_words),
+            recovery_words: creation.recovery_words,
         };
 
         *self.session.write().await = Some(ActiveVault {
@@ -265,8 +268,14 @@ impl AppService {
 
     /// Change the vault password.
     ///
-    /// Requires exclusive access to the session — FUSE must be unmounted first.
-    pub async fn change_password(&self, old_password: &str, new_password: &str) -> AppResult<()> {
+    /// Both passwords are taken by value as [`Zeroizing<String>`] so they are
+    /// wiped from memory on return, regardless of success or failure. Requires
+    /// exclusive access to the session — FUSE must be unmounted first.
+    pub async fn change_password(
+        &self,
+        old_password: Zeroizing<String>,
+        new_password: Zeroizing<String>,
+    ) -> AppResult<()> {
         let mut guard = self.session.write().await;
         let active = guard.as_mut().ok_or(AppError::NoOpenVault)?;
 
@@ -278,6 +287,11 @@ impl AppService {
         session
             .change_password(old_password.as_bytes(), new_password.as_bytes())
             .map_err(AppError::from)?;
+
+        // Drop both passwords as soon as the underlying call returns. The
+        // `Zeroizing` wrapper wipes the heap allocation on drop.
+        drop(old_password);
+        drop(new_password);
 
         // Persist the updated config.
         self.manager
@@ -594,7 +608,7 @@ mod tests {
         let result = service
             .create_vault(CreateVaultParams {
                 vault_id: "test-vault".to_string(),
-                password: "secure-password".to_string(),
+                password: Zeroizing::new("secure-password".to_string()),
                 provider_type: "memory".to_string(),
                 provider_config: serde_json::Value::Null,
             })
@@ -617,7 +631,7 @@ mod tests {
         service
             .create_vault(CreateVaultParams {
                 vault_id: "test-vault".to_string(),
-                password: "password".to_string(),
+                password: Zeroizing::new("password".to_string()),
                 provider_type: "memory".to_string(),
                 provider_config: serde_json::Value::Null,
             })
@@ -654,7 +668,7 @@ mod tests {
         service
             .create_vault(CreateVaultParams {
                 vault_id: "test-vault".to_string(),
-                password: "password".to_string(),
+                password: Zeroizing::new("password".to_string()),
                 provider_type: "memory".to_string(),
                 provider_config: serde_json::Value::Null,
             })
@@ -680,7 +694,7 @@ mod tests {
         service
             .create_vault(CreateVaultParams {
                 vault_id: "test-vault".to_string(),
-                password: "password".to_string(),
+                password: Zeroizing::new("password".to_string()),
                 provider_type: "memory".to_string(),
                 provider_config: serde_json::Value::Null,
             })
@@ -722,7 +736,7 @@ mod tests {
 
         let result = service
             .open_vault(OpenVaultParams {
-                password: "password".to_string(),
+                password: Zeroizing::new("password".to_string()),
                 provider_type: "memory".to_string(),
                 provider_config: serde_json::Value::Null,
             })
@@ -752,7 +766,7 @@ mod tests {
         service
             .create_vault(CreateVaultParams {
                 vault_id: "test-vault".to_string(),
-                password: "old-password".to_string(),
+                password: Zeroizing::new("old-password".to_string()),
                 provider_type: "memory".to_string(),
                 provider_config: serde_json::Value::Null,
             })
@@ -760,7 +774,10 @@ mod tests {
             .unwrap();
 
         service
-            .change_password("old-password", "new-password")
+            .change_password(
+                Zeroizing::new("old-password".to_string()),
+                Zeroizing::new("new-password".to_string()),
+            )
             .await
             .unwrap();
 

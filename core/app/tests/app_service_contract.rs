@@ -7,6 +7,7 @@ use axiomvault_app::{
     AppError, AppEvent, AppService, CreateVaultParams, LocalIndex, OpenVaultParams,
     RecoverVaultParams,
 };
+use zeroize::Zeroizing;
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -15,7 +16,7 @@ use axiomvault_app::{
 fn memory_params(vault_id: &str, password: &str) -> CreateVaultParams {
     CreateVaultParams {
         vault_id: vault_id.to_string(),
-        password: password.to_string(),
+        password: Zeroizing::new(password.to_string()),
         provider_type: "memory".to_string(),
         provider_config: serde_json::Value::Null,
     }
@@ -23,7 +24,7 @@ fn memory_params(vault_id: &str, password: &str) -> CreateVaultParams {
 
 fn memory_open_params(password: &str) -> OpenVaultParams {
     OpenVaultParams {
-        password: password.to_string(),
+        password: Zeroizing::new(password.to_string()),
         provider_type: "memory".to_string(),
         provider_config: serde_json::Value::Null,
     }
@@ -72,7 +73,7 @@ async fn create_duplicate_vault_fails() {
 
     svc.create_vault(CreateVaultParams {
         vault_id: "dup".to_string(),
-        password: "pass".to_string(),
+        password: Zeroizing::new("pass".to_string()),
         provider_type: "local".to_string(),
         provider_config: config.clone(),
     })
@@ -84,7 +85,7 @@ async fn create_duplicate_vault_fails() {
     let err = svc
         .create_vault(CreateVaultParams {
             vault_id: "dup".to_string(),
-            password: "pass".to_string(),
+            password: Zeroizing::new("pass".to_string()),
             provider_type: "local".to_string(),
             provider_config: config,
         })
@@ -179,7 +180,7 @@ async fn recover_vault_with_valid_words() {
     let created = svc
         .create_vault(CreateVaultParams {
             vault_id: "rec".to_string(),
-            password: "old-pass".to_string(),
+            password: Zeroizing::new("old-pass".to_string()),
             provider_type: "local".to_string(),
             provider_config: config.clone(),
         })
@@ -194,7 +195,7 @@ async fn recover_vault_with_valid_words() {
     let info = svc
         .recover_vault(RecoverVaultParams {
             recovery_words: words,
-            new_password: "new-pass".to_string(),
+            new_password: Zeroizing::new("new-pass".to_string()),
             provider_type: "local".to_string(),
             provider_config: config,
         })
@@ -217,7 +218,7 @@ async fn recover_vault_with_wrong_words_fails() {
 
     svc.create_vault(CreateVaultParams {
         vault_id: "rec2".to_string(),
-        password: "pass".to_string(),
+        password: Zeroizing::new("pass".to_string()),
         provider_type: "local".to_string(),
         provider_config: config.clone(),
     })
@@ -227,8 +228,8 @@ async fn recover_vault_with_wrong_words_fails() {
 
     let err = svc
         .recover_vault(RecoverVaultParams {
-            recovery_words: "abandon ".repeat(24).trim().to_string(),
-            new_password: "new".to_string(),
+            recovery_words: Zeroizing::new("abandon ".repeat(24).trim().to_string()),
+            new_password: Zeroizing::new("new".to_string()),
             provider_type: "local".to_string(),
             provider_config: config,
         })
@@ -254,9 +255,12 @@ async fn change_password_allows_new_password() {
     let svc = service_with_vault().await;
     svc.create_file("/test.txt", b"hello").await.unwrap();
 
-    svc.change_password("password", "new-password")
-        .await
-        .unwrap();
+    svc.change_password(
+        Zeroizing::new("password".to_string()),
+        Zeroizing::new("new-password".to_string()),
+    )
+    .await
+    .unwrap();
 
     // File should still be readable.
     let content = svc.read_file("/test.txt").await.unwrap();
@@ -266,7 +270,13 @@ async fn change_password_allows_new_password() {
 #[tokio::test]
 async fn change_password_with_wrong_old_password_fails() {
     let svc = service_with_vault().await;
-    let err = svc.change_password("wrong", "new").await.unwrap_err();
+    let err = svc
+        .change_password(
+            Zeroizing::new("wrong".to_string()),
+            Zeroizing::new("new".to_string()),
+        )
+        .await
+        .unwrap_err();
     assert!(
         matches!(err, AppError::InvalidPassword | AppError::Crypto(_)),
         "expected InvalidPassword or Crypto, got {:?}",
@@ -580,7 +590,12 @@ async fn password_change_event() {
     let svc = service_with_vault().await;
     let mut rx = svc.subscribe();
 
-    svc.change_password("password", "new").await.unwrap();
+    svc.change_password(
+        Zeroizing::new("password".to_string()),
+        Zeroizing::new("new".to_string()),
+    )
+    .await
+    .unwrap();
     assert!(matches!(rx.try_recv().unwrap(), AppEvent::PasswordChanged));
 }
 
@@ -632,7 +647,11 @@ async fn operations_fail_without_vault() {
         Err(AppError::NoOpenVault)
     ));
     assert!(matches!(
-        svc.change_password("a", "b").await,
+        svc.change_password(
+            Zeroizing::new("a".to_string()),
+            Zeroizing::new("b".to_string())
+        )
+        .await,
         Err(AppError::NoOpenVault)
     ));
     assert!(matches!(
@@ -766,7 +785,7 @@ async fn vault_exists_before_and_after_create() {
 
     svc.create_vault(CreateVaultParams {
         vault_id: "ex".to_string(),
-        password: "pass".to_string(),
+        password: Zeroizing::new("pass".to_string()),
         provider_type: "local".to_string(),
         provider_config: config.clone(),
     })

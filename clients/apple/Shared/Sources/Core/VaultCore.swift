@@ -217,11 +217,12 @@ class VaultCore {
         handle = newHandle
         subscribeEventsLocked()
 
-        // Retrieve recovery words (one-time).
+        // Retrieve recovery words (one-time). MUST use axiom_recovery_words_free
+        // so the source bytes are zeroized before the C buffer is released.
         var recoveryWords: String? = nil
         if let wordsPtr = axiom_vault_get_recovery_words(newHandle) {
             recoveryWords = String(cString: wordsPtr)
-            axiom_string_free(wordsPtr)
+            axiom_recovery_words_free(wordsPtr)
         }
 
         return recoveryWords
@@ -373,7 +374,8 @@ class VaultCore {
         guard let wordsPtr = axiom_vault_show_recovery_key(currentHandle) else {
             throw VaultError.operationFailed(getLastError())
         }
-        defer { axiom_string_free(wordsPtr) }
+        // Zeroize-then-free: recovery words are credentials.
+        defer { axiom_recovery_words_free(wordsPtr) }
 
         return String(cString: wordsPtr)
     }
