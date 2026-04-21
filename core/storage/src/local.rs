@@ -270,14 +270,26 @@ impl StorageProvider for LocalProvider {
             )));
         }
 
-        fs::create_dir(&fs_path).await?;
-
-        // Restrict directory mode so other local users cannot list its
-        // contents (defence-in-depth around vault metadata layout).
+        // On Unix, set the mode atomically at directory creation via
+        // `DirBuilder::mode` instead of `create_dir` followed by
+        // `set_permissions`. The latter leaves a brief window where the
+        // directory exists with umask-affected permissions and another
+        // local user could enter or list it.
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&fs_path, std::fs::Permissions::from_mode(DIR_MODE)).await?;
+            use std::os::unix::fs::DirBuilderExt;
+            let fs_path_blocking = fs_path.clone();
+            tokio::task::spawn_blocking(move || {
+                std::fs::DirBuilder::new()
+                    .mode(DIR_MODE)
+                    .create(&fs_path_blocking)
+            })
+            .await
+            .map_err(|e| Error::Storage(format!("spawn_blocking join error: {}", e)))??;
+        }
+        #[cfg(not(unix))]
+        {
+            fs::create_dir(&fs_path).await?;
         }
 
         let fs_meta = fs::metadata(&fs_path).await?;
@@ -342,18 +354,53 @@ impl StorageProvider for LocalProvider {
         }
 
         if from_path.is_dir() {
-            fs::create_dir(&to_path).await?;
+            // Create the destination directory with restrictive mode set
+            // atomically at creation (Unix). Avoids the TOCTOU window where
+            // `create_dir` followed by `set_permissions` would briefly
+            // expose the new directory at the umask-affected mode.
             #[cfg(unix)]
             {
-                use std::os::unix::fs::PermissionsExt;
-                fs::set_permissions(&to_path, std::fs::Permissions::from_mode(DIR_MODE)).await?;
+                use std::os::unix::fs::DirBuilderExt;
+                let to_blocking = to_path.clone();
+                tokio::task::spawn_blocking(move || {
+                    std::fs::DirBuilder::new()
+                        .mode(DIR_MODE)
+                        .create(&to_blocking)
+                })
+                .await
+                .map_err(|e| Error::Storage(format!("spawn_blocking join error: {}", e)))??;
+            }
+            #[cfg(not(unix))]
+            {
+                fs::create_dir(&to_path).await?;
             }
         } else {
-            fs::copy(&from_path, &to_path).await?;
+            // Read source then create destination atomically with restrictive
+            // mode (Unix), mirroring `upload`. `fs::copy` followed by
+            // `set_permissions` would briefly expose the destination at the
+            // umask-affected mode (TOCTOU).
+            let data = fs::read(&from_path).await?;
             #[cfg(unix)]
             {
-                use std::os::unix::fs::PermissionsExt;
-                fs::set_permissions(&to_path, std::fs::Permissions::from_mode(FILE_MODE)).await?;
+                use tokio::io::AsyncWriteExt;
+                let mut file = tokio::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .mode(FILE_MODE)
+                    .open(&to_path)
+                    .await?;
+                if let Err(e) = file.write_all(&data).await {
+                    let _ = std::fs::remove_file(&to_path);
+                    return Err(e.into());
+                }
+                if let Err(e) = file.sync_all().await {
+                    let _ = std::fs::remove_file(&to_path);
+                    return Err(e.into());
+                }
+            }
+            #[cfg(not(unix))]
+            {
+                fs::write(&to_path, &data).await?;
             }
         }
 
@@ -435,6 +482,51 @@ mod tests {
 
         let mode = std::fs::metadata(&root).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o700, "newly created vault root must be owner-only");
+    }
+
+    /// Audit hardening: `copy` of a regular file must produce a destination
+    /// with mode `0o600` from the moment of creation. The pre-fix
+    /// implementation used `fs::copy` then `set_permissions`, leaving a
+    /// TOCTOU window where another local user could open the destination at
+    /// the umask-affected mode.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_local_copy_file_sets_restrictive_file_mode() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = TempDir::new().unwrap();
+        let provider = LocalProvider::new(temp.path()).unwrap();
+        let src = VaultPath::parse("/src.bin").unwrap();
+        let dst = VaultPath::parse("/dst.bin").unwrap();
+        provider.upload(&src, b"ciphertext".to_vec()).await.unwrap();
+        provider.copy(&src, &dst).await.unwrap();
+
+        let fs_path = temp.path().join("dst.bin");
+        let mode = std::fs::metadata(&fs_path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "copied file must be owner-only readable");
+
+        // Content must still match.
+        let copied = provider.download(&dst).await.unwrap();
+        assert_eq!(copied, b"ciphertext");
+    }
+
+    /// Audit hardening: `copy` of a directory must produce a destination
+    /// with mode `0o700` set atomically at creation (no TOCTOU window).
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_local_copy_dir_sets_restrictive_dir_mode() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = TempDir::new().unwrap();
+        let provider = LocalProvider::new(temp.path()).unwrap();
+        let src = VaultPath::parse("/srcdir").unwrap();
+        let dst = VaultPath::parse("/dstdir").unwrap();
+        provider.create_dir(&src).await.unwrap();
+        provider.copy(&src, &dst).await.unwrap();
+
+        let fs_path = temp.path().join("dstdir");
+        let mode = std::fs::metadata(&fs_path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o700, "copied directory must be owner-only");
     }
 
     #[tokio::test]

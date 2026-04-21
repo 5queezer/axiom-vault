@@ -137,7 +137,16 @@ impl StagingArea {
             match serde_json::from_str::<HashMap<String, StagedChange>>(&content) {
                 Ok(map) => map,
                 Err(e) => {
-                    let ts = Utc::now().format("%Y%m%d_%H%M%S_%6f").to_string();
+                    // chrono's `%6f` is a width directive for nanoseconds and
+                    // does not emit fractional seconds on its own; build the
+                    // microsecond suffix explicitly so renames within the same
+                    // second still differ (audit M-6).
+                    let now = Utc::now();
+                    let ts = format!(
+                        "{}_{:06}",
+                        now.format("%Y%m%d_%H%M%S"),
+                        now.timestamp_subsec_micros()
+                    );
                     let corrupt_path = registry_path
                         .with_file_name(format!("staging_registry.json.corrupt-{}", ts));
                     warn!(
@@ -534,5 +543,56 @@ mod tests {
             found_corrupt_sibling,
             "expected a `staging_registry.json.corrupt-*` sibling preserving the bad file"
         );
+    }
+
+    /// Audit M-6 regression lock: the `corrupt-*` suffix on the renamed
+    /// registry must include a 6-digit microsecond segment, not the 0-length
+    /// segment chrono's misused `%6f` width directive produced.
+    /// Shape: `staging_registry.json.corrupt-\d{8}_\d{6}_\d{6}`.
+    #[tokio::test]
+    async fn test_corrupt_registry_rename_suffix_has_microseconds() {
+        let temp = TempDir::new().unwrap();
+        let registry_path = temp.path().join("staging_registry.json");
+        tokio::fs::write(&registry_path, b"{ broken").await.unwrap();
+
+        let _staging = StagingArea::new(temp.path()).await.unwrap();
+
+        let mut suffix: Option<String> = None;
+        let mut entries = tokio::fs::read_dir(temp.path()).await.unwrap();
+        while let Some(entry) = entries.next_entry().await.unwrap() {
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy().to_string();
+            if let Some(s) = name_str.strip_prefix("staging_registry.json.corrupt-") {
+                suffix = Some(s.to_string());
+                break;
+            }
+        }
+        let suffix = suffix.expect("corrupt sibling must exist");
+
+        // Must be exactly YYYYMMDD_HHMMSS_uuuuuu = 8+1+6+1+6 = 22 chars.
+        assert_eq!(
+            suffix.len(),
+            22,
+            "corrupt suffix `{}` has unexpected length (chrono %6f bug?)",
+            suffix
+        );
+        let parts: Vec<&str> = suffix.split('_').collect();
+        assert_eq!(
+            parts.len(),
+            3,
+            "suffix must be 3 underscore-separated parts"
+        );
+        assert_eq!(parts[0].len(), 8);
+        assert!(parts[0].chars().all(|c| c.is_ascii_digit()));
+        assert_eq!(parts[1].len(), 6);
+        assert!(parts[1].chars().all(|c| c.is_ascii_digit()));
+        // The microsecond segment was 0-length under the %6f bug — assert
+        // it is the full 6 digits.
+        assert_eq!(
+            parts[2].len(),
+            6,
+            "microsecond segment has wrong length (chrono %6f bug?)"
+        );
+        assert!(parts[2].chars().all(|c| c.is_ascii_digit()));
     }
 }

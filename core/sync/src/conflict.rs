@@ -125,8 +125,16 @@ impl ConflictResolver {
         use rand::RngExt;
 
         let original_str = original.to_string();
-        // %6f -> microseconds (6-digit fractional seconds).
-        let timestamp = Utc::now().format("%Y%m%d_%H%M%S_%6f").to_string();
+        // chrono's `%6f` is a *width* directive for nanoseconds — it does NOT
+        // emit fractional seconds on its own. Build the microseconds suffix
+        // explicitly so two conflicts in the same wall-clock second still
+        // differ in the timestamp portion (audit M-6).
+        let now = Utc::now();
+        let timestamp = format!(
+            "{}_{:06}",
+            now.format("%Y%m%d_%H%M%S"),
+            now.timestamp_subsec_micros()
+        );
 
         // 16 random bits rendered as 4 lowercase hex chars.
         let mut rand_bytes = [0u8; 2];
@@ -319,5 +327,59 @@ mod tests {
             let inserted = seen.insert(p.to_string());
             assert!(inserted, "duplicate conflict path generated back-to-back");
         }
+    }
+
+    /// Audit M-6 regression lock: the generated path must match the exact
+    /// shape `_conflict_\d{8}_\d{6}_\d{6}_[0-9a-f]{4}` (with extension
+    /// preserved). This guards against a recurrence of the chrono `%6f`
+    /// width-vs-microsecond confusion that produced a 0-length microsecond
+    /// segment.
+    #[test]
+    fn test_generate_conflict_path_matches_documented_regex() {
+        let resolver = ConflictResolver::default();
+        let original = VaultPath::parse("/docs/report.pdf").unwrap();
+        let conflict_path = resolver.generate_conflict_path(&original).unwrap();
+        let path_str = conflict_path.to_string();
+
+        // Hand-rolled regex match for `_conflict_\d{8}_\d{6}_\d{6}_[0-9a-f]{4}`
+        // anchored to "/docs/report" + suffix + ".pdf".
+        let suffix = path_str
+            .strip_prefix("/docs/report")
+            .and_then(|s| s.strip_suffix(".pdf"))
+            .expect("conflict path must preserve stem and extension");
+        // suffix should be: _conflict_YYYYMMDD_HHMMSS_uuuuuu_xxxx
+        // i.e. "_conflict_" (10) + 8 + 1 + 6 + 1 + 6 + 1 + 4 = 37 chars.
+        assert_eq!(
+            suffix.len(),
+            37,
+            "suffix `{}` has unexpected length",
+            suffix
+        );
+
+        let mut chars = suffix.chars();
+        for c in "_conflict_".chars() {
+            assert_eq!(chars.next(), Some(c));
+        }
+        // 8-digit date
+        for _ in 0..8 {
+            assert!(chars.next().unwrap().is_ascii_digit());
+        }
+        assert_eq!(chars.next(), Some('_'));
+        // 6-digit time
+        for _ in 0..6 {
+            assert!(chars.next().unwrap().is_ascii_digit());
+        }
+        assert_eq!(chars.next(), Some('_'));
+        // 6-digit microseconds (this is the bit that the %6f bug zeroed out)
+        for _ in 0..6 {
+            assert!(chars.next().unwrap().is_ascii_digit());
+        }
+        assert_eq!(chars.next(), Some('_'));
+        // 4 lowercase hex chars
+        for _ in 0..4 {
+            let c = chars.next().unwrap();
+            assert!(c.is_ascii_digit() || ('a'..='f').contains(&c));
+        }
+        assert!(chars.next().is_none());
     }
 }
