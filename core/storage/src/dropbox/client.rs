@@ -113,7 +113,9 @@ impl DropboxClient {
             }
         }
         if status == StatusCode::UNAUTHORIZED {
-            return Error::Authentication("Dropbox authentication failed".to_string());
+            // Transient: token rejected, likely expired. Let the retry
+            // executor trigger a refresh on the next attempt.
+            return Error::AuthenticationExpired("Dropbox authentication failed".to_string());
         }
         Error::Storage(format!("Dropbox API error ({}): {}", status, body))
     }

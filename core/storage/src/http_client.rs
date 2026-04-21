@@ -70,7 +70,7 @@ pub fn bearer_header(token: &str) -> String {
 ///
 /// | Status | Error variant |
 /// |--------|--------------|
-/// | 401    | `Authentication` |
+/// | 401    | `AuthenticationExpired` (transient — token needs refresh) |
 /// | 403    | `NotPermitted` |
 /// | 404    | `NotFound` |
 /// | 409    | `AlreadyExists` |
@@ -79,7 +79,11 @@ pub fn map_status_error(status: StatusCode, body: &str) -> Error {
     if status == StatusCode::NOT_FOUND {
         Error::NotFound(format!("Resource not found: {}", body))
     } else if status == StatusCode::UNAUTHORIZED {
-        Error::Authentication("Invalid or expired token".to_string())
+        // A 401 is the textbook transient auth case: the access token
+        // is no longer accepted, but the refresh token is (probably)
+        // still good. Surface as `AuthenticationExpired` so the retry
+        // executor gives the token manager a chance to refresh.
+        Error::AuthenticationExpired("Invalid or expired token".to_string())
     } else if status == StatusCode::FORBIDDEN {
         Error::NotPermitted("Access denied".to_string())
     } else if status == StatusCode::CONFLICT {
@@ -142,7 +146,7 @@ mod tests {
     #[test]
     fn test_map_status_unauthorized() {
         let err = map_status_error(StatusCode::UNAUTHORIZED, "bad token");
-        assert!(matches!(err, Error::Authentication(_)));
+        assert!(matches!(err, Error::AuthenticationExpired(_)));
     }
 
     #[test]
