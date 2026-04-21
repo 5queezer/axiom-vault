@@ -8,6 +8,7 @@ use adw::prelude::*;
 use axiomvault_app::OpenVaultParams;
 
 use crate::app::{self, AppState};
+use crate::ui::recovery_dialog::show_recovery_words_dialog;
 
 /// The initial view: enter a vault path and password to unlock.
 pub struct UnlockView {
@@ -134,6 +135,7 @@ impl UnlockView {
 
                 status_label.set_text("Creating vault...");
                 let status = status_label.clone();
+                let parent = status_label.clone();
                 let st = state.borrow();
 
                 app::spawn_async(
@@ -150,10 +152,12 @@ impl UnlockView {
                     },
                     move |result| match result {
                         Ok(created) => {
-                            status.set_text(&format!(
-                                "Vault created. Recovery words:\n{}",
-                                &*created.recovery_words
-                            ));
+                            // SECURITY: never surface the recovery words on
+                            // the persistent status_label. Show them once in
+                            // a modal dialog the user must acknowledge, then
+                            // drop the Zeroizing<String> to wipe the buffer.
+                            status.set_text("Vault created.");
+                            show_recovery_words_dialog(&parent, created.recovery_words, || {});
                         }
                         Err(e) => status.set_text(&format!("Error: {}", e)),
                     },
