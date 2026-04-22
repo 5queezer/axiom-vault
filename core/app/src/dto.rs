@@ -87,8 +87,12 @@ pub struct FileMetadataDto {
 /// when the params are dropped. The struct intentionally does not implement
 /// `Serialize`/`Deserialize` because callers should never persist or log it.
 ///
-/// `Debug` is implemented by hand and redacts `password` — see the
-/// module-level note about `Zeroizing<T>` and `Debug`.
+/// `Debug` is implemented by hand and redacts `password` and
+/// `provider_config` — see the module-level note about `Zeroizing<T>` and
+/// `Debug`. `provider_config` is redacted because providers (OAuth2 clients,
+/// custom backends) may carry tokens / refresh tokens / API keys in this
+/// blob; treating it as opaque-and-secret in Debug output is the safe
+/// default.
 pub struct CreateVaultParams {
     /// Vault identifier.
     pub vault_id: String,
@@ -106,7 +110,7 @@ impl std::fmt::Debug for CreateVaultParams {
             .field("vault_id", &self.vault_id)
             .field("password", &"[REDACTED]")
             .field("provider_type", &self.provider_type)
-            .field("provider_config", &self.provider_config)
+            .field("provider_config", &"[REDACTED]")
             .finish()
     }
 }
@@ -116,8 +120,9 @@ impl std::fmt::Debug for CreateVaultParams {
 /// `password` is held in [`Zeroizing`] so the secret is wiped from memory
 /// when the params are dropped.
 ///
-/// `Debug` is implemented by hand and redacts `password` — see the
-/// module-level note about `Zeroizing<T>` and `Debug`.
+/// `Debug` is implemented by hand and redacts `password` and
+/// `provider_config` — see the `CreateVaultParams` doc and the module-level
+/// note for the rationale.
 pub struct OpenVaultParams {
     /// Password for the vault.
     pub password: Zeroizing<String>,
@@ -132,7 +137,7 @@ impl std::fmt::Debug for OpenVaultParams {
         f.debug_struct("OpenVaultParams")
             .field("password", &"[REDACTED]")
             .field("provider_type", &self.provider_type)
-            .field("provider_config", &self.provider_config)
+            .field("provider_config", &"[REDACTED]")
             .finish()
     }
 }
@@ -142,8 +147,9 @@ impl std::fmt::Debug for OpenVaultParams {
 /// Both `recovery_words` and `new_password` are held in [`Zeroizing`] so the
 /// secrets are wiped from memory when the params are dropped.
 ///
-/// `Debug` is implemented by hand and redacts both secret fields — see the
-/// module-level note about `Zeroizing<T>` and `Debug`.
+/// `Debug` is implemented by hand and redacts both secret fields plus
+/// `provider_config` — see the `CreateVaultParams` doc and the module-level
+/// note for the rationale.
 pub struct RecoverVaultParams {
     /// BIP39 recovery words.
     pub recovery_words: Zeroizing<String>,
@@ -161,7 +167,7 @@ impl std::fmt::Debug for RecoverVaultParams {
             .field("recovery_words", &"[REDACTED]")
             .field("new_password", &"[REDACTED]")
             .field("provider_type", &self.provider_type)
-            .field("provider_config", &self.provider_config)
+            .field("provider_config", &"[REDACTED]")
             .finish()
     }
 }
@@ -202,12 +208,17 @@ mod tests {
         let params = OpenVaultParams {
             password: Zeroizing::new("another-secret-passphrase".to_string()),
             provider_type: "gdrive".to_string(),
-            provider_config: serde_json::json!({"folder": "vault"}),
+            provider_config: serde_json::json!({"folder": "vault-secret-folder-id"}),
         };
         let s = format!("{:?}", params);
         assert!(
             !s.contains("another-secret-passphrase"),
             "OpenVaultParams Debug leaked password: {}",
+            s
+        );
+        assert!(
+            !s.contains("vault-secret-folder-id"),
+            "OpenVaultParams Debug leaked provider_config: {}",
             s
         );
         assert!(s.contains("[REDACTED]"));

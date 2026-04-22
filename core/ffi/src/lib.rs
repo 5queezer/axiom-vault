@@ -830,22 +830,18 @@ pub unsafe extern "C" fn axiom_recovery_words_free(s: *mut c_char) {
     // takes back ownership of the same allocation and won't be called twice.
     let cstring = CString::from_raw(s);
 
-    // Convert into an owned `Vec<u8>` so we can mutate via a legitimate
-    // `as_mut_ptr()`. Writing through a `*mut` derived from `&[u8]` (as the
-    // previous implementation did via `cstring.as_bytes_with_nul().as_ptr()
-    // as *mut u8`) violates Rust's aliasing model: the optimizer is allowed
-    // to assume bytes behind a shared reference are not mutated, and could
-    // elide the wipe entirely — turning this security-critical zeroization
-    // into a no-op. Owning a `Vec` makes the mutation legitimate.
+    // Convert into an owned `Vec<u8>` so the wipe operates on memory we own.
+    // Writing through a `*mut` derived from `&[u8]` (as an earlier version
+    // did via `cstring.as_bytes_with_nul().as_ptr() as *mut u8`) violates
+    // Rust's aliasing model. We could fall back to `ptr::write_bytes` plus a
+    // `compiler_fence`, but the compiler is still permitted to elide a write
+    // it considers a dead store (the bytes are dropped immediately after).
+    // `zeroize::Zeroize` is the standard primitive for exactly this case:
+    // its implementation uses volatile writes that the optimizer must not
+    // remove.
+    use zeroize::Zeroize;
     let mut bytes = cstring.into_bytes_with_nul();
-    let len = bytes.len();
-    let ptr = bytes.as_mut_ptr();
-    // SAFETY: `ptr` points to `len` bytes owned by `bytes`; exclusive access
-    // is guaranteed because we own the `Vec`. The compiler_fence prevents the
-    // wipe from being reordered past the subsequent deallocation.
-    std::ptr::write_bytes(ptr, 0, len);
-    std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
-
+    bytes.zeroize();
     drop(bytes);
 }
 
