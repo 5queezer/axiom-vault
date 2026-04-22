@@ -431,7 +431,16 @@ impl StorageProvider for LocalProvider {
             }
             #[cfg(not(unix))]
             {
-                fs::write(&to_path, &data).await?;
+                use tokio::io::AsyncWriteExt;
+                let mut file = fs::File::create(&to_path).await?;
+                if let Err(e) = file.write_all(&data).await {
+                    let _ = std::fs::remove_file(&to_path);
+                    return Err(e.into());
+                }
+                if let Err(e) = file.sync_all().await {
+                    let _ = std::fs::remove_file(&to_path);
+                    return Err(e.into());
+                }
             }
         }
 
