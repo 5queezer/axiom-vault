@@ -195,10 +195,11 @@ impl SyncSchedulerHandle {
                                 match &result {
                                     Ok(sync_result) => {
                                         info!(
-                                            "Periodic sync completed: {} synced, {} failed, {} conflicts",
+                                            "Periodic sync completed: {} synced, {} failed, {} conflicts, {} pending persistence",
                                             sync_result.files_synced,
                                             sync_result.files_failed,
-                                            sync_result.conflicts_found
+                                            sync_result.conflicts_found,
+                                            sync_result.pending_persistence
                                         );
                                     }
                                     Err(e) => {

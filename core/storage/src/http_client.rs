@@ -22,7 +22,7 @@ const USER_AGENT: &str = "AxiomVault/0.1";
 /// Metadata calls (small JSON requests) are expected to complete quickly;
 /// 30 seconds is well above normal latency but bounds the impact of a
 /// hung or slow-loris server.
-const METADATA_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+pub const METADATA_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Build an HTTP client with standard settings for cloud API usage.
 ///
@@ -49,10 +49,22 @@ pub fn build_http_client() -> Result<Client, Error> {
 /// streaming uploads or downloads — those need to be unbounded so that
 /// large transfers can complete.
 pub fn build_metadata_http_client() -> Result<Client, Error> {
+    build_metadata_http_client_with_timeout(METADATA_REQUEST_TIMEOUT)
+}
+
+/// Build a metadata HTTP client with a caller-specified total request
+/// timeout.
+///
+/// Same shape as [`build_metadata_http_client`] but takes the total
+/// request timeout as a parameter. Exposed primarily for testability —
+/// production code should prefer the parameterless
+/// [`build_metadata_http_client`], which uses
+/// [`METADATA_REQUEST_TIMEOUT`] as the default.
+pub fn build_metadata_http_client_with_timeout(timeout: Duration) -> Result<Client, Error> {
     Client::builder()
         .user_agent(USER_AGENT)
         .connect_timeout(Duration::from_secs(10))
-        .timeout(METADATA_REQUEST_TIMEOUT)
+        .timeout(timeout)
         .build()
         .map_err(|e| Error::Network(format!("Failed to create HTTP client: {}", e)))
 }
@@ -211,13 +223,10 @@ mod tests {
             }
         });
 
-        // Replicate the production builder but with a short timeout so
-        // the test is fast.
-        let client = Client::builder()
-            .user_agent(USER_AGENT)
-            .connect_timeout(Duration::from_secs(10))
-            .timeout(Duration::from_millis(200))
-            .build()
+        // Exercise the production builder with a short timeout so the
+        // test is fast — this guards the real code path rather than a
+        // hand-rolled replica.
+        let client = build_metadata_http_client_with_timeout(Duration::from_millis(200))
             .expect("client builds");
 
         let url = format!("http://{}/", addr);

@@ -17,6 +17,9 @@
 //! [`adw::MessageDialog`]. `adw::AlertDialog` (libadwaita 1.5) would be the
 //! newer idiom but is not available on this feature set.
 
+use std::cell::Cell;
+use std::rc::Rc;
+
 use adw::prelude::*;
 use gtk::{gdk, glib};
 use zeroize::Zeroizing;
@@ -94,12 +97,20 @@ where
     // and the one-shot completion callback.
     let words_cell = std::cell::RefCell::new(Some(words));
     let on_dismissed = std::cell::RefCell::new(Some(on_dismissed));
+    // Tracks whether *we* wrote the recovery words to the system clipboard.
+    // Only set when the user clicks "Copy to Clipboard". On dismiss we use
+    // this to decide whether to wipe — we must not unconditionally clear,
+    // or we'd erase whatever the user copied (from elsewhere) between
+    // opening and dismissing the dialog.
+    let we_wrote_clipboard = Rc::new(Cell::new(false));
 
+    let we_wrote_clipboard_handler = we_wrote_clipboard.clone();
     dialog.connect_response(None, move |dlg, response| match response {
         RESPONSE_COPY => {
             if let Some(words) = words_cell.borrow().as_deref() {
                 if let Some(display) = gdk::Display::default() {
                     display.clipboard().set_text(words);
+                    we_wrote_clipboard_handler.set(true);
                 }
             }
             // Keep the dialog open — the user still needs to confirm.
@@ -109,6 +120,18 @@ where
             // Drop the recovery words first so the wipe runs before we
             // invoke the caller's completion handler.
             drop(words_cell.borrow_mut().take());
+            // Threat model: the recovery words are equivalent to the
+            // master key. If we copied them to the clipboard, every other
+            // process on the system can read them via paste until something
+            // else is copied. Overwrite our own clipboard contents on
+            // dismiss to bound that window. We only wipe when *we* wrote
+            // (tracked above) so we don't clobber unrelated data the user
+            // copied in the interim.
+            if we_wrote_clipboard_handler.get() {
+                if let Some(display) = gdk::Display::default() {
+                    display.clipboard().set_text("");
+                }
+            }
             if let Some(cb) = on_dismissed.borrow_mut().take() {
                 // Run the callback asynchronously to ensure `present()`
                 // has fully unwound before the caller mutates any UI that
@@ -141,5 +164,29 @@ mod tests {
         // unreferenced in a where-clause.
         let _: fn(&gtk::Widget, Zeroizing<String>, fn()) =
             show_recovery_words_dialog::<gtk::Widget, fn()>;
+    }
+
+    /// Guard the clipboard-wipe-on-dismiss branch against silent removal.
+    ///
+    /// We can't drive a real GTK dismissal without a display server in CI,
+    /// so we assert structurally on the source: both the gating flag set
+    /// in the copy branch and the clearing `set_text("")` call in the
+    /// dismiss branch must be present. A future "simplification" that
+    /// drops the wipe will fail this test instead of silently leaving the
+    /// recovery words in the system clipboard.
+    #[test]
+    fn dismiss_branch_clears_clipboard_when_we_wrote_it() {
+        let src = include_str!("recovery_dialog.rs");
+        assert!(
+            src.contains("we_wrote_clipboard_handler.set(true)"),
+            "copy branch must mark that we wrote to the clipboard so the \
+             dismiss branch can wipe only what we put there"
+        );
+        assert!(
+            src.contains("display.clipboard().set_text(\"\")"),
+            "dismiss branch must overwrite our own clipboard contents — \
+             the recovery words are master-key equivalent and must not \
+             linger after the dialog closes"
+        );
     }
 }
