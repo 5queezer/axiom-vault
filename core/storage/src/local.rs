@@ -59,6 +59,24 @@ impl LocalProvider {
             }
         }
 
+        // Defense in depth: if the root already existed (or an adversary
+        // pre-created it in the gap between `exists()` and `create`), we
+        // never applied DIR_MODE. With `recursive(true)`, `create` succeeds
+        // silently against a pre-existing weak-mode directory. Read the
+        // actual mode now and repair it if it differs. This does NOT close
+        // the creation race, but it ensures any adversary's pre-emptive
+        // weak-mode directory gets re-permissioned before we trust it for
+        // wrapped keys / KDF parameters / ciphertext.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let meta = std::fs::metadata(&root)?;
+            let current_mode = meta.permissions().mode() & 0o777;
+            if current_mode != DIR_MODE {
+                std::fs::set_permissions(&root, std::fs::Permissions::from_mode(DIR_MODE))?;
+            }
+        }
+
         Ok(Self { root })
     }
 
@@ -153,7 +171,20 @@ impl StorageProvider for LocalProvider {
         }
         #[cfg(not(unix))]
         {
-            fs::write(&tmp_path, &data).await?;
+            // Match the Unix branch's durability semantics: explicit
+            // create -> write_all -> sync_all. `fs::write` skips the
+            // fsync, so on power loss the rename target could resolve to
+            // a zero-length file. Keep both platforms aligned.
+            use tokio::io::AsyncWriteExt;
+            let mut file = fs::File::create(&tmp_path).await?;
+            if let Err(e) = file.write_all(&data).await {
+                let _ = std::fs::remove_file(&tmp_path);
+                return Err(e.into());
+            }
+            if let Err(e) = file.sync_all().await {
+                let _ = std::fs::remove_file(&tmp_path);
+                return Err(e.into());
+            }
         }
 
         if let Err(e) = fs::rename(&tmp_path, &fs_path).await {
@@ -482,6 +513,35 @@ mod tests {
 
         let mode = std::fs::metadata(&root).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o700, "newly created vault root must be owner-only");
+    }
+
+    /// Defense-in-depth: when the root directory already exists (e.g. an
+    /// adversary pre-created it with a permissive mode in the gap between
+    /// our `exists()` check and our `DirBuilder::create`, or it was just
+    /// left over from a prior run with the wrong mode), `LocalProvider::new`
+    /// must repair the mode to `DIR_MODE` (0o700) before returning.
+    #[cfg(unix)]
+    #[test]
+    fn test_local_new_repairs_pre_existing_root_mode() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = TempDir::new().unwrap();
+        let root = temp.path().join("vault-root");
+
+        // Pre-create the root with a world-readable mode, simulating either
+        // a leftover directory or an adversary winning the TOCTOU race.
+        std::fs::create_dir(&root).unwrap();
+        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let pre_mode = std::fs::metadata(&root).unwrap().permissions().mode() & 0o777;
+        assert_eq!(pre_mode, 0o755, "test setup must produce 0o755");
+
+        LocalProvider::new(&root).unwrap();
+
+        let mode = std::fs::metadata(&root).unwrap().permissions().mode() & 0o777;
+        assert_eq!(
+            mode, 0o700,
+            "pre-existing root with weak mode must be repaired to 0o700"
+        );
     }
 
     /// Audit hardening: `copy` of a regular file must produce a destination

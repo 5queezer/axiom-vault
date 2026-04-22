@@ -155,6 +155,7 @@ pub extern "C" fn axiom_version() -> *const c_char {
 /// - `password` must be a valid null-terminated UTF-8 string
 /// - Returns a handle that must be freed with `axiom_vault_close`
 /// - On error, returns null and sets error message retrievable via `axiom_last_error`
+// SAFETY: see `# Safety` rustdoc above; caller upholds raw-pointer invariants.
 #[no_mangle]
 pub unsafe extern "C" fn axiom_vault_create(
     path: *const c_char,
@@ -181,6 +182,7 @@ pub unsafe extern "C" fn axiom_vault_create(
 /// - `path` must be a valid null-terminated UTF-8 string
 /// - `password` must be a valid null-terminated UTF-8 string
 /// - Returns a handle that must be freed with `axiom_vault_close`
+// SAFETY: see `# Safety` rustdoc above; caller upholds raw-pointer invariants.
 #[no_mangle]
 pub unsafe extern "C" fn axiom_vault_open(
     path: *const c_char,
@@ -206,6 +208,7 @@ pub unsafe extern "C" fn axiom_vault_open(
 /// # Safety
 /// - `handle` must be a valid handle returned by `axiom_vault_create` or `axiom_vault_open`
 /// - After this call, the handle is invalid and must not be used
+// SAFETY: see `# Safety` rustdoc above; caller upholds raw-pointer invariants.
 #[no_mangle]
 pub unsafe extern "C" fn axiom_vault_close(handle: *mut FFIVaultHandle) -> c_int {
     if handle.is_null() {
@@ -247,6 +250,7 @@ pub unsafe extern "C" fn axiom_vault_close(handle: *mut FFIVaultHandle) -> c_int
 /// # Safety
 /// - `handle` must be a valid vault handle
 /// - Returns a pointer to `FFIVaultInfo` that must be freed with `axiom_vault_info_free`
+// SAFETY: see `# Safety` rustdoc above; caller upholds raw-pointer invariants.
 #[no_mangle]
 pub unsafe extern "C" fn axiom_vault_info(handle: *const FFIVaultHandle) -> *mut FFIVaultInfo {
     if handle.is_null() {
@@ -267,6 +271,7 @@ pub unsafe extern "C" fn axiom_vault_info(handle: *const FFIVaultHandle) -> *mut
 ///
 /// # Safety
 /// - `info` must be a valid pointer returned by `axiom_vault_info`
+// SAFETY: see `# Safety` rustdoc above; caller upholds raw-pointer invariants.
 #[no_mangle]
 pub unsafe extern "C" fn axiom_vault_info_free(info: *mut FFIVaultInfo) {
     if !info.is_null() {
@@ -291,6 +296,7 @@ pub unsafe extern "C" fn axiom_vault_info_free(info: *mut FFIVaultInfo) {
 /// - `path` must be a valid null-terminated UTF-8 string (use "/" for root)
 /// - Returns a JSON string containing the file list
 /// - Returned string must be freed with `axiom_string_free`
+// SAFETY: see `# Safety` rustdoc above; caller upholds raw-pointer invariants.
 #[no_mangle]
 pub unsafe extern "C" fn axiom_vault_list(
     handle: *const FFIVaultHandle,
@@ -322,6 +328,7 @@ pub unsafe extern "C" fn axiom_vault_list(
 /// - `handle` must be a valid vault handle
 /// - `local_path` must be a valid null-terminated UTF-8 string (path to local file)
 /// - `vault_path` must be a valid null-terminated UTF-8 string (path in vault)
+// SAFETY: see `# Safety` rustdoc above; caller upholds raw-pointer invariants.
 #[no_mangle]
 pub unsafe extern "C" fn axiom_vault_add_file(
     handle: *const FFIVaultHandle,
@@ -353,6 +360,7 @@ pub unsafe extern "C" fn axiom_vault_add_file(
 /// - `handle` must be a valid vault handle
 /// - `vault_path` must be a valid null-terminated UTF-8 string (path in vault)
 /// - `local_path` must be a valid null-terminated UTF-8 string (path to save file)
+// SAFETY: see `# Safety` rustdoc above; caller upholds raw-pointer invariants.
 #[no_mangle]
 pub unsafe extern "C" fn axiom_vault_extract_file(
     handle: *const FFIVaultHandle,
@@ -383,6 +391,7 @@ pub unsafe extern "C" fn axiom_vault_extract_file(
 /// # Safety
 /// - `handle` must be a valid vault handle
 /// - `vault_path` must be a valid null-terminated UTF-8 string
+// SAFETY: see `# Safety` rustdoc above; caller upholds raw-pointer invariants.
 #[no_mangle]
 pub unsafe extern "C" fn axiom_vault_mkdir(
     handle: *const FFIVaultHandle,
@@ -408,6 +417,7 @@ pub unsafe extern "C" fn axiom_vault_mkdir(
 /// # Safety
 /// - `handle` must be a valid vault handle
 /// - `vault_path` must be a valid null-terminated UTF-8 string
+// SAFETY: see `# Safety` rustdoc above; caller upholds raw-pointer invariants.
 #[no_mangle]
 pub unsafe extern "C" fn axiom_vault_remove(
     handle: *const FFIVaultHandle,
@@ -437,6 +447,7 @@ pub unsafe extern "C" fn axiom_vault_remove(
 /// # Safety
 /// - `handle` must be a valid vault handle
 /// - `old_password` and `new_password` must be valid null-terminated UTF-8 strings
+// SAFETY: see `# Safety` rustdoc above; caller upholds raw-pointer invariants.
 #[no_mangle]
 pub unsafe extern "C" fn axiom_vault_change_password(
     handle: *const FFIVaultHandle,
@@ -476,6 +487,7 @@ pub unsafe extern "C" fn axiom_vault_change_password(
 /// - `handle` must be a valid vault handle
 /// - Returned string must be freed with [`axiom_recovery_words_free`]
 ///   (NOT `axiom_string_free` — recovery words require zeroizing free)
+// SAFETY: see `# Safety` rustdoc above; caller upholds raw-pointer invariants.
 #[no_mangle]
 pub unsafe extern "C" fn axiom_vault_get_recovery_words(
     handle: *const FFIVaultHandle,
@@ -512,6 +524,7 @@ pub unsafe extern "C" fn axiom_vault_get_recovery_words(
 /// - `handle` must be a valid vault handle
 /// - Returned string must be freed with [`axiom_recovery_words_free`]
 ///   (NOT `axiom_string_free` — recovery words require zeroizing free)
+// SAFETY: see `# Safety` rustdoc above; caller upholds raw-pointer invariants.
 #[no_mangle]
 pub unsafe extern "C" fn axiom_vault_show_recovery_key(
     handle: *const FFIVaultHandle,
@@ -540,6 +553,7 @@ pub unsafe extern "C" fn axiom_vault_show_recovery_key(
 /// - `recovery_words` must be a valid null-terminated UTF-8 string (24 space-separated words)
 /// - `new_password` must be a valid null-terminated UTF-8 string
 /// - Returns a vault handle on success, null on failure
+// SAFETY: see `# Safety` rustdoc above; caller upholds raw-pointer invariants.
 #[no_mangle]
 pub unsafe extern "C" fn axiom_vault_reset_password(
     path: *const c_char,
@@ -582,6 +596,7 @@ pub unsafe extern "C" fn axiom_vault_reset_password(
 /// - 0: up to date
 /// - 1: needs migration
 /// - -1: incompatible or error (check `axiom_last_error`)
+// SAFETY: see `# Safety` rustdoc above; caller upholds raw-pointer invariants.
 #[no_mangle]
 pub unsafe extern "C" fn axiom_vault_check_migration(path: *const c_char) -> c_int {
     let path_str = match str_from_ptr(path, "path") {
@@ -607,6 +622,7 @@ pub unsafe extern "C" fn axiom_vault_check_migration(path: *const c_char) -> c_i
 /// # Returns
 /// - 0 on success
 /// - -1 on error (check `axiom_last_error`)
+// SAFETY: see `# Safety` rustdoc above; caller upholds raw-pointer invariants.
 #[no_mangle]
 pub unsafe extern "C" fn axiom_vault_migrate(
     path: *const c_char,
@@ -636,6 +652,7 @@ pub unsafe extern "C" fn axiom_vault_migrate(
 /// - `path` must be a valid null-terminated UTF-8 string
 /// - `password` may be null for a shallow (structure-only) check
 /// - Returned string must be freed with `axiom_string_free`
+// SAFETY: see `# Safety` rustdoc above; caller upholds raw-pointer invariants.
 #[no_mangle]
 pub unsafe extern "C" fn axiom_vault_health_check(
     path: *const c_char,
@@ -684,6 +701,7 @@ pub unsafe extern "C" fn axiom_vault_health_check(
 /// - `handle` must be a valid vault handle
 /// - `callback` must be a valid function pointer or null
 /// - The callback may be invoked from any thread
+// SAFETY: see `# Safety` rustdoc above; caller upholds raw-pointer invariants.
 #[no_mangle]
 pub unsafe extern "C" fn axiom_vault_subscribe_events(
     handle: *const FFIVaultHandle,
@@ -773,6 +791,7 @@ pub extern "C" fn axiom_last_error() -> *mut c_char {
 /// # Safety
 /// - `s` must be a valid pointer returned by an axiom FFI function
 /// - After this call, the pointer is invalid
+// SAFETY: see `# Safety` rustdoc above; caller upholds raw-pointer invariants.
 #[no_mangle]
 pub unsafe extern "C" fn axiom_string_free(s: *mut c_char) {
     if !s.is_null() {
@@ -795,6 +814,7 @@ pub unsafe extern "C" fn axiom_string_free(s: *mut c_char) {
 /// - `s` must be a valid pointer returned by `axiom_vault_get_recovery_words`
 ///   or `axiom_vault_show_recovery_key`
 /// - After this call, the pointer is invalid
+// SAFETY: see `# Safety` rustdoc above; caller upholds raw-pointer invariants.
 #[no_mangle]
 pub unsafe extern "C" fn axiom_recovery_words_free(s: *mut c_char) {
     if s.is_null() {
@@ -810,19 +830,23 @@ pub unsafe extern "C" fn axiom_recovery_words_free(s: *mut c_char) {
     // takes back ownership of the same allocation and won't be called twice.
     let cstring = CString::from_raw(s);
 
-    // Overwrite the bytes (including the NUL terminator) in place, through
-    // the pointer we still hold. This uses a volatile-style write via
-    // `write_bytes` plus a compiler fence to prevent the writes being elided
-    // by the optimizer before the subsequent free.
-    let bytes = cstring.as_bytes_with_nul();
+    // Convert into an owned `Vec<u8>` so we can mutate via a legitimate
+    // `as_mut_ptr()`. Writing through a `*mut` derived from `&[u8]` (as the
+    // previous implementation did via `cstring.as_bytes_with_nul().as_ptr()
+    // as *mut u8`) violates Rust's aliasing model: the optimizer is allowed
+    // to assume bytes behind a shared reference are not mutated, and could
+    // elide the wipe entirely — turning this security-critical zeroization
+    // into a no-op. Owning a `Vec` makes the mutation legitimate.
+    let mut bytes = cstring.into_bytes_with_nul();
     let len = bytes.len();
-    let ptr = bytes.as_ptr() as *mut u8;
-    // SAFETY: `ptr` points to `len` bytes owned by `cstring`; we have exclusive
-    // access for the duration of this call because we just took ownership.
+    let ptr = bytes.as_mut_ptr();
+    // SAFETY: `ptr` points to `len` bytes owned by `bytes`; exclusive access
+    // is guaranteed because we own the `Vec`. The compiler_fence prevents the
+    // wipe from being reordered past the subsequent deallocation.
     std::ptr::write_bytes(ptr, 0, len);
     std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
 
-    drop(cstring);
+    drop(bytes);
 }
 
 #[cfg(test)]
@@ -878,22 +902,24 @@ mod tests {
         // Take ownership of the allocation back (mirrors the first step in
         // axiom_recovery_words_free). SAFETY: `raw` came from CString::into_raw.
         let cstring = unsafe { CString::from_raw(raw) };
-        let bytes_with_nul = cstring.as_bytes_with_nul();
-        assert_eq!(bytes_with_nul[0], b'w');
-        assert!(bytes_with_nul.ends_with(&[0]));
-        let len = bytes_with_nul.len();
-        let ptr = bytes_with_nul.as_ptr() as *mut u8;
+
+        // Convert to an owned `Vec<u8>` so we can mutate legitimately via
+        // `as_mut_ptr()` — same shape as the FFI free.
+        let mut bytes = cstring.into_bytes_with_nul();
+        assert_eq!(bytes[0], b'w');
+        assert!(bytes.ends_with(&[0]));
+        let len = bytes.len();
+        let ptr = bytes.as_mut_ptr();
 
         // Apply the same wipe as the FFI free.
-        // SAFETY: exclusive ownership via `cstring`; writing `len` bytes is in-bounds.
+        // SAFETY: exclusive ownership via `bytes`; writing `len` bytes is in-bounds.
         unsafe { std::ptr::write_bytes(ptr, 0, len) };
         std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
 
         // The buffer is now all zeros while still owned.
-        let after: &[u8] = cstring.as_bytes_with_nul();
-        assert!(after.iter().all(|&b| b == 0), "buffer not fully zeroed");
+        assert!(bytes.iter().all(|&b| b == 0), "buffer not fully zeroed");
 
         // Drop releases the (now-zeroed) allocation.
-        drop(cstring);
+        drop(bytes);
     }
 }
