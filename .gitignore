@@ -30,3 +30,6 @@ clients/apple/Frameworks/
 clients/apple/build/
 clients/apple/**/*.xcuserstate
 clients/apple/AxiomVault.xcodeproj/project.pbxproj
+
+# Git worktrees
+.worktrees/
