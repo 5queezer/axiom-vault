@@ -45,9 +45,23 @@ pub enum Error {
     #[error("Conflict: {0}")]
     Conflict(String),
 
-    /// Authentication failed.
+    /// Authentication failed permanently.
+    ///
+    /// Used for non-transient auth failures where retrying will not help:
+    /// invalid credentials, revoked tokens, failed OAuth token exchange,
+    /// failed refresh-token redemption, permission denials that surface
+    /// as auth errors, etc.
     #[error("Authentication error: {0}")]
     Authentication(String),
+
+    /// Authentication failed transiently — token expired or needs refresh.
+    ///
+    /// Used when the server indicates the current access token is no
+    /// longer valid (typically HTTP 401) but the refresh token is still
+    /// believed to be good. Callers wrapped by the retry executor will
+    /// re-attempt, giving the token manager a chance to refresh.
+    #[error("Authentication expired: {0}")]
+    AuthenticationExpired(String),
 
     /// Network operation failed.
     #[error("Network error: {0}")]

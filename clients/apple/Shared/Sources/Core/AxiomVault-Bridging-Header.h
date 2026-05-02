@@ -80,9 +80,11 @@ int axiom_vault_change_password(const FFIVaultHandle *handle,
 
 // Returns recovery words from vault creation (one-time, cleared after call).
 // Returns NULL if vault was opened or words already consumed.
+// MUST be freed with axiom_recovery_words_free (NOT axiom_string_free).
 char *axiom_vault_get_recovery_words(const FFIVaultHandle *handle);
 
 // Returns the recovery key for an open vault (requires active session).
+// MUST be freed with axiom_recovery_words_free (NOT axiom_string_free).
 char *axiom_vault_show_recovery_key(const FFIVaultHandle *handle);
 
 // Reset password using recovery words. Returns a new vault handle on success.
@@ -118,5 +120,11 @@ int axiom_vault_subscribe_events(const FFIVaultHandle *handle,
 
 char *axiom_last_error(void);
 void axiom_string_free(char *s);
+
+// Zeroize-then-free for strings containing secrets (recovery mnemonics).
+// REQUIRED for buffers returned by axiom_vault_get_recovery_words and
+// axiom_vault_show_recovery_key. Using axiom_string_free on those buffers
+// leaks the credential bytes into freed heap memory.
+void axiom_recovery_words_free(char *s);
 
 #endif /* AxiomVault_Bridging_Header_h */

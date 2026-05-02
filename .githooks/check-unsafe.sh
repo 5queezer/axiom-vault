@@ -6,7 +6,14 @@ exit_code=0
 for file in "$@"; do
     [ "${file##*.}" = "rs" ] || continue
 
-    # Get all lines with 'unsafe'
+    # Get all lines containing an `unsafe { ... }` block or an
+    # `unsafe impl|fn|trait` declaration. We match the block form anywhere on
+    # the line (catches inline expressions like `uid: unsafe { libc::getuid() }`)
+    # and the declaration form at the start of a line.
+    #
+    # The optional visibility prefix accepts `pub`, `pub(crate)`, `pub(super)`,
+    # `pub(self)`, and `pub(in path::to::module)` so that a `pub(crate) unsafe
+    # fn foo()` is not silently exempt from the SAFETY comment requirement.
     while IFS= read -r line_num; do
         # Check 3 lines before and the current line for SAFETY comment
         start=$((line_num - 3))
@@ -19,7 +26,7 @@ for file in "$@"; do
             sed -n "$((line_num))p" "$file" | sed 's/^/    /'
             exit_code=1
         fi
-    done < <(grep -n "^\s*unsafe" "$file" | cut -d: -f1)
+    done < <(grep -nE 'unsafe[[:space:]]*\{|^[[:space:]]*(pub([[:space:]]*\([[:space:]]*(crate|super|self|in[[:space:]]+[^)]+)[[:space:]]*\))?[[:space:]]+)?unsafe[[:space:]]+(impl|fn|trait|extern)' "$file" | cut -d: -f1)
 done
 
 if [ $exit_code -ne 0 ]; then

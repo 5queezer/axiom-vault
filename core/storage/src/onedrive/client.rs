@@ -118,7 +118,10 @@ struct UploadSession {
 
 /// Microsoft Graph API client for OneDrive.
 pub struct OneDriveClient {
+    /// HTTP client for streaming uploads and downloads (no total timeout).
     http: Client,
+    /// HTTP client for short metadata requests (bounded total timeout).
+    metadata_http: Client,
     token_manager: Arc<OneDriveTokenManager>,
 }
 
@@ -127,6 +130,7 @@ impl OneDriveClient {
     pub fn new(token_manager: Arc<OneDriveTokenManager>) -> axiomvault_common::Result<Self> {
         Ok(Self {
             http: http_client::build_http_client()?,
+            metadata_http: http_client::build_metadata_http_client()?,
             token_manager,
         })
     }
@@ -171,7 +175,7 @@ impl OneDriveClient {
         let auth = self.auth_header().await?;
 
         let response = self
-            .http
+            .metadata_http
             .get(&url)
             .header(header::AUTHORIZATION, auth)
             .send()
@@ -197,7 +201,7 @@ impl OneDriveClient {
             let auth = self.auth_header().await?;
 
             let response = self
-                .http
+                .metadata_http
                 .get(&url)
                 .header(header::AUTHORIZATION, auth)
                 .send()
@@ -244,7 +248,7 @@ impl OneDriveClient {
         });
 
         let response = self
-            .http
+            .metadata_http
             .post(&url)
             .header(header::AUTHORIZATION, auth)
             .header(header::CONTENT_TYPE, "application/json")
@@ -350,7 +354,7 @@ impl OneDriveClient {
         let auth = self.auth_header().await?;
 
         let response = self
-            .http
+            .metadata_http
             .delete(&url)
             .header(header::AUTHORIZATION, auth)
             .send()
@@ -381,7 +385,7 @@ impl OneDriveClient {
         });
 
         let response = self
-            .http
+            .metadata_http
             .post(&url)
             .header(header::AUTHORIZATION, auth)
             .header(header::CONTENT_TYPE, "application/json")
@@ -416,7 +420,7 @@ impl OneDriveClient {
         });
 
         let response = self
-            .http
+            .metadata_http
             .patch(&url)
             .header(header::AUTHORIZATION, auth)
             .header(header::CONTENT_TYPE, "application/json")
@@ -451,7 +455,7 @@ impl OneDriveClient {
         });
 
         let response = self
-            .http
+            .metadata_http
             .post(&url)
             .header(header::AUTHORIZATION, auth)
             .header(header::CONTENT_TYPE, "application/json")

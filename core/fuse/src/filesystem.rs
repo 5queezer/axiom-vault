@@ -39,7 +39,11 @@ fn create_file_attr(ino: INodeNo, is_dir: bool, size: u64) -> FileAttr {
         },
         perm: if is_dir { 0o700 } else { 0o600 },
         nlink: if is_dir { 2 } else { 1 },
+        // SAFETY: `getuid`/`getgid` are async-signal-safe POSIX syscalls with no
+        // preconditions and no side effects; they always return the current
+        // process's UID/GID.
         uid: unsafe { libc::getuid() },
+        // SAFETY: see `getuid` above.
         gid: unsafe { libc::getgid() },
         rdev: 0,
         blksize: 4096,

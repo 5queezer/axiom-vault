@@ -142,6 +142,17 @@ impl CompositeStorageProvider {
             let backend = Arc::clone(&self.backends[i]);
             let shard_path = Self::shard_path(path, i)?;
             // Header: [4-byte LE CRC-32 of shard_data] [8-byte LE original_size] [shard_data]
+            //
+            // SECURITY NOTE: CRC-32 is a NON-CRYPTOGRAPHIC checksum and is
+            // used here ONLY to detect accidental bit rot or transport
+            // corruption of an erasure shard. It does NOT provide
+            // authenticity: a backend that rewrites a shard can trivially
+            // recompute and replace the CRC. Authenticity / tamper-detection
+            // is provided one layer up by the AEAD (XChaCha20-Poly1305) at
+            // the vault layer — any malicious modification of plaintext or
+            // ciphertext is caught when the AEAD tag fails to verify. CRC
+            // mismatches here just let us treat a shard as missing and
+            // reconstruct it from the remaining Reed-Solomon shards.
             let crc = crc32fast::hash(&shard);
             let mut payload = Vec::with_capacity(4 + 8 + shard.len());
             payload.extend_from_slice(&crc.to_le_bytes());

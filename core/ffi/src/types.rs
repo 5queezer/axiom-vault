@@ -7,6 +7,7 @@ use std::sync::Mutex;
 
 use axiomvault_app::AppService;
 use tokio::task::JoinHandle;
+use zeroize::Zeroizing;
 
 /// Opaque handle to the application service.
 ///
@@ -17,8 +18,10 @@ pub struct FFIVaultHandle {
     /// Vault storage path on disk (for health check / migration).
     pub(crate) path: String,
     /// Recovery words from vault creation. One-time retrievable — cleared after
-    /// the first call to `axiom_vault_get_recovery_words`.
-    pub(crate) recovery_words: Mutex<Option<String>>,
+    /// the first call to `axiom_vault_get_recovery_words`. Wrapped in
+    /// [`Zeroizing`] so the mnemonic bytes are wiped from memory when the
+    /// handle is freed without ever being read.
+    pub(crate) recovery_words: Mutex<Option<Zeroizing<String>>>,
     /// Background task forwarding events to the C callback. At most one
     /// subscription is active at a time — re-subscribing aborts the previous.
     pub(crate) event_task: Mutex<Option<JoinHandle<()>>>,

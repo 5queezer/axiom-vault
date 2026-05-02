@@ -83,6 +83,7 @@ impl From<CommonError> for AppError {
             CommonError::Storage(msg) => AppError::Storage(msg),
             CommonError::Network(msg) => AppError::Storage(msg),
             CommonError::Authentication(msg) => AppError::Storage(msg),
+            CommonError::AuthenticationExpired(msg) => AppError::Storage(msg),
             CommonError::Io(err) => AppError::Storage(err.to_string()),
             CommonError::Serialization(msg) => AppError::Internal(msg),
             CommonError::Vault(msg) => AppError::Internal(msg),

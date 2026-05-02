@@ -17,15 +17,54 @@ use axiomvault_common::Error;
 /// User-Agent string for all cloud API requests.
 const USER_AGENT: &str = "AxiomVault/0.1";
 
+/// Total request timeout used by [`build_metadata_http_client`].
+///
+/// Metadata calls (small JSON requests) are expected to complete quickly;
+/// 30 seconds is well above normal latency but bounds the impact of a
+/// hung or slow-loris server.
+pub const METADATA_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// Build an HTTP client with standard settings for cloud API usage.
 ///
 /// Configures a consistent User-Agent header and connection timeout (10s).
-/// No total request timeout is set because cloud providers handle both
-/// small metadata requests and large file transfers through the same client.
+/// No total request timeout is set because this client is also used for
+/// streaming uploads and downloads that may legitimately take many minutes
+/// (large files, slow uplinks). For small metadata calls use
+/// [`build_metadata_http_client`] instead, which adds a bounded
+/// per-request timeout to limit DoS / hang exposure.
 pub fn build_http_client() -> Result<Client, Error> {
     Client::builder()
         .user_agent(USER_AGENT)
         .connect_timeout(Duration::from_secs(10))
+        .build()
+        .map_err(|e| Error::Network(format!("Failed to create HTTP client: {}", e)))
+}
+
+/// Build an HTTP client suitable for short-lived metadata requests.
+///
+/// Identical to [`build_http_client`] but adds a 30-second total request
+/// timeout. Use this client for JSON metadata calls (list, get, delete,
+/// move, copy, create-folder, session-init, etc.) where a hang would
+/// otherwise stall the whole sync indefinitely. Do **not** use it for
+/// streaming uploads or downloads — those need to be unbounded so that
+/// large transfers can complete.
+pub fn build_metadata_http_client() -> Result<Client, Error> {
+    build_metadata_http_client_with_timeout(METADATA_REQUEST_TIMEOUT)
+}
+
+/// Build a metadata HTTP client with a caller-specified total request
+/// timeout.
+///
+/// Same shape as [`build_metadata_http_client`] but takes the total
+/// request timeout as a parameter. Exposed primarily for testability —
+/// production code should prefer the parameterless
+/// [`build_metadata_http_client`], which uses
+/// [`METADATA_REQUEST_TIMEOUT`] as the default.
+pub fn build_metadata_http_client_with_timeout(timeout: Duration) -> Result<Client, Error> {
+    Client::builder()
+        .user_agent(USER_AGENT)
+        .connect_timeout(Duration::from_secs(10))
+        .timeout(timeout)
         .build()
         .map_err(|e| Error::Network(format!("Failed to create HTTP client: {}", e)))
 }
@@ -43,7 +82,7 @@ pub fn bearer_header(token: &str) -> String {
 ///
 /// | Status | Error variant |
 /// |--------|--------------|
-/// | 401    | `Authentication` |
+/// | 401    | `AuthenticationExpired` (transient — token needs refresh) |
 /// | 403    | `NotPermitted` |
 /// | 404    | `NotFound` |
 /// | 409    | `AlreadyExists` |
@@ -52,7 +91,11 @@ pub fn map_status_error(status: StatusCode, body: &str) -> Error {
     if status == StatusCode::NOT_FOUND {
         Error::NotFound(format!("Resource not found: {}", body))
     } else if status == StatusCode::UNAUTHORIZED {
-        Error::Authentication("Invalid or expired token".to_string())
+        // A 401 is the textbook transient auth case: the access token
+        // is no longer accepted, but the refresh token is (probably)
+        // still good. Surface as `AuthenticationExpired` so the retry
+        // executor gives the token manager a chance to refresh.
+        Error::AuthenticationExpired("Invalid or expired token".to_string())
     } else if status == StatusCode::FORBIDDEN {
         Error::NotPermitted("Access denied".to_string())
     } else if status == StatusCode::CONFLICT {
@@ -115,7 +158,7 @@ mod tests {
     #[test]
     fn test_map_status_unauthorized() {
         let err = map_status_error(StatusCode::UNAUTHORIZED, "bad token");
-        assert!(matches!(err, Error::Authentication(_)));
+        assert!(matches!(err, Error::AuthenticationExpired(_)));
     }
 
     #[test]
@@ -149,5 +192,59 @@ mod tests {
     fn test_build_http_client() {
         let client = build_http_client();
         assert!(client.is_ok());
+    }
+
+    #[test]
+    fn test_build_metadata_http_client() {
+        let client = build_metadata_http_client();
+        assert!(client.is_ok());
+    }
+
+    /// The bounded metadata client must surface a timeout (rather than
+    /// hang indefinitely) when a server accepts the connection but
+    /// never sends a response. We verify behaviour against a local TCP
+    /// listener that does nothing after `accept()` — `reqwest::Client`
+    /// does not expose its configured timeout, so we exercise it.
+    #[tokio::test]
+    async fn test_metadata_http_client_times_out() {
+        use std::time::Duration;
+        use tokio::net::TcpListener;
+
+        // Bind a local listener and accept-but-never-respond. The
+        // request should resolve as a timeout error within ~200ms.
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let _accept_task = tokio::spawn(async move {
+            // Accept once and hold the connection open without writing.
+            if let Ok((stream, _)) = listener.accept().await {
+                // Keep the stream alive for the duration of the test.
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                drop(stream);
+            }
+        });
+
+        // Exercise the production builder with a short timeout so the
+        // test is fast — this guards the real code path rather than a
+        // hand-rolled replica.
+        let client = build_metadata_http_client_with_timeout(Duration::from_millis(200))
+            .expect("client builds");
+
+        let url = format!("http://{}/", addr);
+        let result = tokio::time::timeout(Duration::from_secs(2), client.get(&url).send()).await;
+
+        // Outer guard must not fire — the bounded client should have
+        // returned its own timeout well before 2s elapsed.
+        let inner = result.expect("bounded client did not hang past its own timeout");
+        let err = match inner {
+            Err(err) => err,
+            Ok(resp) => panic!(
+                "request should have timed out, got status: {}",
+                resp.status()
+            ),
+        };
+        assert!(
+            err.is_timeout(),
+            "request should have timed out, got: {err:?}"
+        );
     }
 }

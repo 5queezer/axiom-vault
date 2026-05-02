@@ -10,6 +10,7 @@ use axiomvault_vault::{
     check_migration_needed, check_vault_health, check_vault_structure, MigrationRegistry,
     MigrationStatus, VaultConfig, VaultManager as CoreVaultManager, VaultVersion,
 };
+use zeroize::Zeroizing;
 
 use crate::error::{FFIError, FFIResult};
 use crate::types::{FFIVaultHandle, FFIVaultInfo};
@@ -28,7 +29,10 @@ fn resolve_path(path: &str) -> FFIResult<String> {
 }
 
 /// Create a new vault at the specified path.
-pub async fn create_vault(path: &str, password: &str) -> FFIResult<FFIVaultHandle> {
+///
+/// `password` is taken by value as [`Zeroizing<String>`] so the secret is
+/// wiped from memory regardless of success or failure.
+pub async fn create_vault(path: &str, password: Zeroizing<String>) -> FFIResult<FFIVaultHandle> {
     let abs_path = resolve_path(path)?;
 
     // Derive vault ID from directory name.
@@ -43,7 +47,7 @@ pub async fn create_vault(path: &str, password: &str) -> FFIResult<FFIVaultHandl
     let result = service
         .create_vault(CreateVaultParams {
             vault_id: vault_name.to_string(),
-            password: password.to_string(),
+            password,
             provider_type: "local".to_string(),
             provider_config,
         })
@@ -53,20 +57,24 @@ pub async fn create_vault(path: &str, password: &str) -> FFIResult<FFIVaultHandl
     Ok(FFIVaultHandle {
         service,
         path: abs_path,
-        recovery_words: std::sync::Mutex::new(Some(String::from(&*result.recovery_words))),
+        // Move the mnemonic into the handle without copying into a non-zeroizing buffer.
+        recovery_words: std::sync::Mutex::new(Some(result.recovery_words)),
         event_task: std::sync::Mutex::new(None),
     })
 }
 
 /// Open an existing vault at the specified path.
-pub async fn open_vault(path: &str, password: &str) -> FFIResult<FFIVaultHandle> {
+///
+/// `password` is taken by value as [`Zeroizing<String>`] so the secret is
+/// wiped from memory regardless of success or failure.
+pub async fn open_vault(path: &str, password: Zeroizing<String>) -> FFIResult<FFIVaultHandle> {
     let abs_path = resolve_path(path)?;
     let provider_config = serde_json::json!({ "root": abs_path });
 
     let service = AppService::new();
     service
         .open_vault(OpenVaultParams {
-            password: password.to_string(),
+            password,
             provider_type: "local".to_string(),
             provider_config,
         })
@@ -173,10 +181,13 @@ pub async fn remove_entry(handle: &FFIVaultHandle, vault_path: &str) -> FFIResul
 }
 
 /// Change the vault password.
+///
+/// Both passwords are taken by value as [`Zeroizing<String>`] so they are
+/// wiped from memory regardless of success or failure.
 pub async fn change_password(
     handle: &FFIVaultHandle,
-    old_password: &str,
-    new_password: &str,
+    old_password: Zeroizing<String>,
+    new_password: Zeroizing<String>,
 ) -> FFIResult<()> {
     handle
         .service
@@ -186,7 +197,10 @@ pub async fn change_password(
 }
 
 /// Show recovery key for an open vault.
-pub async fn show_recovery_key(handle: &FFIVaultHandle) -> FFIResult<String> {
+///
+/// Returns the mnemonic wrapped in [`Zeroizing`] so the bytes are wiped
+/// from memory once the FFI layer has copied them to the C-owned buffer.
+pub async fn show_recovery_key(handle: &FFIVaultHandle) -> FFIResult<Zeroizing<String>> {
     // Recovery key display requires direct session access (not in AppService).
     let session = handle
         .service
@@ -205,15 +219,17 @@ pub async fn show_recovery_key(handle: &FFIVaultHandle) -> FFIResult<String> {
 
     recovery_key
         .to_mnemonic()
-        .map(|z| String::from(&*z))
         .map_err(|e| FFIError::VaultError(e.to_string()))
 }
 
 /// Reset vault password using recovery key words.
+///
+/// Both `recovery_words` and `new_password` are taken by value as
+/// [`Zeroizing<String>`] so they are wiped from memory regardless of outcome.
 pub async fn reset_password(
     path: &str,
-    recovery_words: &str,
-    new_password: &str,
+    recovery_words: Zeroizing<String>,
+    new_password: Zeroizing<String>,
 ) -> FFIResult<FFIVaultHandle> {
     let abs_path = resolve_path(path)?;
     let provider_config = serde_json::json!({ "root": abs_path });
@@ -221,8 +237,8 @@ pub async fn reset_password(
     let service = AppService::new();
     service
         .recover_vault(RecoverVaultParams {
-            recovery_words: recovery_words.to_string(),
-            new_password: new_password.to_string(),
+            recovery_words,
+            new_password,
             provider_type: "local".to_string(),
             provider_config,
         })

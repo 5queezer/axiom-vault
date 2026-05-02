@@ -78,7 +78,10 @@ pub struct UploadSessionStart {
 
 /// Dropbox API client.
 pub struct DropboxClient {
+    /// HTTP client for streaming uploads and downloads (no total timeout).
     http: Client,
+    /// HTTP client for short metadata requests (bounded total timeout).
+    metadata_http: Client,
     token_manager: Arc<DropboxTokenManager>,
 }
 
@@ -87,6 +90,7 @@ impl DropboxClient {
     pub fn new(token_manager: Arc<DropboxTokenManager>) -> axiomvault_common::Result<Self> {
         Ok(Self {
             http: http_client::build_http_client()?,
+            metadata_http: http_client::build_metadata_http_client()?,
             token_manager,
         })
     }
@@ -109,7 +113,9 @@ impl DropboxClient {
             }
         }
         if status == StatusCode::UNAUTHORIZED {
-            return Error::Authentication("Dropbox authentication failed".to_string());
+            // Transient: token rejected, likely expired. Let the retry
+            // executor trigger a refresh on the next attempt.
+            return Error::AuthenticationExpired("Dropbox authentication failed".to_string());
         }
         Error::Storage(format!("Dropbox API error ({}): {}", status, body))
     }
@@ -118,7 +124,7 @@ impl DropboxClient {
     pub async fn get_metadata(&self, path: &str) -> Result<DropboxMetadata> {
         let auth = self.auth_header().await?;
         let resp = self
-            .http
+            .metadata_http
             .post(format!("{}/files/get_metadata", API_BASE))
             .header(header::AUTHORIZATION, &auth)
             .header(header::CONTENT_TYPE, "application/json")
@@ -149,7 +155,7 @@ impl DropboxClient {
         let list_path = if path == "/" { "" } else { path };
 
         let resp = self
-            .http
+            .metadata_http
             .post(format!("{}/files/list_folder", API_BASE))
             .header(header::AUTHORIZATION, &auth)
             .header(header::CONTENT_TYPE, "application/json")
@@ -182,7 +188,7 @@ impl DropboxClient {
         while result.has_more {
             let auth = self.auth_header().await?;
             let resp = self
-                .http
+                .metadata_http
                 .post(format!("{}/files/list_folder/continue", API_BASE))
                 .header(header::AUTHORIZATION, &auth)
                 .header(header::CONTENT_TYPE, "application/json")
@@ -432,7 +438,7 @@ impl DropboxClient {
     pub async fn delete(&self, path: &str) -> Result<()> {
         let auth = self.auth_header().await?;
         let resp = self
-            .http
+            .metadata_http
             .post(format!("{}/files/delete_v2", API_BASE))
             .header(header::AUTHORIZATION, &auth)
             .header(header::CONTENT_TYPE, "application/json")
@@ -457,7 +463,7 @@ impl DropboxClient {
     pub async fn create_folder(&self, path: &str) -> Result<DropboxMetadata> {
         let auth = self.auth_header().await?;
         let resp = self
-            .http
+            .metadata_http
             .post(format!("{}/files/create_folder_v2", API_BASE))
             .header(header::AUTHORIZATION, &auth)
             .header(header::CONTENT_TYPE, "application/json")
@@ -496,7 +502,7 @@ impl DropboxClient {
     pub async fn move_entry(&self, from_path: &str, to_path: &str) -> Result<DropboxMetadata> {
         let auth = self.auth_header().await?;
         let resp = self
-            .http
+            .metadata_http
             .post(format!("{}/files/move_v2", API_BASE))
             .header(header::AUTHORIZATION, &auth)
             .header(header::CONTENT_TYPE, "application/json")
@@ -535,7 +541,7 @@ impl DropboxClient {
     pub async fn copy_entry(&self, from_path: &str, to_path: &str) -> Result<DropboxMetadata> {
         let auth = self.auth_header().await?;
         let resp = self
-            .http
+            .metadata_http
             .post(format!("{}/files/copy_v2", API_BASE))
             .header(header::AUTHORIZATION, &auth)
             .header(header::CONTENT_TYPE, "application/json")

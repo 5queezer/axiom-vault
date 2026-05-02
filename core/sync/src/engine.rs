@@ -167,6 +167,7 @@ impl<P: StorageProvider + ?Sized + 'static> SyncEngine<P> {
         let mut files_synced = 0;
         let mut files_failed = 0;
         let mut conflicts_found = 0;
+        let mut pending_persistence = 0;
 
         info!("Starting full sync");
 
@@ -189,6 +190,7 @@ impl<P: StorageProvider + ?Sized + 'static> SyncEngine<P> {
         let download_result = self.download_remote_changes().await;
         files_synced += download_result.0;
         files_failed += download_result.1;
+        pending_persistence += download_result.2;
 
         {
             let mut state = self.state.write().await;
@@ -198,14 +200,15 @@ impl<P: StorageProvider + ?Sized + 'static> SyncEngine<P> {
 
         let duration = start.elapsed();
         info!(
-            "Full sync completed in {:?}: {} synced, {} failed, {} conflicts",
-            duration, files_synced, files_failed, conflicts_found
+            "Full sync completed in {:?}: {} synced, {} failed, {} conflicts, {} pending persistence",
+            duration, files_synced, files_failed, conflicts_found, pending_persistence
         );
 
         Ok(SyncResult {
             files_synced,
             files_failed,
             conflicts_found,
+            pending_persistence,
             duration,
         })
     }
@@ -249,6 +252,7 @@ impl<P: StorageProvider + ?Sized + 'static> SyncEngine<P> {
             files_synced,
             files_failed,
             conflicts_found,
+            pending_persistence: 0,
             duration,
         })
     }
@@ -262,6 +266,7 @@ impl<P: StorageProvider + ?Sized + 'static> SyncEngine<P> {
                 files_synced: 0,
                 files_failed: 0,
                 conflicts_found: 0,
+                pending_persistence: 0,
                 duration: Duration::from_secs(0),
             }),
         }
@@ -482,10 +487,27 @@ impl<P: StorageProvider + ?Sized + 'static> SyncEngine<P> {
         Ok(conflicts)
     }
 
+    // TODO(audit H-1, SECURITY_AUDIT_2026-04-21.md): the sync engine has no
+    // wired-up local destination for downloaded ciphertext. Until a local
+    // provider / staging callback / `VaultOperations::update_file` integration
+    // lands, `download_remote_changes` MUST NOT pretend the data was
+    // persisted: that would silently lose remote-side changes while
+    // reporting success in the sync result counters. The fix here is
+    // intentionally narrow — we only make the failure honest (warn log,
+    // pending_persistence counter, no etag/timestamp mutation). The full
+    // architectural fix is tracked separately.
     /// Download remote changes to local.
-    async fn download_remote_changes(&self) -> (usize, usize) {
-        let mut synced = 0;
+    ///
+    /// Currently, downloaded data has no destination wired up in the engine,
+    /// so successful downloads are reported via `pending_persistence` rather
+    /// than `synced`, and the entry's sync state is left untouched so the
+    /// next sync will see the remote change again.
+    async fn download_remote_changes(&self) -> (usize, usize, usize) {
+        // `synced` stays 0 until persistence is wired up (audit H-1). Successful
+        // downloads are accounted for in `pending_persistence` instead.
+        let synced: usize = 0;
         let mut failed = 0;
+        let mut pending_persistence = 0;
 
         let entries: Vec<(String, SyncStatus)> = {
             let state = self.state.read().await;
@@ -518,27 +540,17 @@ impl<P: StorageProvider + ?Sized + 'static> SyncEngine<P> {
                 .await;
 
             match download_result {
-                Ok(_data) => {
-                    // In a real implementation, we would write this to the vault
-                    // For now, just update the state
-                    let provider = self.provider.clone();
-                    let path_clone = path.clone();
-
-                    if let Ok(metadata) = self
-                        .retry_executor
-                        .execute(move || {
-                            let p = provider.clone();
-                            let path = path_clone.clone();
-                            async move { p.metadata(&path).await }
-                        })
-                        .await
-                    {
-                        let mut state = self.state.write().await;
-                        if let Some(entry) = state.get_mut(&path) {
-                            entry.mark_synced(metadata.etag, metadata.modified);
-                        }
-                    }
-                    synced += 1;
+                Ok(data) => {
+                    // The downloaded ciphertext has nowhere to go yet (audit
+                    // H-1). Surface this honestly: increment the
+                    // pending_persistence counter, leave the entry's sync
+                    // state untouched, and warn so operators can see it.
+                    warn!(
+                        "downloaded {} bytes for path {} but persistence is not yet wired up — entry not marked synced (audit H-1)",
+                        data.len(),
+                        path
+                    );
+                    pending_persistence += 1;
                 }
                 Err(e) => {
                     error!("Failed to download remote file: {}", e);
@@ -547,7 +559,7 @@ impl<P: StorageProvider + ?Sized + 'static> SyncEngine<P> {
             }
         }
 
-        (synced, failed)
+        (synced, failed, pending_persistence)
     }
 
     /// Sync a single path.
@@ -690,6 +702,81 @@ struct SingleSyncResult {
 
 #[cfg(test)]
 mod tests {
-    // Tests would require a mock StorageProvider
-    // See integration tests for full testing
+    use super::*;
+    use axiomvault_storage::MemoryProvider;
+    use tempfile::TempDir;
+
+    /// Audit H-1: a successful remote download must NOT increment the
+    /// `synced` counter and must NOT update the entry's etag/timestamp,
+    /// because the engine has no wired-up local destination yet. It must
+    /// surface the download via the `pending_persistence` counter (and a
+    /// `warn!` log — verifiable by running `cargo test -- --nocapture`).
+    #[tokio::test]
+    async fn test_download_remote_changes_does_not_falsely_mark_synced() {
+        let provider = MemoryProvider::new();
+        let path = VaultPath::parse("/remote-only.bin").unwrap();
+        // Seed remote with a file the engine will "discover" as RemoteModified.
+        provider
+            .upload(&path, b"remote-ciphertext".to_vec())
+            .await
+            .unwrap();
+        let original_remote_meta = provider.metadata(&path).await.unwrap();
+
+        let staging_dir = TempDir::new().unwrap();
+        let engine = SyncEngine::new(provider, staging_dir.path(), SyncConfig::default())
+            .await
+            .unwrap();
+
+        // Pre-seed sync state with an entry whose status is RemoteModified
+        // so download_remote_changes will pick it up. Capture the
+        // pre-download etag so we can assert it doesn't get bumped.
+        let pre_download_local_etag = Some("baseline-local-etag".to_string());
+        let pre_download_remote_etag = Some("baseline-remote-etag".to_string());
+        {
+            let mut state = engine.state.write().await;
+            let mut entry = SyncEntry::new_synced(
+                path.to_string(),
+                pre_download_local_etag.clone(),
+                chrono::Utc::now(),
+            );
+            // Force RemoteModified so download_remote_changes finds it.
+            entry.status = SyncStatus::RemoteModified;
+            entry.remote_etag = pre_download_remote_etag.clone();
+            state.insert(entry);
+        }
+
+        let (synced, failed, pending) = engine.download_remote_changes().await;
+
+        // The honest-failure contract from H-1: synced stays 0, no failure
+        // (the download succeeded), pending bumps.
+        assert_eq!(synced, 0, "synced must not increment without persistence");
+        assert_eq!(failed, 0, "download succeeded so failed must stay 0");
+        assert_eq!(
+            pending, 1,
+            "the successful download must show up in pending"
+        );
+
+        // The entry's etags / status must NOT have been touched (no
+        // silent "this is in sync now" claim).
+        let state = engine.state.read().await;
+        let entry = state.get(&path).expect("entry is still present");
+        assert_eq!(
+            entry.local_etag, pre_download_local_etag,
+            "local_etag must not have been mutated by a no-op download"
+        );
+        assert_eq!(
+            entry.remote_etag, pre_download_remote_etag,
+            "remote_etag must not have been mutated by a no-op download"
+        );
+        assert_eq!(
+            entry.status,
+            SyncStatus::RemoteModified,
+            "status must remain RemoteModified so the next sync sees it again"
+        );
+
+        // Sanity: the remote provider still has the original metadata —
+        // we never touched it.
+        let post_remote_meta = engine.provider.metadata(&path).await.unwrap();
+        assert_eq!(post_remote_meta.etag, original_remote_meta.etag);
+    }
 }
