@@ -105,6 +105,10 @@ level because they are operationally necessary and not vault secrets.
 | Random generation | OS CSPRNG via `rand` | Used for keys, salts, nonces |
 | Constant-time comparison | `subtle` crate | Password verification, recovery verification |
 
+## Quantum-Resistance Scope
+
+AxiomVault uses quantum-resistant client-side encryption for vault contents and encrypted filenames, based on 256-bit symmetric AEAD encryption and password/recovery-key based key wrapping. This claim excludes TLS, OAuth, and cloud-provider identity layers.
+
 ## Out of Scope
 
 - Protection against a compromised OS kernel or hypervisor.

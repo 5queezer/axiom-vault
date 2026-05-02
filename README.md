@@ -207,6 +207,7 @@ vault-root/
 - **Chunk ordering protection** &mdash; chunk index is authenticated to prevent reordering
 - **Memory safety** &mdash; `Zeroize` + `ZeroizeOnDrop` on all key types, `subtle` for constant-time ops
 - **No plaintext in logs** &mdash; keys and sensitive data are redacted in `Display` impls
+- **Quantum-resistant vault encryption** &mdash; AxiomVault uses quantum-resistant client-side encryption for vault contents and encrypted filenames, based on 256-bit symmetric AEAD encryption and password/recovery-key based key wrapping. This claim excludes TLS, OAuth, and cloud-provider identity layers.
 
 ## Development
 
