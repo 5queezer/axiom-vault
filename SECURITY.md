@@ -56,7 +56,7 @@ There is no bug bounty program at this time. We will credit reporters in release
 
 ### Quantum-resistance scope
 
-AxiomVault uses quantum-resistant client-side encryption for vault contents and encrypted filenames, based on 256-bit symmetric AEAD encryption and password/recovery-key based key wrapping. This claim excludes TLS, OAuth, and cloud-provider identity layers.
+AxiomVault uses quantum-resistant client-side encryption for vault contents and encrypted filenames, based on 256-bit symmetric AEAD encryption and password/recovery-key based key wrapping. Password-protected vault strength remains bounded by the user's password entropy, so use a strong password or the high-entropy recovery key for post-quantum-strength access. This claim excludes TLS, OAuth, and cloud-provider identity layers.
 
 ### Key hierarchy
 
