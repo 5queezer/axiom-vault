@@ -27,10 +27,6 @@ use zeroize::Zeroizing;
 /// Response id used when the user confirms they have saved the words. This is
 /// the only response that dismisses the dialog.
 const RESPONSE_CONFIRM: &str = "confirm";
-/// Response id for the "Copy to clipboard" action. It does not close the
-/// dialog so the user can still read the words after copying.
-const RESPONSE_COPY: &str = "copy";
-
 /// Build and present a modal recovery-words dialog.
 ///
 /// * `parent` — any widget inside the window the dialog should be transient
@@ -78,9 +74,20 @@ where
         .margin_end(12)
         .build();
 
-    dialog.set_extra_child(Some(&words_label));
+    let copy_button = gtk::Button::builder()
+        .label("Copy to Clipboard")
+        .halign(gtk::Align::Center)
+        .margin_bottom(12)
+        .build();
 
-    dialog.add_response(RESPONSE_COPY, "_Copy to Clipboard");
+    let content = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(12)
+        .build();
+    content.append(&words_label);
+    content.append(&copy_button);
+    dialog.set_extra_child(Some(&content));
+
     dialog.add_response(RESPONSE_CONFIRM, "I've _Saved My Recovery Words");
     dialog.set_response_appearance(RESPONSE_CONFIRM, adw::ResponseAppearance::Suggested);
     dialog.set_default_response(Some(RESPONSE_CONFIRM));
@@ -104,42 +111,44 @@ where
     // opening and dismissing the dialog.
     let we_wrote_clipboard = Rc::new(Cell::new(false));
 
+    let words_cell = Rc::new(words_cell);
+    let words_cell_for_copy = words_cell.clone();
+    let we_wrote_clipboard_for_copy = we_wrote_clipboard.clone();
+    copy_button.connect_clicked(move |_| {
+        if let Some(words) = words_cell_for_copy.borrow().as_deref() {
+            if let Some(display) = gdk::Display::default() {
+                display.clipboard().set_text(words);
+                we_wrote_clipboard_for_copy.set(true);
+            }
+        }
+    });
+
     let we_wrote_clipboard_handler = we_wrote_clipboard.clone();
-    dialog.connect_response(None, move |dlg, response| match response {
-        RESPONSE_COPY => {
-            if let Some(words) = words_cell.borrow().as_deref() {
-                if let Some(display) = gdk::Display::default() {
-                    display.clipboard().set_text(words);
-                    we_wrote_clipboard_handler.set(true);
-                }
+    dialog.connect_response(None, move |dlg, _response| {
+        // Any dialog response (confirm / close) dismisses the dialog. Copy is
+        // a normal button in `extra_child`, not an AdwMessageDialog response,
+        // because activating any response closes the dialog automatically.
+        // Drop the recovery words first so the wipe runs before we invoke the
+        // caller's completion handler.
+        drop(words_cell.borrow_mut().take());
+        // Threat model: the recovery words are equivalent to the master key.
+        // If we copied them to the clipboard, every other process on the
+        // system can read them via paste until something else is copied.
+        // Overwrite our own clipboard contents on dismiss to bound that
+        // window. We only wipe when *we* wrote (tracked above) so we don't
+        // clobber unrelated data the user copied in the interim.
+        if we_wrote_clipboard_handler.get() {
+            if let Some(display) = gdk::Display::default() {
+                display.clipboard().set_text("");
             }
-            // Keep the dialog open — the user still needs to confirm.
         }
-        _ => {
-            // Any other response (confirm / close) dismisses the dialog.
-            // Drop the recovery words first so the wipe runs before we
-            // invoke the caller's completion handler.
-            drop(words_cell.borrow_mut().take());
-            // Threat model: the recovery words are equivalent to the
-            // master key. If we copied them to the clipboard, every other
-            // process on the system can read them via paste until something
-            // else is copied. Overwrite our own clipboard contents on
-            // dismiss to bound that window. We only wipe when *we* wrote
-            // (tracked above) so we don't clobber unrelated data the user
-            // copied in the interim.
-            if we_wrote_clipboard_handler.get() {
-                if let Some(display) = gdk::Display::default() {
-                    display.clipboard().set_text("");
-                }
-            }
-            if let Some(cb) = on_dismissed.borrow_mut().take() {
-                // Run the callback asynchronously to ensure `present()`
-                // has fully unwound before the caller mutates any UI that
-                // might still be animating the dialog away.
-                glib::idle_add_local_once(cb);
-            }
-            dlg.close();
+        if let Some(cb) = on_dismissed.borrow_mut().take() {
+            // Run the callback asynchronously to ensure `present()` has fully
+            // unwound before the caller mutates any UI that might still be
+            // animating the dialog away.
+            glib::idle_add_local_once(cb);
         }
+        dlg.close();
     });
 
     dialog.present();

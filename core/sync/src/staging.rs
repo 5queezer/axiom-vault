@@ -147,22 +147,27 @@ impl StagingArea {
                         now.format("%Y%m%d_%H%M%S"),
                         now.timestamp_subsec_micros()
                     );
-                    let corrupt_path = registry_path
-                        .with_file_name(format!("staging_registry.json.corrupt-{}", ts));
+                    use rand::RngExt;
+                    let mut rand_bytes = [0u8; 8];
+                    rand::rng().fill(&mut rand_bytes[..]);
+                    let mut rand_suffix = String::with_capacity(rand_bytes.len() * 2);
+                    for byte in rand_bytes {
+                        use std::fmt::Write as _;
+                        let _ = write!(&mut rand_suffix, "{byte:02x}");
+                    }
+                    let corrupt_path = registry_path.with_file_name(format!(
+                        "staging_registry.json.corrupt-{}-{}",
+                        ts, rand_suffix
+                    ));
                     warn!(
                         "staging registry at {} is corrupt ({}); preserving as {} and starting a fresh registry (audit L-7)",
                         registry_path.display(),
                         e,
                         corrupt_path.display()
                     );
-                    if let Err(rename_err) = fs::rename(&registry_path, &corrupt_path).await {
-                        warn!(
-                            "failed to rename corrupt staging registry {} -> {}: {}",
-                            registry_path.display(),
-                            corrupt_path.display(),
-                            rename_err
-                        );
-                    }
+                    fs::rename(&registry_path, &corrupt_path)
+                        .await
+                        .map_err(Error::Io)?;
                     HashMap::new()
                 }
             }
@@ -548,7 +553,7 @@ mod tests {
     /// Audit M-6 regression lock: the `corrupt-*` suffix on the renamed
     /// registry must include a 6-digit microsecond segment, not the 0-length
     /// segment chrono's misused `%6f` width directive produced.
-    /// Shape: `staging_registry.json.corrupt-\d{8}_\d{6}_\d{6}`.
+    /// Shape: `staging_registry.json.corrupt-\d{8}_\d{6}_\d{6}-[0-9a-f]{16}`.
     #[tokio::test]
     async fn test_corrupt_registry_rename_suffix_has_microseconds() {
         let temp = TempDir::new().unwrap();
@@ -569,14 +574,22 @@ mod tests {
         }
         let suffix = suffix.expect("corrupt sibling must exist");
 
-        // Must be exactly YYYYMMDD_HHMMSS_uuuuuu = 8+1+6+1+6 = 22 chars.
+        let (timestamp, rand_suffix) = suffix
+            .rsplit_once('-')
+            .expect("corrupt suffix must include a random hex suffix");
+        assert_eq!(rand_suffix.len(), 16);
+        assert!(rand_suffix
+            .chars()
+            .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)));
+
+        // Timestamp must be exactly YYYYMMDD_HHMMSS_uuuuuu = 8+1+6+1+6 = 22 chars.
         assert_eq!(
-            suffix.len(),
+            timestamp.len(),
             22,
-            "corrupt suffix `{}` has unexpected length (chrono %6f bug?)",
-            suffix
+            "corrupt timestamp `{}` has unexpected length (chrono %6f bug?)",
+            timestamp
         );
-        let parts: Vec<&str> = suffix.split('_').collect();
+        let parts: Vec<&str> = timestamp.split('_').collect();
         assert_eq!(
             parts.len(),
             3,

@@ -235,10 +235,16 @@ mod tests {
         // Outer guard must not fire — the bounded client should have
         // returned its own timeout well before 2s elapsed.
         let inner = result.expect("bounded client did not hang past its own timeout");
+        let err = match inner {
+            Err(err) => err,
+            Ok(resp) => panic!(
+                "request should have timed out, got status: {}",
+                resp.status()
+            ),
+        };
         assert!(
-            inner.is_err(),
-            "request should have failed (timeout), got: {:?}",
-            inner.map(|r| r.status())
+            err.is_timeout(),
+            "request should have timed out, got: {err:?}"
         );
     }
 }

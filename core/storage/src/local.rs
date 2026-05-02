@@ -149,6 +149,7 @@ impl StorageProvider for LocalProvider {
         // platform defaults).
         #[cfg(unix)]
         {
+            use std::os::unix::fs::PermissionsExt;
             use tokio::io::AsyncWriteExt;
 
             // tokio::fs::OpenOptions exposes `mode()` directly on Unix
@@ -159,6 +160,8 @@ impl StorageProvider for LocalProvider {
                 .create_new(true)
                 .mode(FILE_MODE)
                 .open(&tmp_path)
+                .await?;
+            tokio::fs::set_permissions(&tmp_path, std::fs::Permissions::from_mode(FILE_MODE))
                 .await?;
             if let Err(e) = file.write_all(&data).await {
                 let _ = std::fs::remove_file(&tmp_path);
@@ -308,12 +311,16 @@ impl StorageProvider for LocalProvider {
         // local user could enter or list it.
         #[cfg(unix)]
         {
-            use std::os::unix::fs::DirBuilderExt;
+            use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
             let fs_path_blocking = fs_path.clone();
             tokio::task::spawn_blocking(move || {
                 std::fs::DirBuilder::new()
                     .mode(DIR_MODE)
-                    .create(&fs_path_blocking)
+                    .create(&fs_path_blocking)?;
+                std::fs::set_permissions(
+                    &fs_path_blocking,
+                    std::fs::Permissions::from_mode(DIR_MODE),
+                )
             })
             .await
             .map_err(|e| Error::Storage(format!("spawn_blocking join error: {}", e)))??;
@@ -391,12 +398,16 @@ impl StorageProvider for LocalProvider {
             // expose the new directory at the umask-affected mode.
             #[cfg(unix)]
             {
-                use std::os::unix::fs::DirBuilderExt;
+                use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
                 let to_blocking = to_path.clone();
                 tokio::task::spawn_blocking(move || {
                     std::fs::DirBuilder::new()
                         .mode(DIR_MODE)
-                        .create(&to_blocking)
+                        .create(&to_blocking)?;
+                    std::fs::set_permissions(
+                        &to_blocking,
+                        std::fs::Permissions::from_mode(DIR_MODE),
+                    )
                 })
                 .await
                 .map_err(|e| Error::Storage(format!("spawn_blocking join error: {}", e)))??;
@@ -406,38 +417,40 @@ impl StorageProvider for LocalProvider {
                 fs::create_dir(&to_path).await?;
             }
         } else {
-            // Read source then create destination atomically with restrictive
-            // mode (Unix), mirroring `upload`. `fs::copy` followed by
-            // `set_permissions` would briefly expose the destination at the
-            // umask-affected mode (TOCTOU).
-            let data = fs::read(&from_path).await?;
+            // Stream the source into a freshly-created destination instead of
+            // loading the whole vault object into memory. The Unix path keeps
+            // restrictive creation mode and then repairs exact bits in case a
+            // restrictive umask removed owner permissions.
             #[cfg(unix)]
             {
-                use tokio::io::AsyncWriteExt;
-                let mut file = tokio::fs::OpenOptions::new()
+                use std::os::unix::fs::PermissionsExt;
+                let mut source = fs::File::open(&from_path).await?;
+                let mut destination = tokio::fs::OpenOptions::new()
                     .write(true)
                     .create_new(true)
                     .mode(FILE_MODE)
                     .open(&to_path)
                     .await?;
-                if let Err(e) = file.write_all(&data).await {
+                tokio::fs::set_permissions(&to_path, std::fs::Permissions::from_mode(FILE_MODE))
+                    .await?;
+                if let Err(e) = tokio::io::copy(&mut source, &mut destination).await {
                     let _ = std::fs::remove_file(&to_path);
                     return Err(e.into());
                 }
-                if let Err(e) = file.sync_all().await {
+                if let Err(e) = destination.sync_all().await {
                     let _ = std::fs::remove_file(&to_path);
                     return Err(e.into());
                 }
             }
             #[cfg(not(unix))]
             {
-                use tokio::io::AsyncWriteExt;
-                let mut file = fs::File::create(&to_path).await?;
-                if let Err(e) = file.write_all(&data).await {
+                let mut source = fs::File::open(&from_path).await?;
+                let mut destination = fs::File::create_new(&to_path).await?;
+                if let Err(e) = tokio::io::copy(&mut source, &mut destination).await {
                     let _ = std::fs::remove_file(&to_path);
                     return Err(e.into());
                 }
-                if let Err(e) = file.sync_all().await {
+                if let Err(e) = destination.sync_all().await {
                     let _ = std::fs::remove_file(&to_path);
                     return Err(e.into());
                 }

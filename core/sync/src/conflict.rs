@@ -117,7 +117,7 @@ impl ConflictResolver {
     /// Generate a conflict-renamed path
     /// (e.g., "file.txt" -> "file_conflict_20240115_123456_123456_a1b2.txt").
     ///
-    /// The suffix combines a microsecond-resolution timestamp and a 4-char
+    /// The suffix combines a microsecond-resolution timestamp and a 16-char
     /// random hex tag so two conflicts on the same path within the same
     /// wall-clock second cannot collide (audit M-6,
     /// SECURITY_AUDIT_2026-04-21.md).
@@ -136,17 +136,27 @@ impl ConflictResolver {
             now.timestamp_subsec_micros()
         );
 
-        // 16 random bits rendered as 4 lowercase hex chars.
-        let mut rand_bytes = [0u8; 2];
+        // 64 random bits rendered as 16 lowercase hex chars.
+        let mut rand_bytes = [0u8; 8];
         rand::rng().fill(&mut rand_bytes[..]);
-        let rand_suffix = format!("{:02x}{:02x}", rand_bytes[0], rand_bytes[1]);
+        let mut rand_suffix = String::with_capacity(rand_bytes.len() * 2);
+        for byte in rand_bytes {
+            use std::fmt::Write as _;
+            let _ = write!(&mut rand_suffix, "{byte:02x}");
+        }
 
-        let new_path = if let Some(dot_pos) = original_str.rfind('.') {
-            let (name, ext) = original_str.split_at(dot_pos);
-            format!("{}_conflict_{}_{}{}", name, timestamp, rand_suffix, ext)
-        } else {
-            format!("{}_conflict_{}_{}", original_str, timestamp, rand_suffix)
+        let (parent, file_name) = match original_str.rsplit_once('/') {
+            Some((dir, file_name)) => (format!("{dir}/"), file_name),
+            None => (String::new(), original_str.as_str()),
         };
+
+        let renamed_file = if let Some(dot_pos) = file_name.rfind('.').filter(|&pos| pos > 0) {
+            let (name, ext) = file_name.split_at(dot_pos);
+            format!("{name}_conflict_{timestamp}_{rand_suffix}{ext}")
+        } else {
+            format!("{file_name}_conflict_{timestamp}_{rand_suffix}")
+        };
+        let new_path = format!("{parent}{renamed_file}");
 
         VaultPath::parse(&new_path)
     }
@@ -257,14 +267,40 @@ mod tests {
         assert!(path_str.starts_with("/docs/README_conflict_"));
     }
 
+    #[test]
+    fn test_generate_conflict_path_only_splits_final_component_extension() {
+        let resolver = ConflictResolver::default();
+        let original = VaultPath::parse("/docs.v1/report").unwrap();
+        let conflict_path = resolver.generate_conflict_path(&original).unwrap();
+
+        let path_str = conflict_path.to_string();
+        assert!(
+            path_str.starts_with("/docs.v1/report_conflict_"),
+            "conflict path should rename only final component, got {path_str}"
+        );
+    }
+
+    #[test]
+    fn test_generate_conflict_path_preserves_dotfile_stem() {
+        let resolver = ConflictResolver::default();
+        let original = VaultPath::parse("/docs/.env").unwrap();
+        let conflict_path = resolver.generate_conflict_path(&original).unwrap();
+
+        let path_str = conflict_path.to_string();
+        assert!(
+            path_str.starts_with("/docs/.env_conflict_"),
+            "dotfile should be treated as a filename without extension, got {path_str}"
+        );
+    }
+
     /// Audit M-6: conflict paths must include a sub-second component and a
     /// random suffix so same-second collisions are astronomically unlikely.
     /// Format we expect (for `/docs/report.pdf`):
-    ///   /docs/report_conflict_YYYYMMDD_HHMMSS_uuuuuu_xxxx.pdf
+    ///   /docs/report_conflict_YYYYMMDD_HHMMSS_uuuuuu_xxxxxxxxxxxxxxxx.pdf
     ///   - YYYYMMDD     : 8 digits
     ///   - HHMMSS       : 6 digits
     ///   - uuuuuu       : 6 digits microseconds
-    ///   - xxxx         : 4 lowercase hex chars
+    ///   - xxxxxxxxxxxxxxxx : 16 lowercase hex chars
     #[test]
     fn test_generate_conflict_path_format_includes_random_suffix() {
         let resolver = ConflictResolver::default();
@@ -280,11 +316,11 @@ mod tests {
             .strip_suffix(".pdf")
             .expect("conflict path should preserve the original extension");
 
-        // Now `stem` should look like: 20240115_123456_123456_a1b2
-        // i.e. 8 + 1 + 6 + 1 + 6 + 1 + 4 = 27 chars.
+        // Now `stem` should look like: 20240115_123456_123456_a1b2c3d4e5f60708
+        // i.e. 8 + 1 + 6 + 1 + 6 + 1 + 16 = 39 chars.
         assert_eq!(
             stem.len(),
-            27,
+            39,
             "conflict path stem `{}` has unexpected length",
             stem
         );
@@ -306,8 +342,8 @@ mod tests {
         // Microseconds (6 digits)
         assert_eq!(parts[2].len(), 6);
         assert!(parts[2].chars().all(|c| c.is_ascii_digit()));
-        // Random hex suffix (4 lowercase hex chars)
-        assert_eq!(parts[3].len(), 4);
+        // Random hex suffix (16 lowercase hex chars)
+        assert_eq!(parts[3].len(), 16);
         assert!(parts[3]
             .chars()
             .all(|c| c.is_ascii_hexdigit() && (c.is_ascii_digit() || c.is_ascii_lowercase())));
@@ -330,7 +366,7 @@ mod tests {
     }
 
     /// Audit M-6 regression lock: the generated path must match the exact
-    /// shape `_conflict_\d{8}_\d{6}_\d{6}_[0-9a-f]{4}` (with extension
+    /// shape `_conflict_\d{8}_\d{6}_\d{6}_[0-9a-f]{16}` (with extension
     /// preserved). This guards against a recurrence of the chrono `%6f`
     /// width-vs-microsecond confusion that produced a 0-length microsecond
     /// segment.
@@ -341,17 +377,17 @@ mod tests {
         let conflict_path = resolver.generate_conflict_path(&original).unwrap();
         let path_str = conflict_path.to_string();
 
-        // Hand-rolled regex match for `_conflict_\d{8}_\d{6}_\d{6}_[0-9a-f]{4}`
+        // Hand-rolled regex match for `_conflict_\d{8}_\d{6}_\d{6}_[0-9a-f]{16}`
         // anchored to "/docs/report" + suffix + ".pdf".
         let suffix = path_str
             .strip_prefix("/docs/report")
             .and_then(|s| s.strip_suffix(".pdf"))
             .expect("conflict path must preserve stem and extension");
-        // suffix should be: _conflict_YYYYMMDD_HHMMSS_uuuuuu_xxxx
-        // i.e. "_conflict_" (10) + 8 + 1 + 6 + 1 + 6 + 1 + 4 = 37 chars.
+        // suffix should be: _conflict_YYYYMMDD_HHMMSS_uuuuuu_xxxxxxxxxxxxxxxx
+        // i.e. "_conflict_" (10) + 8 + 1 + 6 + 1 + 6 + 1 + 16 = 49 chars.
         assert_eq!(
             suffix.len(),
-            37,
+            49,
             "suffix `{}` has unexpected length",
             suffix
         );
@@ -375,8 +411,8 @@ mod tests {
             assert!(chars.next().unwrap().is_ascii_digit());
         }
         assert_eq!(chars.next(), Some('_'));
-        // 4 lowercase hex chars
-        for _ in 0..4 {
+        // 16 lowercase hex chars
+        for _ in 0..16 {
             let c = chars.next().unwrap();
             assert!(c.is_ascii_digit() || ('a'..='f').contains(&c));
         }

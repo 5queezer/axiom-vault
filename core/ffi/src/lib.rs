@@ -883,13 +883,12 @@ mod tests {
     /// Rather than reading freed memory (which is UB), we verify the wipe by
     /// reimplementing the free logic in safe code: manually reclaim a matching
     /// `CString`, inspect its bytes to confirm they match the mnemonic, then
-    /// apply the same `write_bytes` + fence sequence that
+    /// apply the same `zeroize::Zeroize` primitive that
     /// `axiom_recovery_words_free` performs and assert the result.
     ///
     /// This is a structural check on the primitive used inside the FFI free
-    /// function — it ensures the compiler cannot elide the wipe under the
-    /// compiler_fence and that the byte range covers the full C string
-    /// including the NUL terminator.
+    /// function — it ensures the wipe covers the full C string including the
+    /// NUL terminator.
     #[test]
     fn recovery_words_free_wipes_bytes_before_drop() {
         let secret = Zeroizing::new("witness witness witness witness".to_string());
@@ -904,13 +903,9 @@ mod tests {
         let mut bytes = cstring.into_bytes_with_nul();
         assert_eq!(bytes[0], b'w');
         assert!(bytes.ends_with(&[0]));
-        let len = bytes.len();
-        let ptr = bytes.as_mut_ptr();
-
         // Apply the same wipe as the FFI free.
-        // SAFETY: exclusive ownership via `bytes`; writing `len` bytes is in-bounds.
-        unsafe { std::ptr::write_bytes(ptr, 0, len) };
-        std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
+        use zeroize::Zeroize;
+        bytes.zeroize();
 
         // The buffer is now all zeros while still owned.
         assert!(bytes.iter().all(|&b| b == 0), "buffer not fully zeroed");

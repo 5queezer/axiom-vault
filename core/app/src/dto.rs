@@ -14,7 +14,28 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use zeroize::Zeroizing;
+use zeroize::{Zeroize, Zeroizing};
+
+fn zeroize_json_value(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Null | serde_json::Value::Bool(_) | serde_json::Value::Number(_) => {}
+        serde_json::Value::String(s) => s.zeroize(),
+        serde_json::Value::Array(items) => {
+            for item in items.iter_mut() {
+                zeroize_json_value(item);
+            }
+            items.clear();
+        }
+        serde_json::Value::Object(map) => {
+            let entries = std::mem::take(map);
+            for (mut key, mut item) in entries {
+                key.zeroize();
+                zeroize_json_value(&mut item);
+            }
+        }
+    }
+    *value = serde_json::Value::Null;
+}
 
 /// Information about an open vault.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -104,6 +125,12 @@ pub struct CreateVaultParams {
     pub provider_config: serde_json::Value,
 }
 
+impl Drop for CreateVaultParams {
+    fn drop(&mut self) {
+        zeroize_json_value(&mut self.provider_config);
+    }
+}
+
 impl std::fmt::Debug for CreateVaultParams {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CreateVaultParams")
@@ -130,6 +157,12 @@ pub struct OpenVaultParams {
     pub provider_type: String,
     /// Provider-specific configuration.
     pub provider_config: serde_json::Value,
+}
+
+impl Drop for OpenVaultParams {
+    fn drop(&mut self) {
+        zeroize_json_value(&mut self.provider_config);
+    }
 }
 
 impl std::fmt::Debug for OpenVaultParams {
@@ -161,6 +194,12 @@ pub struct RecoverVaultParams {
     pub provider_config: serde_json::Value,
 }
 
+impl Drop for RecoverVaultParams {
+    fn drop(&mut self) {
+        zeroize_json_value(&mut self.provider_config);
+    }
+}
+
 impl std::fmt::Debug for RecoverVaultParams {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RecoverVaultParams")
@@ -175,6 +214,18 @@ impl std::fmt::Debug for RecoverVaultParams {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn zeroize_json_value_clears_nested_secret_strings() {
+        let mut value = serde_json::json!({
+            "access_token": "secret-access-token",
+            "nested": ["refresh-token", {"api_key": "secret-api-key"}],
+        });
+
+        zeroize_json_value(&mut value);
+
+        assert_eq!(value, serde_json::Value::Null);
+    }
 
     /// Audit hardening: `Zeroizing<T>` delegates `Debug` to inner `T`, so a
     /// derived `Debug` on these DTOs would print the password / mnemonic in
