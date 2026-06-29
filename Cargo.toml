@@ -23,7 +23,7 @@ license = "Apache-2.0"
 [workspace.dependencies]
 # Crypto
 argon2 = "0.5"
-chacha20poly1305 = "0.10"
+chacha20poly1305 = "0.11"
 blake2 = "0.10"
 rand = "0.10.1"
 zeroize = { version = "1.7", features = ["derive"] }
@@ -67,7 +67,7 @@ tokio-util = { version = "0.7", features = ["io"] }
 bytes = "1.5"
 
 # Database
-rusqlite = { version = "0.39", features = ["bundled"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
 
 # Desktop
 fuser = "0.17"
