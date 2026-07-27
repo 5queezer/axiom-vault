@@ -18,7 +18,7 @@ axiomvault-storage = { path = "../storage" }
 axiomvault-crypto = { path = "../crypto" }
 
 # FUSE (optional, requires libfuse3-dev or macFUSE)
-fuser = { version = "0.17", optional = true }
+fuser = { version = "0.18", optional = true }
 libc = { version = "0.2", optional = true }
 
 # Async
