@@ -55,7 +55,7 @@ proptest = "1.0"
 tempfile = "3.8"
 
 # Utils
-base64 = "0.22.1"
+base64 = "0.23.0"
 uuid = { version = "1.23", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 
@@ -70,7 +70,7 @@ bytes = "1.5"
 rusqlite = { version = "0.40", features = ["bundled"] }
 
 # Desktop
-fuser = "0.17"
+fuser = "0.18"
 
 # Browser opening
 open = "5.3"
