@@ -101,22 +101,17 @@ impl MigrationRegistry {
         let mut current = *from;
 
         while current != *to {
-            let next = self
+            let migration = self
                 .migrations
                 .iter()
-                .find(|m| m.source_version() == current);
-            match next {
-                Some(migration) => {
-                    let target = migration.target_version();
-                    // Ensure we're moving forward and not past our target.
-                    if target.minor > to.minor || target.major != to.major {
-                        return None;
-                    }
-                    path.push(migration.as_ref());
-                    current = target;
-                }
-                None => return None,
+                .find(|m| m.source_version() == current)?;
+            let target = migration.target_version();
+            // Ensure we're moving forward and not past our target.
+            if target.minor > to.minor || target.major != to.major {
+                return None;
             }
+            path.push(migration.as_ref());
+            current = target;
         }
 
         Some(path)
