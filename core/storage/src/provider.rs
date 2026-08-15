@@ -71,6 +71,20 @@ pub trait StorageProvider: Send + Sync {
     /// For large files, this allows streaming without loading entire file into memory.
     async fn upload_stream(&self, path: &VaultPath, stream: ByteStream) -> Result<Metadata>;
 
+    /// Upload a stream whose complete byte length is known in advance.
+    ///
+    /// Providers with resumable/chunked APIs should override this method so the
+    /// transport can remain bounded-memory. The compatibility default delegates
+    /// to `upload_stream`.
+    async fn upload_sized_stream(
+        &self,
+        path: &VaultPath,
+        stream: ByteStream,
+        _total_size: u64,
+    ) -> Result<Metadata> {
+        self.upload_stream(path, stream).await
+    }
+
     /// Download data from storage.
     ///
     /// # Preconditions

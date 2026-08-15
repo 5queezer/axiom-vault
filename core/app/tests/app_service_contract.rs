@@ -731,7 +731,8 @@ async fn close_wipes_index() {
 async fn import_and_export_file() {
     let svc = service_with_vault().await;
 
-    let tmp = std::env::temp_dir().join("axiomvault_test_import.txt");
+    let dir = tempfile::TempDir::new().unwrap();
+    let tmp = dir.path().join("import.txt");
     std::fs::write(&tmp, b"imported content").unwrap();
 
     svc.import_file(tmp.to_str().unwrap(), "/imported.txt")
@@ -741,7 +742,7 @@ async fn import_and_export_file() {
     let content = svc.read_file("/imported.txt").await.unwrap();
     assert_eq!(content, b"imported content");
 
-    let export_path = std::env::temp_dir().join("axiomvault_test_export.txt");
+    let export_path = dir.path().join("export.txt");
     svc.export_file("/imported.txt", export_path.to_str().unwrap())
         .await
         .unwrap();

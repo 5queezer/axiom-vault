@@ -831,10 +831,11 @@ async fn cmd_add(vault_path: &Path, source: &Path, dest: &str) -> Result<()> {
     let password = prompt_password("Enter password: ")?;
     let path_str = vault_path.to_string_lossy().to_string();
 
-    // Read source file
-    let content = tokio::fs::read(source)
+    // Inspect source without reading it into memory.
+    let source_size = tokio::fs::metadata(source)
         .await
-        .context("Failed to read source file")?;
+        .context("Failed to inspect source file")?
+        .len();
 
     let manager = VaultManager::new();
     let provider_config = serde_json::json!({
@@ -849,15 +850,11 @@ async fn cmd_add(vault_path: &Path, source: &Path, dest: &str) -> Result<()> {
     let ops = VaultOperations::new(&session)?;
     let dest_path = VaultPath::parse(dest).context("Invalid destination path")?;
 
-    ops.create_file(&dest_path, &content)
+    ops.create_file_from_path(&dest_path, source)
         .await
         .context("Failed to add file")?;
 
-    println!(
-        "File added successfully: {} ({} bytes)",
-        dest,
-        content.len()
-    );
+    println!("File added successfully: {} ({} bytes)", dest, source_size);
 
     Ok(())
 }
@@ -882,19 +879,18 @@ async fn cmd_extract(vault_path: &Path, source: &str, dest: &Path) -> Result<()>
     let ops = VaultOperations::new(&session)?;
     let source_path = VaultPath::parse(source).context("Invalid source path")?;
 
-    let content = ops
-        .read_file(&source_path)
+    ops.export_file_to_path(&source_path, dest)
         .await
-        .context("Failed to read file from vault")?;
-
-    tokio::fs::write(dest, &content)
+        .context("Failed to extract file from vault")?;
+    let output_size = tokio::fs::metadata(dest)
         .await
-        .context("Failed to write output file")?;
+        .context("Failed to inspect output file")?
+        .len();
 
     println!(
         "File extracted successfully: {} ({} bytes)",
         dest.display(),
-        content.len()
+        output_size
     );
 
     Ok(())
