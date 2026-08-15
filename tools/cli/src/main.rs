@@ -887,14 +887,23 @@ async fn cmd_extract(vault_path: &Path, source: &str, dest: &Path) -> Result<()>
         .await
         .context("Failed to read file from vault")?;
 
-    tokio::fs::write(dest, &content)
-        .await
-        .context("Failed to write output file")?;
+    let output = dest.to_path_buf();
+    let content_len = content.len();
+    tokio::task::spawn_blocking(move || {
+        axiomvault_common::write_sensitive_file(
+            output,
+            &content,
+            axiomvault_common::SensitiveFileMode::CreateNew,
+        )
+    })
+    .await
+    .context("Secure output task failed")?
+    .context("Failed to create output file securely")?;
 
     println!(
         "File extracted successfully: {} ({} bytes)",
         dest.display(),
-        content.len()
+        content_len
     );
 
     Ok(())
@@ -1359,16 +1368,17 @@ async fn cmd_gdrive_auth(
     let tokens_json =
         serde_json::to_string_pretty(&tokens).context("Failed to serialize tokens")?;
 
-    tokio::fs::write(output, &tokens_json)
-        .await
-        .context("Failed to write tokens file")?;
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let perms = std::fs::Permissions::from_mode(0o600);
-        std::fs::set_permissions(output, perms).context("Failed to set token file permissions")?;
-    }
+    let token_path = output.to_path_buf();
+    tokio::task::spawn_blocking(move || {
+        axiomvault_common::write_sensitive_file(
+            token_path,
+            tokens_json.as_bytes(),
+            axiomvault_common::SensitiveFileMode::CreateNew,
+        )
+    })
+    .await
+    .context("Secure token-write task failed")?
+    .context("Failed to create tokens file securely")?;
 
     println!();
     println!("Authentication successful!");
@@ -1417,8 +1427,10 @@ async fn cmd_gdrive_create(
         auth_config: None,
     };
 
-    let provider_config =
+    let mut provider_config =
         serde_json::to_value(gdrive_config).context("Failed to serialize GDrive config")?;
+    provider_config["credential_ref"] =
+        serde_json::Value::String(format!("local:gdrive:{folder_id}"));
 
     let creation = manager
         .create_vault(vault_id, &password, "gdrive", provider_config, kdf_params)
@@ -1453,8 +1465,10 @@ async fn cmd_gdrive_open(folder_id: &str, tokens_path: &Path) -> Result<()> {
         auth_config: None,
     };
 
-    let provider_config =
+    let mut provider_config =
         serde_json::to_value(gdrive_config).context("Failed to serialize GDrive config")?;
+    provider_config["credential_ref"] =
+        serde_json::Value::String(format!("local:gdrive:{folder_id}"));
 
     let manager = VaultManager::new();
 

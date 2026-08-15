@@ -730,8 +730,9 @@ async fn close_wipes_index() {
 #[tokio::test]
 async fn import_and_export_file() {
     let svc = service_with_vault().await;
+    let local = tempfile::tempdir().unwrap();
 
-    let tmp = std::env::temp_dir().join("axiomvault_test_import.txt");
+    let tmp = local.path().join("import.txt");
     std::fs::write(&tmp, b"imported content").unwrap();
 
     svc.import_file(tmp.to_str().unwrap(), "/imported.txt")
@@ -741,17 +742,32 @@ async fn import_and_export_file() {
     let content = svc.read_file("/imported.txt").await.unwrap();
     assert_eq!(content, b"imported content");
 
-    let export_path = std::env::temp_dir().join("axiomvault_test_export.txt");
+    let export_path = local.path().join("export.txt");
     svc.export_file("/imported.txt", export_path.to_str().unwrap())
         .await
         .unwrap();
 
     let exported = std::fs::read(&export_path).unwrap();
     assert_eq!(exported, b"imported content");
+}
 
-    // Cleanup.
-    let _ = std::fs::remove_file(&tmp);
-    let _ = std::fs::remove_file(&export_path);
+#[tokio::test]
+async fn export_refuses_to_overwrite_existing_plaintext() {
+    let svc = service_with_vault().await;
+    svc.create_file("/secret.txt", b"vault secret")
+        .await
+        .unwrap();
+    let local = tempfile::tempdir().unwrap();
+    let destination = local.path().join("existing.txt");
+    std::fs::write(&destination, b"keep me").unwrap();
+
+    let error = svc
+        .export_file("/secret.txt", destination.to_str().unwrap())
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, AppError::Storage(_)));
+    assert_eq!(std::fs::read(destination).unwrap(), b"keep me");
 }
 
 #[tokio::test]

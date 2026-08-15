@@ -12,6 +12,41 @@ use axiomvault_crypto::recovery::{
 use axiomvault_crypto::{KdfParams, MasterKey, Salt};
 use zeroize::Zeroizing;
 
+fn contains_oauth_credentials(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Object(entries) => entries.iter().any(|(key, value)| {
+            let normalized = key.to_ascii_lowercase().replace('-', "_");
+            matches!(
+                normalized.as_str(),
+                "tokens"
+                    | "auth_config"
+                    | "access_token"
+                    | "refresh_token"
+                    | "client_secret"
+                    | "authorization_code"
+                    | "code_verifier"
+            ) || contains_oauth_credentials(value)
+        }),
+        serde_json::Value::Array(values) => values.iter().any(contains_oauth_credentials),
+        _ => false,
+    }
+}
+
+fn serialize_provider_config<S>(
+    value: &serde_json::Value,
+    serializer: S,
+) -> std::result::Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    if contains_oauth_credentials(value) {
+        return Err(serde::ser::Error::custom(
+            "OAuth credentials are forbidden in serialized vault configuration",
+        ));
+    }
+    value.serialize(serializer)
+}
+
 /// Vault format version for migration support.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct VaultVersion {
@@ -79,6 +114,7 @@ pub struct VaultConfig {
     /// Storage provider type (e.g., "local", "gdrive").
     pub provider_type: String,
     /// Provider-specific configuration.
+    #[serde(serialize_with = "serialize_provider_config")]
     pub provider_config: serde_json::Value,
     /// Vault creation timestamp.
     pub created_at: DateTime<Utc>,
@@ -503,6 +539,31 @@ mod tests {
         let mk_from_recovery = config.verify_recovery_key(&rk).unwrap().unwrap();
 
         assert_eq!(mk_from_password.as_bytes(), mk_from_recovery.as_bytes());
+    }
+
+    #[test]
+    fn oauth_credentials_cannot_be_serialized_in_vault_config() {
+        let mut config = VaultConfig::new(
+            VaultId::new("cloud-secrets").unwrap(),
+            b"password",
+            "gdrive",
+            serde_json::json!({
+                "credential_schema": 1,
+                "credential_ref": "local:gdrive:test",
+                "folder_id": "folder"
+            }),
+            KdfParams::moderate(),
+        )
+        .unwrap()
+        .config;
+        config.provider_config["tokens"] = serde_json::json!({
+            "access_token": "must-never-serialize",
+            "refresh_token": "must-never-serialize",
+            "expires_at": "2099-01-01T00:00:00Z"
+        });
+
+        let error = serde_json::to_string(&config).unwrap_err();
+        assert!(error.to_string().contains("OAuth credentials"));
     }
 
     #[test]

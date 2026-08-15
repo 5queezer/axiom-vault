@@ -564,10 +564,17 @@ impl AppService {
     /// Export a vault file to the local filesystem.
     pub async fn export_file(&self, vault_path: &str, local_path: &str) -> AppResult<()> {
         let content = self.read_file(vault_path).await?;
-
-        tokio::fs::write(local_path, content)
-            .await
-            .map_err(|e| AppError::Storage(format!("Failed to write local file: {}", e)))?;
+        let destination = std::path::PathBuf::from(local_path);
+        tokio::task::spawn_blocking(move || {
+            axiomvault_common::write_sensitive_file(
+                destination,
+                &content,
+                axiomvault_common::SensitiveFileMode::CreateNew,
+            )
+        })
+        .await
+        .map_err(|e| AppError::Storage(format!("Export task failed: {e}")))?
+        .map_err(|e| AppError::Storage(format!("Failed to write local file securely: {e}")))?;
 
         Ok(())
     }

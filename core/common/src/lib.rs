@@ -5,8 +5,10 @@
 
 pub mod error;
 pub mod health;
+pub mod secure_file;
 pub mod types;
 
 pub use error::{Error, Result};
 pub use health::{DiagnosticResult, HealthReport, HealthStatus, Severity};
+pub use secure_file::{write_sensitive_file, SensitiveFileMode};
 pub use types::{VaultId, VaultPath};
