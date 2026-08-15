@@ -228,9 +228,11 @@ dependencies = [
 name = "axiomvault-common"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "proptest",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
  "zeroize",
 ]
