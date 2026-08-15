@@ -18,6 +18,8 @@ async-trait.workspace = true
 uuid.workspace = true
 chrono.workspace = true
 base64.workspace = true
+blake2.workspace = true
+dirs.workspace = true
 tracing.workspace = true
 zeroize.workspace = true
 

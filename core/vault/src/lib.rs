@@ -11,14 +11,19 @@
 //! handling all encryption/decryption operations transparently.
 
 pub mod config;
+pub mod freshness;
 pub mod health;
 pub mod manager;
+mod manifest;
 pub mod migration;
 pub mod operations;
 pub mod session;
 pub mod tree;
 
 pub use config::{VaultConfig, VaultVersion};
+pub use freshness::{
+    FreshnessAnchor, InMemoryFreshnessAnchor, LocalFileFreshnessAnchor, UnavailableFreshnessAnchor,
+};
 // Re-export unified health types from common alongside vault-specific check functions.
 pub use axiomvault_common::health::{DiagnosticResult, HealthReport, HealthStatus, Severity};
 pub use health::{check_vault_health, check_vault_structure};
