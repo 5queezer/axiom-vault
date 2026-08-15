@@ -19,6 +19,7 @@ pub mod events;
 pub mod local_index;
 pub mod service;
 
+pub use axiomvault_sync::{ChangeType as SyncChangeType, SyncConfig, SyncResult};
 pub use dto::*;
 pub use error::{AppError, AppResult};
 pub use events::{AppEvent, EventReceiver, EventSender};
