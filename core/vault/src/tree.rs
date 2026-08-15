@@ -34,6 +34,9 @@ pub struct NodeMetadata {
     pub modified_at: DateTime<Utc>,
     /// ETag for conflict detection.
     pub etag: Option<String>,
+    /// Digest of the encrypted file bytes in the authenticated snapshot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_digest: Option<String>,
 }
 
 /// A node in the vault tree.
@@ -68,6 +71,7 @@ impl TreeNode {
                 created_at: now,
                 modified_at: now,
                 etag: Some(Uuid::new_v4().to_string()),
+                content_digest: None,
             },
             children: HashMap::new(),
         }
@@ -297,6 +301,24 @@ impl VaultTree {
     /// Get the total size of all files in the tree.
     pub fn total_size(&self) -> u64 {
         Self::total_size_recursive(&self.root)
+    }
+
+    /// Return encrypted object names and ciphertext digests for the snapshot manifest.
+    pub(crate) fn object_digests(&self) -> std::collections::BTreeMap<String, String> {
+        fn collect(node: &TreeNode, result: &mut std::collections::BTreeMap<String, String>) {
+            if node.is_file() {
+                if let Some(digest) = &node.metadata.content_digest {
+                    result.insert(node.metadata.encrypted_name.clone(), digest.clone());
+                }
+            }
+            for child in node.children.values() {
+                collect(child, result);
+            }
+        }
+
+        let mut result = std::collections::BTreeMap::new();
+        collect(&self.root, &mut result);
+        result
     }
 
     /// Recursively calculate total size.

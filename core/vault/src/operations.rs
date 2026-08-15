@@ -4,6 +4,7 @@ use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use tracing::{debug, info};
 
 use crate::config::DATA_DIRNAME;
+use crate::manifest::digest;
 use crate::session::VaultSession;
 use axiomvault_common::{Error, Result, VaultPath};
 use axiomvault_crypto::{decrypt, encrypt};
@@ -69,8 +70,13 @@ impl<'a> VaultOperations<'a> {
         let storage_path = VaultPath::parse(DATA_DIRNAME)?.join(&encrypted_name)?;
         self.session
             .provider()
-            .upload(&storage_path, encrypted_content)
+            .upload(&storage_path, encrypted_content.clone())
             .await?;
+
+        {
+            let mut tree = self.session.tree().write().await;
+            tree.get_node_mut(path)?.metadata.content_digest = Some(digest(&encrypted_content));
+        }
 
         self.session.save_tree().await?;
 
@@ -94,17 +100,25 @@ impl<'a> VaultOperations<'a> {
     pub async fn read_file(&self, path: &VaultPath) -> Result<Vec<u8>> {
         debug!("Reading encrypted file");
 
-        let encrypted_name = {
+        let (encrypted_name, expected_digest) = {
             let tree = self.session.tree().read().await;
             let node = tree.get_node(path)?;
             if !node.is_file() {
                 return Err(Error::InvalidInput("Not a file".to_string()));
             }
-            node.metadata.encrypted_name.clone()
+            (
+                node.metadata.encrypted_name.clone(),
+                node.metadata.content_digest.clone(),
+            )
         };
 
         let storage_path = VaultPath::parse(DATA_DIRNAME)?.join(&encrypted_name)?;
         let encrypted_content = self.session.provider().download(&storage_path).await?;
+        if expected_digest.is_some_and(|expected| expected != digest(&encrypted_content)) {
+            return Err(Error::Crypto(
+                "encrypted file does not match the authenticated snapshot".to_string(),
+            ));
+        }
 
         let master_key = self.session.master_key()?;
         let file_key = master_key.derive_file_key(encrypted_name.as_bytes());
@@ -149,6 +163,7 @@ impl<'a> VaultOperations<'a> {
             let node = tree.get_node_mut(path)?;
             node.metadata.size = Some(content.len() as u64);
             node.metadata.modified_at = chrono::Utc::now();
+            node.metadata.content_digest = Some(digest(&encrypted_content));
         }
 
         let storage_path = VaultPath::parse(DATA_DIRNAME)?.join(&encrypted_name)?;

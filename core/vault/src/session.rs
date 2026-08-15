@@ -4,10 +4,12 @@
 //! Keys are automatically zeroized when the session is dropped.
 
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 use uuid::Uuid;
 
 use crate::config::{VaultConfig, META_DIRNAME, TREE_FILENAME};
+use crate::freshness::FreshnessAnchor;
+use crate::manifest::{GenerationManifest, MANIFEST_FILENAME};
 use crate::tree::VaultTree;
 use axiomvault_common::{Error, Result, VaultId, VaultPath};
 use axiomvault_crypto::recovery::RecoveryKey;
@@ -65,6 +67,13 @@ pub struct VaultSession {
     tree: Arc<RwLock<VaultTree>>,
     /// Session state.
     state: SessionState,
+    /// Monotonic snapshot state for manager-created sessions.
+    freshness: Option<FreshnessState>,
+}
+
+struct FreshnessState {
+    anchor: Arc<dyn FreshnessAnchor>,
+    generation: Mutex<u64>,
 }
 
 impl VaultSession {
@@ -82,6 +91,36 @@ impl VaultSession {
         provider: Arc<dyn StorageProvider>,
         tree: VaultTree,
     ) -> Result<Self> {
+        Self::from_master_key_internal(config, master_key, provider, tree, None)
+    }
+
+    pub(crate) fn from_master_key_with_freshness(
+        config: VaultConfig,
+        master_key: MasterKey,
+        provider: Arc<dyn StorageProvider>,
+        tree: VaultTree,
+        anchor: Arc<dyn FreshnessAnchor>,
+        generation: u64,
+    ) -> Result<Self> {
+        Self::from_master_key_internal(
+            config,
+            master_key,
+            provider,
+            tree,
+            Some(FreshnessState {
+                anchor,
+                generation: Mutex::new(generation),
+            }),
+        )
+    }
+
+    fn from_master_key_internal(
+        config: VaultConfig,
+        master_key: MasterKey,
+        provider: Arc<dyn StorageProvider>,
+        tree: VaultTree,
+        freshness: Option<FreshnessState>,
+    ) -> Result<Self> {
         if !config.version.is_compatible() {
             return Err(Error::Vault(format!(
                 "Incompatible vault version: {:?}",
@@ -96,6 +135,7 @@ impl VaultSession {
             provider,
             tree: Arc::new(RwLock::new(tree)),
             state: SessionState::Active,
+            freshness,
         })
     }
 
@@ -129,8 +169,15 @@ impl VaultSession {
 
         let encrypted_bytes = provider.download(&tree_path).await?;
 
+        Self::decrypt_tree_bytes(master_key, &encrypted_bytes)
+    }
+
+    pub(crate) fn decrypt_tree_bytes(
+        master_key: &MasterKey,
+        encrypted_bytes: &[u8],
+    ) -> Result<VaultTree> {
         let tree_key = master_key.derive_file_key(TREE_KEY_CONTEXT);
-        let tree_bytes = decrypt(tree_key.as_bytes(), &encrypted_bytes).map_err(|e| {
+        let tree_bytes = decrypt(tree_key.as_bytes(), encrypted_bytes).map_err(|e| {
             Error::Crypto(format!(
                 "Failed to decrypt tree index (wrong password or corrupted vault): {}",
                 e
@@ -315,7 +362,27 @@ impl VaultSession {
             .map_err(|e| Error::Crypto(format!("Failed to encrypt tree index: {}", e)))?;
 
         let tree_path = VaultPath::parse(META_DIRNAME)?.join(TREE_FILENAME)?;
-        self.provider.upload(&tree_path, encrypted).await?;
+        self.provider.upload(&tree_path, encrypted.clone()).await?;
+
+        if let Some(freshness) = &self.freshness {
+            let mut generation = freshness.generation.lock().await;
+            let next_generation = generation
+                .checked_add(1)
+                .ok_or_else(|| Error::Vault("snapshot generation counter exhausted".to_string()))?;
+            let config_bytes = self.config.to_bytes()?;
+            let manifest = GenerationManifest::new(
+                self.config.id.clone(),
+                next_generation,
+                &encrypted,
+                &config_bytes,
+                tree.object_digests(),
+            );
+            let manifest_bytes = manifest.seal(self.master_key()?)?;
+            let manifest_path = VaultPath::parse(META_DIRNAME)?.join(MANIFEST_FILENAME)?;
+            self.provider.upload(&manifest_path, manifest_bytes).await?;
+            freshness.anchor.store(&self.config.id, next_generation)?;
+            *generation = next_generation;
+        }
         Ok(())
     }
 }
