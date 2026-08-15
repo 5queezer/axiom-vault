@@ -34,6 +34,9 @@ pub struct NodeMetadata {
     pub modified_at: DateTime<Utc>,
     /// ETag for conflict detection.
     pub etag: Option<String>,
+    /// Content encoding version. Zero is the legacy one-shot AEAD format.
+    #[serde(default)]
+    pub content_version: u8,
 }
 
 /// A node in the vault tree.
@@ -68,6 +71,7 @@ impl TreeNode {
                 created_at: now,
                 modified_at: now,
                 etag: Some(Uuid::new_v4().to_string()),
+                content_version: 0,
             },
             children: HashMap::new(),
         }

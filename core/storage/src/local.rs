@@ -2,7 +2,6 @@
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use futures::stream;
 use std::path::{Path, PathBuf};
 use tokio::fs;
 use uuid::Uuid;
@@ -202,13 +201,56 @@ impl StorageProvider for LocalProvider {
 
     async fn upload_stream(&self, path: &VaultPath, mut stream: ByteStream) -> Result<Metadata> {
         use futures::StreamExt;
-        let mut data = Vec::new();
+        use tokio::io::AsyncWriteExt;
 
-        while let Some(chunk) = stream.next().await {
-            data.extend_from_slice(&chunk?);
+        let fs_path = self.to_fs_path(path);
+        let parent_dir = fs_path
+            .parent()
+            .ok_or_else(|| Error::InvalidInput("Cannot write to root path".to_string()))?;
+        if !parent_dir.exists() {
+            return Err(Error::NotFound("Parent directory not found".to_string()));
         }
+        let tmp_path = parent_dir.join(format!(
+            ".{}.tmp.{}",
+            fs_path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("file"),
+            Uuid::new_v4()
+        ));
 
-        self.upload(path, data).await
+        #[cfg(unix)]
+        let mut file = tokio::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(FILE_MODE)
+            .open(&tmp_path)
+            .await?;
+        #[cfg(not(unix))]
+        let mut file = tokio::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp_path)
+            .await?;
+
+        let write_result: Result<()> = async {
+            while let Some(chunk) = stream.next().await {
+                file.write_all(&chunk?).await?;
+            }
+            file.sync_all().await?;
+            Ok(())
+        }
+        .await;
+        if let Err(error) = write_result {
+            let _ = fs::remove_file(&tmp_path).await;
+            return Err(error);
+        }
+        if let Err(error) = fs::rename(&tmp_path, &fs_path).await {
+            let _ = fs::remove_file(&tmp_path).await;
+            return Err(error.into());
+        }
+        let fs_meta = fs::metadata(&fs_path).await?;
+        Ok(self.create_metadata(path, fs_meta))
     }
 
     async fn download(&self, path: &VaultPath) -> Result<Vec<u8>> {
@@ -226,8 +268,18 @@ impl StorageProvider for LocalProvider {
     }
 
     async fn download_stream(&self, path: &VaultPath) -> Result<ByteStream> {
-        let data = self.download(path).await?;
-        let stream = stream::once(async move { Ok(data) });
+        use futures::StreamExt;
+
+        let fs_path = self.to_fs_path(path);
+        if !fs_path.exists() {
+            return Err(Error::NotFound(format!("File not found: {}", path)));
+        }
+        if fs_path.is_dir() {
+            return Err(Error::InvalidInput("Cannot download directory".to_string()));
+        }
+        let file = fs::File::open(fs_path).await?;
+        let stream = tokio_util::io::ReaderStream::with_capacity(file, 64 * 1024)
+            .map(|result| result.map(|bytes| bytes.to_vec()).map_err(Error::from));
         Ok(Box::pin(stream))
     }
 
@@ -634,5 +686,60 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(contents.len(), 2);
+    }
+
+    struct BackpressureProbe {
+        root: PathBuf,
+        state: u8,
+    }
+
+    impl futures::Stream for BackpressureProbe {
+        type Item = Result<Vec<u8>>;
+
+        fn poll_next(
+            mut self: std::pin::Pin<&mut Self>,
+            _cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Option<Self::Item>> {
+            match self.state {
+                0 => {
+                    self.state = 1;
+                    std::task::Poll::Ready(Some(Ok(vec![0x5a; 64 * 1024])))
+                }
+                1 => {
+                    self.state = 2;
+                    let written = std::fs::read_dir(&self.root)
+                        .ok()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(std::result::Result::ok)
+                        .any(|entry| entry.metadata().map(|m| m.len() > 0).unwrap_or(false));
+                    if written {
+                        std::task::Poll::Ready(Some(Ok(vec![0x6b; 64 * 1024])))
+                    } else {
+                        std::task::Poll::Ready(Some(Err(Error::Storage(
+                            "producer polled before prior chunk was written".to_string(),
+                        ))))
+                    }
+                }
+                _ => std::task::Poll::Ready(None),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn upload_stream_preserves_backpressure() {
+        let temp = TempDir::new().unwrap();
+        let provider = LocalProvider::new(temp.path()).unwrap();
+        let path = VaultPath::parse("/large.bin").unwrap();
+        let stream: ByteStream = Box::pin(BackpressureProbe {
+            root: temp.path().to_path_buf(),
+            state: 0,
+        });
+
+        provider.upload_stream(&path, stream).await.unwrap();
+        assert_eq!(
+            provider.metadata(&path).await.unwrap().size,
+            Some(128 * 1024)
+        );
     }
 }

@@ -552,24 +552,55 @@ impl AppService {
 
     // -- File import/export --
 
-    /// Import a local file into the vault.
+    /// Import a local file into the vault with bounded memory.
     pub async fn import_file(&self, local_path: &str, vault_path: &str) -> AppResult<()> {
-        let content = tokio::fs::read(local_path)
+        let path = Self::parse_path(vault_path)?;
+        let size = tokio::fs::metadata(local_path)
             .await
-            .map_err(|e| AppError::Storage(format!("Failed to read local file: {}", e)))?;
-
-        self.create_file(vault_path, &content).await
+            .map_err(|e| AppError::Storage(format!("Failed to inspect local file: {}", e)))?
+            .len();
+        let guard = self.active_vault().await?;
+        let active = guard.as_ref().ok_or(AppError::NoOpenVault)?;
+        Self::ops(active)?
+            .create_file_from_path(&path, local_path)
+            .await
+            .map_err(AppError::from)?;
+        let encrypted_name = active
+            .session
+            .tree()
+            .read()
+            .await
+            .get_node(&path)
+            .map_err(AppError::from)?
+            .metadata
+            .encrypted_name
+            .clone();
+        if let Some(ref index) = active.index {
+            index.upsert_entry(&IndexEntry {
+                path: vault_path.to_string(),
+                encrypted_name,
+                is_directory: false,
+                size: Some(i64::try_from(size).unwrap_or(i64::MAX)),
+                modified_at: now_timestamp(),
+                etag: None,
+            })?;
+        }
+        drop(guard);
+        self.emit(AppEvent::FileCreated {
+            path: vault_path.to_string(),
+        });
+        Ok(())
     }
 
-    /// Export a vault file to the local filesystem.
+    /// Export a vault file to the local filesystem with bounded memory.
     pub async fn export_file(&self, vault_path: &str, local_path: &str) -> AppResult<()> {
-        let content = self.read_file(vault_path).await?;
-
-        tokio::fs::write(local_path, content)
+        let path = Self::parse_path(vault_path)?;
+        let guard = self.active_vault().await?;
+        let active = guard.as_ref().ok_or(AppError::NoOpenVault)?;
+        Self::ops(active)?
+            .export_file_to_path(&path, local_path)
             .await
-            .map_err(|e| AppError::Storage(format!("Failed to write local file: {}", e)))?;
-
-        Ok(())
+            .map_err(AppError::from)
     }
 
     /// Check if a vault exists at the given location.

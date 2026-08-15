@@ -237,6 +237,27 @@ impl StorageProvider for GDriveProvider {
         self.upload_data(path, data, true).await
     }
 
+    async fn upload_sized_stream(
+        &self,
+        path: &VaultPath,
+        stream: ByteStream,
+        total_size: u64,
+    ) -> Result<Metadata> {
+        let (parent_id, name) = self.resolve_parent(path).await?;
+        if self.client.find_file(&name, &parent_id).await?.is_some() {
+            return Err(Error::NotPermitted(
+                "bounded-memory replacement of an existing Google Drive object is not implemented"
+                    .to_string(),
+            ));
+        }
+        let file = self
+            .client
+            .upload_resumable(&name, &parent_id, stream, total_size)
+            .await?;
+        self.cache_path(path, &file.id).await;
+        Ok(self.to_metadata(file, path))
+    }
+
     async fn download(&self, path: &VaultPath) -> Result<Vec<u8>> {
         let file_id = self.resolve_path(path).await?;
         self.client.download(&file_id).await

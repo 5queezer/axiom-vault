@@ -36,7 +36,7 @@ pub use icloud::{ICloudConfig, ICloudProvider};
 pub use local::LocalProvider;
 pub use memory::MemoryProvider;
 pub use onedrive::{OneDriveConfig, OneDriveProvider};
-pub use provider::{ConflictResolution, Metadata, StorageProvider};
+pub use provider::{ByteStream, ConflictResolution, Metadata, StorageProvider};
 pub use rebuild::{
     RaidRebuilder, RebuildCheckpoint, RebuildConfig, RebuildProgress, RebuildResult,
 };

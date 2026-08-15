@@ -33,7 +33,7 @@ AxiomVault encrypts your files locally before they touch any cloud service. A si
 | Key derivation | Argon2id (memory-hard, GPU-resistant) |
 | Filename encryption | Deterministic XChaCha20-Poly1305 |
 | Directory structure | Fully encrypted tree index |
-| Streaming | Chunked encryption (64 KiB) with per-chunk authentication |
+| Streaming | Bounded-memory local/CLI import-export and Google Drive resumable transfer with 64 KiB authenticated chunks; Dropbox, OneDrive, RAID, and FUSE paths remain pending |
 | Key hierarchy | Blake2b-derived file keys, directory keys, and index keys |
 | Memory safety | Automatic zeroization, constant-time comparisons, no plaintext logging |
 
