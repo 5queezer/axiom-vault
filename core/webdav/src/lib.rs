@@ -5,10 +5,11 @@
 //! on write and decrypted on read.
 //!
 //! # Security
-//! - Binds only to `127.0.0.1` (never `0.0.0.0`)
-//! - No authentication layer (vault is already password-protected)
+//! - Binds only to loopback IP addresses
+//! - Requires a random, session-scoped HTTP Basic credential
 //! - All operations go through `VaultOperations` which handles encryption
 
+pub mod auth;
 pub mod config;
 pub mod handler;
 pub mod xml;
@@ -22,6 +23,7 @@ use tracing::debug;
 use axiomvault_common::Result;
 use axiomvault_vault::VaultSession;
 
+pub use auth::{WebDavCredential, WEBDAV_USERNAME};
 pub use config::WebDavConfig;
 use handler::AppState;
 
@@ -29,12 +31,22 @@ use handler::AppState;
 pub struct WebDavServer {
     session: Arc<VaultSession>,
     config: WebDavConfig,
+    credential: Arc<WebDavCredential>,
 }
 
 impl WebDavServer {
     /// Create a new WebDAV server.
     pub fn new(session: Arc<VaultSession>, config: WebDavConfig) -> Self {
-        Self { session, config }
+        Self {
+            session,
+            config,
+            credential: Arc::new(WebDavCredential::generate()),
+        }
+    }
+
+    /// Return the random credential for this server session.
+    pub fn credential(&self) -> &WebDavCredential {
+        &self.credential
     }
 
     /// Start the server. Runs until the future is cancelled or the listener fails.
@@ -45,13 +57,14 @@ impl WebDavServer {
         let state = AppState {
             session: self.session.clone(),
             max_body_size: self.config.max_body_size,
+            credential: self.credential.clone(),
         };
 
         let app = Router::new()
             .fallback(handler::handle_request)
             .with_state(state);
 
-        let addr = self.config.socket_addr();
+        let addr = self.config.validated_socket_addr()?;
         debug!("Binding WebDAV server");
 
         let listener = TcpListener::bind(&addr).await?;
@@ -77,6 +90,7 @@ mod tests {
     use axiomvault_crypto::KdfParams;
     use axiomvault_storage::{MemoryProvider, StorageProvider};
     use axiomvault_vault::{VaultConfig, VaultOperations, VaultTree};
+    use base64::Engine;
     use http::Method;
 
     /// Helper to create a test session with an in-memory storage provider.
@@ -110,8 +124,8 @@ mod tests {
         listener.local_addr().unwrap().port()
     }
 
-    /// Start a WebDAV server in the background and return its base URL.
-    async fn start_test_server(session: Arc<VaultSession>) -> String {
+    /// Start a WebDAV server in the background and return its URL and password.
+    async fn start_test_server(session: Arc<VaultSession>) -> (String, String) {
         let port = free_port().await;
         let config = WebDavConfig {
             bind_address: "127.0.0.1".to_string(),
@@ -120,12 +134,53 @@ mod tests {
         };
         let server = WebDavServer::new(session, config);
         let url = server.url();
+        let password = server.credential().password().to_owned();
         tokio::spawn(async move {
             let _ = server.start().await;
         });
         // Give the server a moment to bind
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        url
+        (url, password)
+    }
+
+    fn authenticated_client(password: &str) -> reqwest::Client {
+        let encoded = base64::engine::general_purpose::STANDARD
+            .encode(format!("{}:{}", WEBDAV_USERNAME, password));
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            reqwest::header::AUTHORIZATION,
+            format!("Basic {encoded}").parse().unwrap(),
+        );
+        reqwest::Client::builder()
+            .default_headers(headers)
+            .build()
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn non_loopback_bind_addresses_are_rejected_by_start() {
+        let session = create_test_session().await;
+
+        for bind_address in ["0.0.0.0", "::", "192.168.1.10", "203.0.113.10"] {
+            let server = WebDavServer::new(
+                session.clone(),
+                WebDavConfig {
+                    bind_address: bind_address.to_owned(),
+                    port: 0,
+                    ..Default::default()
+                },
+            );
+
+            let error = tokio::time::timeout(std::time::Duration::from_millis(100), server.start())
+                .await
+                .expect("non-loopback validation must happen before binding")
+                .unwrap_err();
+
+            assert!(
+                matches!(error, axiomvault_common::Error::InvalidInput(_)),
+                "{bind_address} returned {error:?}"
+            );
+        }
     }
 
     #[tokio::test]
@@ -141,9 +196,9 @@ mod tests {
         .await
         .unwrap();
 
-        let base_url = start_test_server(session).await;
+        let (base_url, password) = start_test_server(session).await;
 
-        let client = reqwest::Client::new();
+        let client = authenticated_client(&password);
         let resp = client
             .request(Method::from_bytes(b"PROPFIND").unwrap(), &base_url)
             .header("Depth", "1")
@@ -158,7 +213,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_get_file() {
+    async fn unauthenticated_vault_methods_are_rejected() {
         let session = create_test_session().await;
         let ops = VaultOperations::new(&session).unwrap();
         ops.create_file(
@@ -168,26 +223,98 @@ mod tests {
         .await
         .unwrap();
 
-        let base_url = start_test_server(session).await;
-
+        let (base_url, _) = start_test_server(session.clone()).await;
         let client = reqwest::Client::new();
-        let resp = client
-            .get(format!("{}/test.txt", base_url))
+
+        for (method, path) in [
+            ("PROPFIND", "/"),
+            ("GET", "/test.txt"),
+            ("HEAD", "/test.txt"),
+            ("PUT", "/test.txt"),
+            ("MKCOL", "/new-directory"),
+            ("DELETE", "/test.txt"),
+        ] {
+            let response = client
+                .request(
+                    Method::from_bytes(method.as_bytes()).unwrap(),
+                    format!("{base_url}{path}"),
+                )
+                .body("attacker-controlled")
+                .send()
+                .await
+                .unwrap();
+
+            assert_eq!(
+                response.status(),
+                401,
+                "{method} must require authentication"
+            );
+            assert_eq!(
+                response
+                    .headers()
+                    .get("www-authenticate")
+                    .and_then(|value| value.to_str().ok()),
+                Some("Basic realm=\"AxiomVault WebDAV\"")
+            );
+        }
+
+        assert_eq!(
+            ops.read_file(&axiomvault_common::VaultPath::parse("/test.txt").unwrap())
+                .await
+                .unwrap(),
+            b"decrypted content"
+        );
+        assert!(
+            !ops.exists(&axiomvault_common::VaultPath::parse("/new-directory").unwrap())
+                .await
+        );
+    }
+
+    #[tokio::test]
+    async fn wrong_password_is_rejected() {
+        let session = create_test_session().await;
+        let (base_url, _) = start_test_server(session).await;
+
+        let response = authenticated_client("wrong-password")
+            .get(format!("{base_url}/test.txt"))
             .send()
             .await
             .unwrap();
 
-        assert_eq!(resp.status(), 200);
-        let body = resp.bytes().await.unwrap();
-        assert_eq!(&body[..], b"decrypted content");
+        assert_eq!(response.status(), 401);
+    }
+
+    #[tokio::test]
+    async fn correct_password_allows_decrypted_get() {
+        let session = create_test_session().await;
+        let ops = VaultOperations::new(&session).unwrap();
+        ops.create_file(
+            &axiomvault_common::VaultPath::parse("/secret.txt").unwrap(),
+            b"decrypted content",
+        )
+        .await
+        .unwrap();
+        let (base_url, password) = start_test_server(session).await;
+
+        let response = authenticated_client(&password)
+            .get(format!("{base_url}/secret.txt"))
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), 200);
+        assert_eq!(
+            response.bytes().await.unwrap(),
+            b"decrypted content".as_slice()
+        );
     }
 
     #[tokio::test]
     async fn test_put_create_file() {
         let session = create_test_session().await;
-        let base_url = start_test_server(session.clone()).await;
+        let (base_url, password) = start_test_server(session.clone()).await;
 
-        let client = reqwest::Client::new();
+        let client = authenticated_client(&password);
 
         // PUT a new file
         let resp = client
@@ -222,9 +349,9 @@ mod tests {
         .await
         .unwrap();
 
-        let base_url = start_test_server(session).await;
+        let (base_url, password) = start_test_server(session).await;
 
-        let client = reqwest::Client::new();
+        let client = authenticated_client(&password);
         let resp = client
             .put(format!("{}/existing.txt", base_url))
             .body("updated content")
@@ -255,9 +382,9 @@ mod tests {
         .await
         .unwrap();
 
-        let base_url = start_test_server(session).await;
+        let (base_url, password) = start_test_server(session).await;
 
-        let client = reqwest::Client::new();
+        let client = authenticated_client(&password);
         let resp = client
             .delete(format!("{}/todelete.txt", base_url))
             .send()
@@ -279,9 +406,9 @@ mod tests {
     #[tokio::test]
     async fn test_mkcol_create_directory() {
         let session = create_test_session().await;
-        let base_url = start_test_server(session).await;
+        let (base_url, password) = start_test_server(session).await;
 
-        let client = reqwest::Client::new();
+        let client = authenticated_client(&password);
         let resp = client
             .request(
                 Method::from_bytes(b"MKCOL").unwrap(),
@@ -312,9 +439,9 @@ mod tests {
     #[tokio::test]
     async fn test_options() {
         let session = create_test_session().await;
-        let base_url = start_test_server(session).await;
+        let (base_url, password) = start_test_server(session).await;
 
-        let client = reqwest::Client::new();
+        let client = authenticated_client(&password);
         let resp = client
             .request(Method::OPTIONS, &base_url)
             .send()
@@ -333,9 +460,9 @@ mod tests {
     #[tokio::test]
     async fn test_unsupported_methods_return_501() {
         let session = create_test_session().await;
-        let base_url = start_test_server(session).await;
+        let (base_url, password) = start_test_server(session).await;
 
-        let client = reqwest::Client::new();
+        let client = authenticated_client(&password);
 
         for method_name in &["MOVE", "COPY", "LOCK", "UNLOCK"] {
             let resp = client
@@ -362,9 +489,9 @@ mod tests {
         .await
         .unwrap();
 
-        let base_url = start_test_server(session).await;
+        let (base_url, password) = start_test_server(session).await;
 
-        let client = reqwest::Client::new();
+        let client = authenticated_client(&password);
         let resp = client
             .head(format!("{}/headtest.txt", base_url))
             .send()

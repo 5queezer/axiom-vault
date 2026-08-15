@@ -17,12 +17,14 @@ use axiomvault_common::VaultPath;
 use axiomvault_vault::{VaultOperations, VaultSession};
 
 use crate::xml::{self, PropEntry};
+use crate::WebDavCredential;
 
 /// Shared application state passed to all handlers.
 #[derive(Clone)]
 pub struct AppState {
     pub session: Arc<VaultSession>,
     pub max_body_size: usize,
+    pub credential: Arc<WebDavCredential>,
 }
 
 /// Top-level router: dispatches by HTTP method.
@@ -31,6 +33,18 @@ pub async fn handle_request(
     req: axum::extract::Request,
 ) -> Response {
     let method = req.method().clone();
+
+    // OPTIONS is deliberately public so clients can discover DAV support.
+    // Every other method is fail-closed, including methods added in the future.
+    if method != http::Method::OPTIONS && !state.credential.authorizes(req.headers()) {
+        return Response::builder()
+            .status(StatusCode::UNAUTHORIZED)
+            .header("WWW-Authenticate", "Basic realm=\"AxiomVault WebDAV\"")
+            .header("Content-Length", "0")
+            .body(Body::empty())
+            .unwrap();
+    }
+
     let path = req.uri().path().to_string();
     let depth = req
         .headers()
