@@ -1,5 +1,6 @@
 //! Application facade — the single entry point for all vault operations.
 
+use std::path::Path;
 use std::sync::Arc;
 
 use tokio::sync::{RwLock, RwLockReadGuard};
@@ -8,6 +9,8 @@ use zeroize::Zeroizing;
 
 use axiomvault_common::{VaultId, VaultPath};
 use axiomvault_crypto::KdfParams;
+use axiomvault_storage::StorageProvider;
+use axiomvault_sync::{ChangeType, SyncConfig, SyncEngine, SyncResult};
 use axiomvault_vault::{VaultManager, VaultOperations, VaultSession};
 
 use crate::dto::*;
@@ -29,8 +32,11 @@ fn now_timestamp() -> i64 {
 pub struct AppService {
     manager: VaultManager,
     session: RwLock<Option<ActiveVault>>,
+    sync_engine: RwLock<Option<Arc<AppSyncEngine>>>,
     event_tx: EventSender,
 }
+
+type AppSyncEngine = SyncEngine<dyn StorageProvider, dyn StorageProvider>;
 
 /// Internal state for an open vault.
 struct ActiveVault {
@@ -47,6 +53,7 @@ impl AppService {
         Self {
             manager: VaultManager::new(),
             session: RwLock::new(None),
+            sync_engine: RwLock::new(None),
             event_tx,
         }
     }
@@ -587,6 +594,78 @@ impl AppService {
             .vault_exists(provider_type, provider_config)
             .await
             .map_err(AppError::from)
+    }
+    // -- Sync lifecycle --
+
+    /// Configure bidirectional synchronization with explicit remote transport
+    /// and local persistence providers.
+    pub async fn configure_sync(
+        &self,
+        remote: Arc<dyn StorageProvider>,
+        local: Arc<dyn StorageProvider>,
+        state_dir: impl AsRef<Path>,
+        config: SyncConfig,
+    ) -> AppResult<()> {
+        let engine = SyncEngine::from_arcs(remote, local, state_dir, config)
+            .await
+            .map_err(AppError::from)?;
+        *self.sync_engine.write().await = Some(Arc::new(engine));
+        Ok(())
+    }
+
+    /// Stage complete provider bytes for upload on the next sync.
+    pub async fn stage_sync_change(
+        &self,
+        path: &str,
+        data: Vec<u8>,
+        change_type: ChangeType,
+    ) -> AppResult<String> {
+        let path = Self::parse_path(path)?;
+        let engine = self
+            .sync_engine
+            .read()
+            .await
+            .clone()
+            .ok_or_else(|| AppError::InvalidInput("sync is not configured".to_string()))?;
+        engine
+            .stage_change(&path, data, change_type)
+            .await
+            .map_err(AppError::from)
+    }
+
+    /// Stage a provider-path deletion for the next sync.
+    pub async fn stage_sync_delete(&self, path: &str) -> AppResult<String> {
+        let path = Self::parse_path(path)?;
+        let engine = self
+            .sync_engine
+            .read()
+            .await
+            .clone()
+            .ok_or_else(|| AppError::InvalidInput("sync is not configured".to_string()))?;
+        engine.stage_delete(&path).await.map_err(AppError::from)
+    }
+
+    /// Run a complete bidirectional sync and emit lifecycle events for UI/FFI clients.
+    pub async fn sync_now(&self) -> AppResult<SyncResult> {
+        let engine = self
+            .sync_engine
+            .read()
+            .await
+            .clone()
+            .ok_or_else(|| AppError::InvalidInput("sync is not configured".to_string()))?;
+        self.emit(AppEvent::SyncStarted);
+        match engine.sync_full().await {
+            Ok(result) => {
+                self.emit(AppEvent::SyncCompleted);
+                Ok(result)
+            }
+            Err(error) => {
+                self.emit(AppEvent::SyncFailed {
+                    error: error.to_string(),
+                });
+                Err(AppError::from(error))
+            }
+        }
     }
 }
 

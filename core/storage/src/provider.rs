@@ -66,6 +66,17 @@ pub trait StorageProvider: Send + Sync {
     /// - Authentication errors
     async fn upload(&self, path: &VaultPath, data: Vec<u8>) -> Result<Metadata>;
 
+    /// Atomically replace a complete local object.
+    ///
+    /// Sync engines use this operation for downloaded objects and only advance
+    /// ETags after it succeeds. Providers with stronger transactional primitives
+    /// should override it. The default delegates to `upload`, whose contract is
+    /// already all-or-error for a complete byte vector; `LocalProvider`'s upload
+    /// uses same-directory write, fsync, and rename.
+    async fn replace_atomic(&self, path: &VaultPath, data: Vec<u8>) -> Result<Metadata> {
+        self.upload(path, data).await
+    }
+
     /// Upload data as a stream.
     ///
     /// For large files, this allows streaming without loading entire file into memory.

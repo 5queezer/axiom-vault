@@ -1,5 +1,7 @@
 //! Core sync engine that orchestrates all sync operations.
 
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, RwLock};
@@ -9,6 +11,7 @@ use axiomvault_common::{Error, Result, VaultPath};
 use axiomvault_storage::StorageProvider;
 
 use crate::conflict::{ConflictInfo, ConflictResolver, ConflictStrategy, ResolutionResult};
+use crate::mapping::{IdentityPathMapper, SyncPathMapper};
 use crate::retry::{RetryConfig, RetryExecutor};
 use crate::scheduler::{SyncMode, SyncRequest, SyncResult, SyncScheduler, SyncSchedulerHandle};
 use crate::staging::{ChangeType, StagingArea};
@@ -41,10 +44,42 @@ impl Default for SyncConfig {
     }
 }
 
-/// Main sync engine for coordinating vault synchronization.
-pub struct SyncEngine<P: StorageProvider + ?Sized> {
-    /// Storage provider for remote operations.
-    provider: Arc<P>,
+async fn persist_json_atomic<T: serde::Serialize>(path: &Path, value: &T) -> Result<()> {
+    let bytes =
+        serde_json::to_vec_pretty(value).map_err(|e| Error::Serialization(e.to_string()))?;
+    let temp = path.with_extension(format!("json.tmp.{}", uuid::Uuid::new_v4()));
+    let mut file = tokio::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temp)
+        .await?;
+    use tokio::io::AsyncWriteExt;
+    if let Err(error) = file.write_all(&bytes).await {
+        let _ = tokio::fs::remove_file(&temp).await;
+        return Err(error.into());
+    }
+    if let Err(error) = file.sync_all().await {
+        let _ = tokio::fs::remove_file(&temp).await;
+        return Err(error.into());
+    }
+    drop(file);
+    if let Err(error) = tokio::fs::rename(&temp, path).await {
+        let _ = tokio::fs::remove_file(&temp).await;
+        return Err(error.into());
+    }
+    Ok(())
+}
+
+/// Main sync engine for coordinating a remote provider and explicit local persistence.
+pub struct SyncEngine<R: StorageProvider + ?Sized, L: StorageProvider + ?Sized = R> {
+    /// Provider used for remote transport.
+    remote: Arc<R>,
+    /// Provider used as the durable local destination for downloads.
+    local: Arc<L>,
+    /// Maps canonical local paths to provider-specific remote paths.
+    path_mapper: Arc<dyn SyncPathMapper>,
+    /// Directory containing staging, state, and configuration files.
+    state_dir: PathBuf,
     /// Sync state tracking.
     state: Arc<RwLock<SyncState>>,
     /// Staging area for atomic writes.
@@ -61,31 +96,85 @@ pub struct SyncEngine<P: StorageProvider + ?Sized> {
     sync_lock: Arc<Mutex<()>>,
 }
 
-impl<P: StorageProvider + 'static> SyncEngine<P> {
-    /// Create a new sync engine.
-    pub async fn new(
-        provider: P,
-        staging_dir: impl AsRef<std::path::Path>,
+impl<P: StorageProvider + ?Sized + 'static> SyncEngine<P, P> {
+    /// Backward-compatible single-provider constructor.
+    ///
+    /// This preserves the historical API by using the same provider for remote
+    /// transport and local persistence. New production call sites should pass
+    /// distinct providers through [`Self::from_arcs`].
+    pub async fn from_arc(
+        provider: Arc<P>,
+        state_dir: impl AsRef<Path>,
         config: SyncConfig,
     ) -> Result<Self> {
-        Self::from_arc(Arc::new(provider), staging_dir, config).await
+        Self::from_arcs(provider.clone(), provider, state_dir, config).await
     }
 }
 
-impl<P: StorageProvider + ?Sized + 'static> SyncEngine<P> {
-    /// Create a new sync engine from an Arc-wrapped provider.
-    pub async fn from_arc(
-        provider: Arc<P>,
-        staging_dir: impl AsRef<std::path::Path>,
+impl<R: StorageProvider + ?Sized + 'static, L: StorageProvider + ?Sized + 'static>
+    SyncEngine<R, L>
+{
+    /// Create an engine with identity path mapping.
+    pub async fn from_arcs(
+        remote: Arc<R>,
+        local: Arc<L>,
+        state_dir: impl AsRef<Path>,
         config: SyncConfig,
     ) -> Result<Self> {
-        let staging = StagingArea::new(staging_dir).await?;
+        Self::from_arcs_with_mapper(
+            remote,
+            local,
+            state_dir,
+            config,
+            Arc::new(IdentityPathMapper),
+        )
+        .await
+    }
+
+    /// Create an engine with an explicit provider path mapping.
+    pub async fn from_arcs_with_mapper(
+        remote: Arc<R>,
+        local: Arc<L>,
+        state_dir: impl AsRef<Path>,
+        supplied_config: SyncConfig,
+        path_mapper: Arc<dyn SyncPathMapper>,
+    ) -> Result<Self> {
+        let state_dir = state_dir.as_ref().to_path_buf();
+        tokio::fs::create_dir_all(&state_dir).await?;
+        let config_path = state_dir.join("sync_config.json");
+        let config = if config_path.exists() {
+            let bytes = tokio::fs::read(&config_path).await?;
+            serde_json::from_slice(&bytes).map_err(|e| Error::Serialization(e.to_string()))?
+        } else {
+            persist_json_atomic(&config_path, &supplied_config).await?;
+            supplied_config
+        };
+        let staging = StagingArea::new(&state_dir).await?;
+        let state_path = state_dir.join("sync_state.json");
+        let mut state = if state_path.exists() {
+            let bytes = tokio::fs::read(&state_path).await?;
+            serde_json::from_slice(&bytes).map_err(|e| Error::Serialization(e.to_string()))?
+        } else {
+            SyncState::new()
+        };
+
+        // The staging registry is authoritative for interrupted local changes.
+        // Rebuild any missing state entries before persisting the loaded state.
+        for change in staging.all_changes() {
+            if state.get(&change.vault_path).is_none() {
+                state.insert(SyncEntry::new_local(change.vault_path.to_string(), None));
+            }
+        }
+        persist_json_atomic(&state_path, &state).await?;
+
         let retry_config = RetryConfig::new(config.max_retries);
         let conflict_resolver = ConflictResolver::new(config.conflict_strategy);
-
         Ok(Self {
-            provider,
-            state: Arc::new(RwLock::new(SyncState::new())),
+            remote,
+            local,
+            path_mapper,
+            state_dir,
+            state: Arc::new(RwLock::new(state)),
             staging: Arc::new(RwLock::new(staging)),
             conflict_resolver: Arc::new(conflict_resolver),
             retry_executor: Arc::new(RetryExecutor::new(retry_config)),
@@ -93,6 +182,20 @@ impl<P: StorageProvider + ?Sized + 'static> SyncEngine<P> {
             config,
             sync_lock: Arc::new(Mutex::new(())),
         })
+    }
+
+    /// Return the effective persisted configuration.
+    pub fn config(&self) -> &SyncConfig {
+        &self.config
+    }
+
+    async fn persist_state(&self) -> Result<()> {
+        let snapshot = self.state.read().await.clone();
+        persist_json_atomic(&self.state_dir.join("sync_state.json"), &snapshot).await
+    }
+
+    fn remote_path(&self, local_path: &VaultPath) -> Result<VaultPath> {
+        self.path_mapper.local_to_remote(local_path)
     }
 
     /// Initialize the scheduler and return a handle for running it.
@@ -136,6 +239,8 @@ impl<P: StorageProvider + ?Sized + 'static> SyncEngine<P> {
         } else {
             state.insert(SyncEntry::new_local(path.to_string(), etag));
         }
+        drop(state);
+        self.persist_state().await?;
 
         Ok(change_id)
     }
@@ -152,6 +257,8 @@ impl<P: StorageProvider + ?Sized + 'static> SyncEngine<P> {
         } else {
             state.insert(SyncEntry::new_local(path.to_string(), None));
         }
+        drop(state);
+        self.persist_state().await?;
 
         Ok(change_id)
     }
@@ -339,6 +446,7 @@ impl<P: StorageProvider + ?Sized + 'static> SyncEngine<P> {
 
     /// Upload a single staged file.
     async fn upload_staged_file(&self, change_id: &str, path: &VaultPath) -> Result<bool> {
+        let remote_path = self.remote_path(path)?;
         let data = {
             let staging = self.staging.read().await;
             staging.get_staged_data(change_id).await?
@@ -352,8 +460,8 @@ impl<P: StorageProvider + ?Sized + 'static> SyncEngine<P> {
 
         if let Some(ref entry) = local_entry {
             // Check if remote has changed
-            let provider = self.provider.clone();
-            let path_clone = path.clone();
+            let provider = self.remote.clone();
+            let path_clone = remote_path.clone();
 
             let remote_metadata = self
                 .retry_executor
@@ -370,8 +478,10 @@ impl<P: StorageProvider + ?Sized + 'static> SyncEngine<P> {
                     remote.etag.as_deref(),
                     entry.remote_etag.as_deref(),
                 ) {
-                    // Conflict detected
-                    let conflict_info = ConflictInfo::from_entry_and_remote(entry, &remote)?;
+                    // Conflict detection is based on local state, but remote
+                    // operations must use the mapped provider path.
+                    let mut conflict_info = ConflictInfo::from_entry_and_remote(entry, &remote)?;
+                    conflict_info.path = remote_path.clone();
 
                     if self.config.auto_resolve_conflicts {
                         let result = self
@@ -379,7 +489,7 @@ impl<P: StorageProvider + ?Sized + 'static> SyncEngine<P> {
                             .resolve(
                                 &conflict_info,
                                 data,
-                                self.provider.as_ref(),
+                                self.remote.as_ref(),
                                 self.config.conflict_strategy,
                             )
                             .await?;
@@ -399,8 +509,8 @@ impl<P: StorageProvider + ?Sized + 'static> SyncEngine<P> {
         }
 
         // No conflict, upload
-        let provider = self.provider.clone();
-        let path_clone = path.clone();
+        let provider = self.remote.clone();
+        let path_clone = remote_path;
 
         let metadata = self
             .retry_executor
@@ -423,14 +533,16 @@ impl<P: StorageProvider + ?Sized + 'static> SyncEngine<P> {
                 metadata.modified,
             ));
         }
+        drop(state);
+        self.persist_state().await?;
 
         Ok(false)
     }
 
     /// Delete a file from remote storage.
     async fn delete_remote_file(&self, path: &VaultPath) -> Result<()> {
-        let provider = self.provider.clone();
-        let path_clone = path.clone();
+        let provider = self.remote.clone();
+        let path_clone = self.remote_path(path)?;
 
         self.retry_executor
             .execute(move || {
@@ -443,123 +555,150 @@ impl<P: StorageProvider + ?Sized + 'static> SyncEngine<P> {
         // Remove from sync state
         let mut state = self.state.write().await;
         state.remove(path);
+        drop(state);
+        self.persist_state().await?;
 
         Ok(())
     }
 
-    /// Check remote for changes.
+    /// Discover remote objects, mark changed objects for download, and apply
+    /// remote deletions to the local persistence provider.
     async fn check_remote_changes(&self) -> Result<usize> {
+        let mut remote_files = Vec::new();
+        let mut directories = vec![self.path_mapper.remote_root()];
+        while let Some(directory) = directories.pop() {
+            let children = self.remote.list(&directory).await?;
+            for metadata in children {
+                let remote_path = directory.join(&metadata.name)?;
+                if metadata.is_directory {
+                    directories.push(remote_path);
+                } else {
+                    remote_files.push((remote_path, metadata));
+                }
+            }
+        }
+
+        let mut seen_local_paths = HashSet::new();
         let mut conflicts = 0;
-
-        // Get list of known paths
-        let paths: Vec<String> = {
-            let state = self.state.read().await;
-            state.paths()
-        };
-
-        for path_str in paths {
-            let path = VaultPath::parse(&path_str)?;
-            let provider = self.provider.clone();
-            let path_clone = path.clone();
-
-            let remote_result = self
-                .retry_executor
-                .execute(move || {
-                    let p = provider.clone();
-                    let path = path_clone.clone();
-                    async move { p.metadata(&path).await }
-                })
-                .await;
-
-            if let Ok(remote) = remote_result {
-                let mut state = self.state.write().await;
-                if let Some(entry) = state.get_mut(&path) {
-                    if entry.remote_etag != remote.etag {
-                        entry.mark_remote_modified(remote.etag.clone(), remote.modified);
+        {
+            let mut state = self.state.write().await;
+            for (remote_path, metadata) in remote_files {
+                let local_path = self.path_mapper.remote_to_local(&remote_path)?;
+                seen_local_paths.insert(local_path.to_string());
+                match state.get_mut(&local_path) {
+                    Some(entry) if entry.remote_etag != metadata.etag => {
+                        entry.mark_remote_modified(metadata.etag.clone(), metadata.modified);
                         if entry.status == SyncStatus::Conflicted {
                             conflicts += 1;
                         }
+                    }
+                    Some(_) => {}
+                    None => {
+                        let mut entry = SyncEntry::new_local(local_path.to_string(), None);
+                        entry.remote_etag = metadata.etag;
+                        entry.remote_modified = Some(metadata.modified);
+                        entry.status = SyncStatus::RemoteModified;
+                        state.insert(entry);
                     }
                 }
             }
         }
 
-        Ok(conflicts)
-    }
-
-    // TODO(audit H-1, SECURITY_AUDIT_2026-04-21.md): the sync engine has no
-    // wired-up local destination for downloaded ciphertext. Until a local
-    // provider / staging callback / `VaultOperations::update_file` integration
-    // lands, `download_remote_changes` MUST NOT pretend the data was
-    // persisted: that would silently lose remote-side changes while
-    // reporting success in the sync result counters. The fix here is
-    // intentionally narrow — we only make the failure honest (warn log,
-    // pending_persistence counter, no etag/timestamp mutation). The full
-    // architectural fix is tracked separately.
-    /// Download remote changes to local.
-    ///
-    /// Currently, downloaded data has no destination wired up in the engine,
-    /// so successful downloads are reported via `pending_persistence` rather
-    /// than `synced`, and the entry's sync state is left untouched so the
-    /// next sync will see the remote change again.
-    async fn download_remote_changes(&self) -> (usize, usize, usize) {
-        // `synced` stays 0 until persistence is wired up (audit H-1). Successful
-        // downloads are accounted for in `pending_persistence` instead.
-        let synced: usize = 0;
-        let mut failed = 0;
-        let mut pending_persistence = 0;
-
-        let entries: Vec<(String, SyncStatus)> = {
+        let deleted_paths: Vec<VaultPath> = {
             let state = self.state.read().await;
             state
                 .entries()
-                .filter(|e| e.status == SyncStatus::RemoteModified)
-                .map(|e| (e.path.clone(), e.status))
+                .filter(|entry| {
+                    entry.status == SyncStatus::Synced && !seen_local_paths.contains(&entry.path)
+                })
+                .filter_map(|entry| VaultPath::parse(&entry.path).ok())
+                .collect()
+        };
+        for local_path in deleted_paths {
+            if self.local.exists(&local_path).await? {
+                self.local.delete(&local_path).await?;
+            }
+            self.state.write().await.remove(&local_path);
+        }
+        self.persist_state().await?;
+        Ok(conflicts)
+    }
+
+    /// Download and durably persist every remotely modified object.
+    ///
+    /// State and remote ETags advance only after `replace_atomic` succeeds.
+    async fn download_remote_changes(&self) -> (usize, usize, usize) {
+        let mut synced = 0;
+        let mut failed = 0;
+        let entries: Vec<String> = {
+            let state = self.state.read().await;
+            state
+                .entries()
+                .filter(|entry| entry.status == SyncStatus::RemoteModified)
+                .map(|entry| entry.path.clone())
                 .collect()
         };
 
-        for (path_str, _) in entries {
-            let path = match VaultPath::parse(&path_str) {
-                Ok(p) => p,
+        for path_string in entries {
+            let local_path = match VaultPath::parse(&path_string) {
+                Ok(path) => path,
                 Err(_) => {
                     failed += 1;
                     continue;
                 }
             };
-
-            let provider = self.provider.clone();
-            let path_clone = path.clone();
-
-            let download_result = self
+            let remote_path = match self.remote_path(&local_path) {
+                Ok(path) => path,
+                Err(_) => {
+                    failed += 1;
+                    continue;
+                }
+            };
+            let remote = self.remote.clone();
+            let download_path = remote_path.clone();
+            let data = self
                 .retry_executor
                 .execute(move || {
-                    let p = provider.clone();
-                    let path = path_clone.clone();
-                    async move { p.download(&path).await }
+                    let provider = remote.clone();
+                    let path = download_path.clone();
+                    async move { provider.download(&path).await }
                 })
                 .await;
 
-            match download_result {
-                Ok(data) => {
-                    // The downloaded ciphertext has nowhere to go yet (audit
-                    // H-1). Surface this honestly: increment the
-                    // pending_persistence counter, leave the entry's sync
-                    // state untouched, and warn so operators can see it.
-                    warn!(
-                        "downloaded {} bytes for path {} but persistence is not yet wired up — entry not marked synced (audit H-1)",
-                        data.len(),
-                        path
-                    );
-                    pending_persistence += 1;
-                }
-                Err(e) => {
-                    error!("Failed to download remote file: {}", e);
+            let result = match data {
+                Ok(data) => self.local.replace_atomic(&local_path, data).await,
+                Err(error) => Err(error),
+            };
+            match result {
+                Ok(_) => match self.remote.metadata(&remote_path).await {
+                    Ok(metadata) => {
+                        let mut state = self.state.write().await;
+                        if let Some(entry) = state.get_mut(&local_path) {
+                            entry.mark_synced(metadata.etag, metadata.modified);
+                        }
+                        drop(state);
+                        if let Err(error) = self.persist_state().await {
+                            error!("Failed to persist sync state: {}", error);
+                            failed += 1;
+                        } else {
+                            synced += 1;
+                        }
+                    }
+                    Err(error) => {
+                        error!(
+                            "Failed to read remote metadata after persistence: {}",
+                            error
+                        );
+                        failed += 1;
+                    }
+                },
+                Err(error) => {
+                    error!("Failed to persist downloaded file: {}", error);
                     failed += 1;
                 }
             }
         }
-
-        (synced, failed, pending_persistence)
+        (synced, failed, 0)
     }
 
     /// Sync a single path.
@@ -583,24 +722,29 @@ impl<P: StorageProvider + ?Sized + 'static> SyncEngine<P> {
                 self.staging.write().await.commit(&change_id).await?;
             }
         } else {
-            // Check remote for updates
-            let provider = self.provider.clone();
-            let path_clone = path.clone();
-
-            let remote_metadata = self
-                .retry_executor
-                .execute(move || {
-                    let p = provider.clone();
-                    let path = path_clone.clone();
-                    async move { p.metadata(&path).await }
-                })
-                .await?;
-
-            let mut state = self.state.write().await;
-            if let Some(entry) = state.get_mut(path) {
-                if entry.remote_etag != remote_metadata.etag {
+            let remote_path = self.remote_path(path)?;
+            let remote_metadata = self.remote.metadata(&remote_path).await?;
+            let changed = {
+                let state = self.state.read().await;
+                state
+                    .get(path)
+                    .is_none_or(|entry| entry.remote_etag != remote_metadata.etag)
+            };
+            if changed {
+                let data = self.remote.download(&remote_path).await?;
+                self.local.replace_atomic(path, data).await?;
+                let mut state = self.state.write().await;
+                if let Some(entry) = state.get_mut(path) {
                     entry.mark_synced(remote_metadata.etag, remote_metadata.modified);
+                } else {
+                    state.insert(SyncEntry::new_synced(
+                        path.to_string(),
+                        remote_metadata.etag,
+                        remote_metadata.modified,
+                    ));
                 }
+                drop(state);
+                self.persist_state().await?;
             }
         }
 
@@ -649,6 +793,8 @@ impl<P: StorageProvider + ?Sized + 'static> SyncEngine<P> {
                 // Nothing to do, conflict remains
             }
         }
+        drop(state);
+        self.persist_state().await?;
 
         Ok(())
     }
@@ -683,12 +829,12 @@ impl<P: StorageProvider + ?Sized + 'static> SyncEngine<P> {
             return Err(Error::InvalidInput("Path is not in conflict".to_string()));
         }
 
-        let remote_metadata = self.provider.metadata(path).await?;
+        let remote_metadata = self.remote.metadata(path).await?;
         let conflict_info = ConflictInfo::from_entry_and_remote(&entry, &remote_metadata)?;
 
         let result = self
             .conflict_resolver
-            .resolve(&conflict_info, local_data, self.provider.as_ref(), strategy)
+            .resolve(&conflict_info, local_data, self.remote.as_ref(), strategy)
             .await?;
 
         self.handle_resolution_result(path, result).await
@@ -698,85 +844,4 @@ impl<P: StorageProvider + ?Sized + 'static> SyncEngine<P> {
 /// Result of syncing a single path.
 struct SingleSyncResult {
     has_conflict: bool,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use axiomvault_storage::MemoryProvider;
-    use tempfile::TempDir;
-
-    /// Audit H-1: a successful remote download must NOT increment the
-    /// `synced` counter and must NOT update the entry's etag/timestamp,
-    /// because the engine has no wired-up local destination yet. It must
-    /// surface the download via the `pending_persistence` counter (and a
-    /// `warn!` log — verifiable by running `cargo test -- --nocapture`).
-    #[tokio::test]
-    async fn test_download_remote_changes_does_not_falsely_mark_synced() {
-        let provider = MemoryProvider::new();
-        let path = VaultPath::parse("/remote-only.bin").unwrap();
-        // Seed remote with a file the engine will "discover" as RemoteModified.
-        provider
-            .upload(&path, b"remote-ciphertext".to_vec())
-            .await
-            .unwrap();
-        let original_remote_meta = provider.metadata(&path).await.unwrap();
-
-        let staging_dir = TempDir::new().unwrap();
-        let engine = SyncEngine::new(provider, staging_dir.path(), SyncConfig::default())
-            .await
-            .unwrap();
-
-        // Pre-seed sync state with an entry whose status is RemoteModified
-        // so download_remote_changes will pick it up. Capture the
-        // pre-download etag so we can assert it doesn't get bumped.
-        let pre_download_local_etag = Some("baseline-local-etag".to_string());
-        let pre_download_remote_etag = Some("baseline-remote-etag".to_string());
-        {
-            let mut state = engine.state.write().await;
-            let mut entry = SyncEntry::new_synced(
-                path.to_string(),
-                pre_download_local_etag.clone(),
-                chrono::Utc::now(),
-            );
-            // Force RemoteModified so download_remote_changes finds it.
-            entry.status = SyncStatus::RemoteModified;
-            entry.remote_etag = pre_download_remote_etag.clone();
-            state.insert(entry);
-        }
-
-        let (synced, failed, pending) = engine.download_remote_changes().await;
-
-        // The honest-failure contract from H-1: synced stays 0, no failure
-        // (the download succeeded), pending bumps.
-        assert_eq!(synced, 0, "synced must not increment without persistence");
-        assert_eq!(failed, 0, "download succeeded so failed must stay 0");
-        assert_eq!(
-            pending, 1,
-            "the successful download must show up in pending"
-        );
-
-        // The entry's etags / status must NOT have been touched (no
-        // silent "this is in sync now" claim).
-        let state = engine.state.read().await;
-        let entry = state.get(&path).expect("entry is still present");
-        assert_eq!(
-            entry.local_etag, pre_download_local_etag,
-            "local_etag must not have been mutated by a no-op download"
-        );
-        assert_eq!(
-            entry.remote_etag, pre_download_remote_etag,
-            "remote_etag must not have been mutated by a no-op download"
-        );
-        assert_eq!(
-            entry.status,
-            SyncStatus::RemoteModified,
-            "status must remain RemoteModified so the next sync sees it again"
-        );
-
-        // Sanity: the remote provider still has the original metadata —
-        // we never touched it.
-        let post_remote_meta = engine.provider.metadata(&path).await.unwrap();
-        assert_eq!(post_remote_meta.etag, original_remote_meta.etag);
-    }
 }

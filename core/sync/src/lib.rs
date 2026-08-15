@@ -9,6 +9,7 @@
 
 pub mod conflict;
 pub mod engine;
+pub mod mapping;
 pub mod retry;
 pub mod scheduler;
 pub mod staging;
@@ -17,6 +18,7 @@ pub mod state;
 // Re-export main types
 pub use conflict::{ConflictInfo, ConflictResolver, ConflictStrategy, ResolutionResult};
 pub use engine::{SyncConfig, SyncEngine};
+pub use mapping::{IdentityPathMapper, PrefixPathMapper, SyncPathMapper};
 pub use retry::{retry, retry_with_config, RetryConfig, RetryExecutor};
 pub use scheduler::{SyncMode, SyncRequest, SyncResult, SyncScheduler, SyncSchedulerHandle};
 pub use staging::{ChangeType, StagedChange, StagingArea};
