@@ -1214,7 +1214,7 @@ fn print_health_report(report: &axiomvault_vault::HealthReport) {
 async fn cmd_gdrive_auth(
     client_id: Option<String>,
     client_secret: Option<String>,
-    output: &PathBuf,
+    output: &Path,
 ) -> Result<()> {
     info!("Starting Google Drive authentication");
 
