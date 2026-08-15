@@ -21,8 +21,8 @@ use axiomvault_crypto::recovery::RecoveryKey;
 use axiomvault_crypto::KdfParams;
 use axiomvault_storage::gdrive::{AuthConfig, AuthManager, GDriveConfig, Tokens};
 use axiomvault_storage::{
-    create_default_registry, CompositeConfig, CompositeStorageProvider, HealthStatus, RaidMode,
-    RaidRebuilder, RebuildConfig, RebuildResult,
+    create_default_registry, CompositeConfig, CompositeStorageProvider, HealthStatus,
+    LocalProvider, RaidMode, RaidRebuilder, RebuildConfig, RebuildResult,
 };
 use axiomvault_sync::{ConflictStrategy, SyncConfig, SyncEngine, SyncMode, SyncState};
 use axiomvault_vault::{
@@ -1713,7 +1713,7 @@ async fn cmd_migrate(path: &Path, dry_run: bool) -> Result<()> {
     let config_bytes = tokio::fs::read(&config_path)
         .await
         .context("Failed to read vault config")?;
-    let mut config = VaultConfig::from_bytes(&config_bytes).context("Failed to parse config")?;
+    let config = VaultConfig::from_bytes(&config_bytes).context("Failed to parse config")?;
 
     let status = check_migration_needed(&config);
 
@@ -1762,14 +1762,22 @@ async fn cmd_migrate(path: &Path, dry_run: bool) -> Result<()> {
     }
 
     println!("\nRunning migrations...");
-    registry
-        .migrate(path, &mut config, &target)
+    let password = prompt_password("Enter vault password: ")?;
+    let provider = LocalProvider::new(path).context("Failed to open local vault storage")?;
+    let outcome = registry
+        .migrate(&provider, password.as_slice(), &target)
+        .await
         .context("Migration failed")?;
 
     println!(
         "Migration completed successfully! Vault is now at version {}.",
-        config.version
+        outcome.config.version
     );
+    if let Some(words) = outcome.recovery_words {
+        println!("\nIMPORTANT: write down these recovery words now.");
+        println!("They cannot be shown again after this migration command exits.\n");
+        println!("{}", words.as_str());
+    }
 
     Ok(())
 }

@@ -272,21 +272,29 @@ pub fn check_migration(path: &str) -> FFIResult<i32> {
     }
 }
 
-/// Run migrations on a vault at the given path.
-pub fn run_migration(path: &str, _password: &str) -> FFIResult<()> {
-    let vault_path = std::path::Path::new(path);
-    let config_path = vault_path.join("vault.config");
-
-    let config_bytes = std::fs::read(&config_path).map_err(|e| FFIError::IOError(e.to_string()))?;
-    let mut config =
-        VaultConfig::from_bytes(&config_bytes).map_err(|e| FFIError::VaultError(e.to_string()))?;
-
-    let registry = MigrationRegistry::default();
-    let target = VaultVersion::CURRENT;
-
-    registry
-        .migrate(vault_path, &mut config, &target)
-        .map_err(|e| FFIError::VaultError(e.to_string()))
+/// Run authenticated migrations on a local vault and return any newly generated
+/// recovery mnemonic. The password is consumed by the migration and wiped on
+/// return.
+pub async fn run_migration(
+    path: &str,
+    password: Zeroizing<String>,
+) -> FFIResult<Option<Zeroizing<String>>> {
+    let abs_path = resolve_path(path)?;
+    let provider_config = serde_json::json!({ "root": abs_path });
+    let manager = CoreVaultManager::new();
+    let provider = manager
+        .registry()
+        .resolve("local", provider_config)
+        .map_err(|e| FFIError::VaultError(e.to_string()))?;
+    let outcome = MigrationRegistry::default()
+        .migrate(
+            provider.as_ref(),
+            password.as_bytes(),
+            &VaultVersion::CURRENT,
+        )
+        .await
+        .map_err(|e| FFIError::VaultError(e.to_string()))?;
+    Ok(outcome.recovery_words)
 }
 
 /// Run a health check on a vault. Returns JSON report.

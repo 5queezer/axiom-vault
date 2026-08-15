@@ -228,9 +228,7 @@ impl AppService {
 
         // Wipe cached plaintext metadata before locking.
         if let Some(ref index) = active.index {
-            if let Err(e) = index.wipe() {
-                tracing::warn!("Failed to wipe local index on lock: {}", e);
-            }
+            index.wipe()?;
         }
 
         let session = Arc::get_mut(&mut active.session).ok_or_else(|| {
@@ -253,9 +251,7 @@ impl AppService {
 
         // Wipe cached plaintext metadata before closing.
         if let Some(ref index) = active.index {
-            if let Err(e) = index.wipe() {
-                tracing::warn!("Failed to wipe local index on close: {}", e);
-            }
+            index.wipe()?;
         }
 
         *guard = None;
@@ -599,6 +595,55 @@ impl Default for AppService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::TempDir;
+
+    async fn service_with_corrupt_index() -> (AppService, TempDir) {
+        let service = AppService::new();
+        service
+            .create_vault(CreateVaultParams {
+                vault_id: "test-vault".to_string(),
+                password: Zeroizing::new("password".to_string()),
+                provider_type: "memory".to_string(),
+                provider_config: serde_json::Value::Null,
+            })
+            .await
+            .unwrap();
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("index.sqlite");
+        let index = LocalIndex::open(&path).unwrap();
+        index
+            .upsert_entry(&IndexEntry {
+                path: "/plaintext-secret.txt".to_string(),
+                encrypted_name: "enc".to_string(),
+                is_directory: false,
+                size: Some(1),
+                modified_at: 0,
+                etag: None,
+            })
+            .unwrap();
+        rusqlite::Connection::open(&path)
+            .unwrap()
+            .execute("DROP TABLE vault_entries", [])
+            .unwrap();
+        service.set_local_index(index).await.unwrap();
+        (service, dir)
+    }
+
+    #[tokio::test]
+    async fn lock_fails_closed_when_mandatory_index_wipe_fails() {
+        let (service, _dir) = service_with_corrupt_index().await;
+
+        assert!(service.lock_vault().await.is_err());
+        assert!(service.vault_info().await.unwrap().is_unlocked);
+    }
+
+    #[tokio::test]
+    async fn close_fails_closed_when_mandatory_index_wipe_fails() {
+        let (service, _dir) = service_with_corrupt_index().await;
+
+        assert!(service.close_vault().await.is_err());
+        assert!(service.is_vault_open().await);
+    }
 
     #[tokio::test]
     async fn test_create_and_open_vault() {

@@ -4,15 +4,24 @@
 //! Migrations are executed in sequence with automatic backup and rollback support.
 
 use std::fmt;
-use std::path::Path;
 
 use tracing::{info, warn};
+use zeroize::Zeroizing;
 
 use crate::config::{VaultConfig, VaultVersion, CONFIG_FILENAME};
-use axiomvault_common::{Error, Result};
+use axiomvault_common::{Error, Result, VaultPath};
+use axiomvault_crypto::recovery::RecoveryKey;
+use axiomvault_storage::StorageProvider;
 
 /// Backup filename for vault config during migration.
 pub const CONFIG_BACKUP_FILENAME: &str = "vault.config.backup";
+const CONFIG_MIGRATION_FILENAME: &str = "vault.config.migration";
+
+/// Fully verified result of a committed migration.
+pub struct MigrationOutcome {
+    pub config: VaultConfig,
+    pub recovery_words: Option<Zeroizing<String>>,
+}
 
 /// Status of migration check for a vault.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,8 +59,12 @@ pub trait Migration: Send + Sync {
     fn target_version(&self) -> VaultVersion;
     /// Human-readable description of what this migration does.
     fn description(&self) -> &str;
-    /// Execute the migration, modifying the vault config and optionally vault files.
-    fn migrate(&self, vault_path: &Path, config: &mut VaultConfig) -> Result<()>;
+    /// Transform a config using authenticated secret material.
+    fn migrate(
+        &self,
+        config: &mut VaultConfig,
+        password: &[u8],
+    ) -> Result<Option<Zeroizing<String>>>;
 }
 
 /// Registry of all available migrations.
@@ -117,124 +130,136 @@ impl MigrationRegistry {
         Some(path)
     }
 
-    /// Execute all migrations from the vault's current version to the target version.
+    /// Authenticate, transform, verify, and atomically commit all migrations.
     ///
-    /// Backs up the vault config before starting. If any step fails, the backup
-    /// is restored and the error is returned.
-    pub fn migrate(
+    /// The config is loaded and persisted exclusively through `StorageProvider`,
+    /// so local and cloud-backed vaults share identical rollback semantics.
+    pub async fn migrate(
         &self,
-        vault_path: &Path,
-        config: &mut VaultConfig,
+        provider: &dyn StorageProvider,
+        password: &[u8],
         target: &VaultVersion,
-    ) -> Result<()> {
+    ) -> Result<MigrationOutcome> {
+        let config_path = VaultPath::parse(CONFIG_FILENAME)?;
+        let backup_path = VaultPath::parse(CONFIG_BACKUP_FILENAME)?;
+        let temp_path = VaultPath::parse(CONFIG_MIGRATION_FILENAME)?;
+
+        self.recover_interrupted(provider, &config_path, &backup_path, &temp_path)
+            .await?;
+
+        let original_bytes = provider.download(&config_path).await?;
+        let mut config = VaultConfig::from_bytes(&original_bytes)?;
         let from = config.version;
         let path = self.find_path(&from, target).ok_or_else(|| {
             Error::Vault(format!("No migration path from {} to {}", from, target))
         })?;
-
         if path.is_empty() {
-            info!("Vault is already at version {}", target);
-            return Ok(());
+            validate_v1_1_invariants(&config)?;
+            return Ok(MigrationOutcome {
+                config,
+                recovery_words: None,
+            });
         }
 
-        info!(
-            "Migrating vault from {} to {} ({} step(s))",
-            from,
-            target,
-            path.len()
-        );
-
-        // Backup config before migration.
-        self.backup_config(vault_path)?;
-
-        for (i, migration) in path.iter().enumerate() {
-            info!(
-                "  Step {}/{}: {} -> {} - {}",
-                i + 1,
-                path.len(),
-                migration.source_version(),
-                migration.target_version(),
-                migration.description()
-            );
-
-            if let Err(e) = migration.migrate(vault_path, config) {
-                warn!("Migration step failed: {}. Restoring backup.", e);
-                if let Err(restore_err) = self.restore_config(vault_path, config) {
-                    warn!("Failed to restore backup: {}", restore_err);
-                }
-                return Err(e);
-            }
+        let original_master_key = config
+            .verify_password(password)?
+            .ok_or_else(|| Error::NotPermitted("Invalid password".to_string()))?;
+        let mut recovery_words = None;
+        for migration in path {
+            recovery_words = migration.migrate(&mut config, password)?;
         }
-
-        // Verify the final version matches the target.
         if config.version != *target {
-            warn!(
-                "Version mismatch after migration: expected {}, got {}",
-                target, config.version
-            );
-            if let Err(restore_err) = self.restore_config(vault_path, config) {
-                warn!("Failed to restore backup: {}", restore_err);
-            }
             return Err(Error::Vault(format!(
-                "Migration completed but version is {} instead of {}",
+                "Migration completed in memory at {} instead of {}",
                 config.version, target
             )));
         }
-
-        // Save the updated config.
-        self.save_config(vault_path, config)?;
-
-        // Remove backup after successful migration.
-        let backup_path = vault_path.join(CONFIG_BACKUP_FILENAME);
-        if backup_path.exists() {
-            let _ = std::fs::remove_file(&backup_path);
+        validate_v1_1_invariants(&config)?;
+        let password_master_key = config
+            .verify_password(password)?
+            .ok_or_else(|| Error::Vault("Migrated config rejected its password".to_string()))?;
+        if password_master_key.as_bytes() != original_master_key.as_bytes() {
+            return Err(Error::Vault(
+                "Migration changed the vault master key".to_string(),
+            ));
+        }
+        let words = recovery_words.as_ref().ok_or_else(|| {
+            Error::Vault("Migration did not produce required recovery words".to_string())
+        })?;
+        let recovery_key = RecoveryKey::from_mnemonic(words)?;
+        let recovered_master_key = config
+            .verify_recovery_key(&recovery_key)?
+            .ok_or_else(|| Error::Vault("Migrated recovery key failed verification".to_string()))?;
+        if recovered_master_key.as_bytes() != original_master_key.as_bytes() {
+            return Err(Error::Vault(
+                "Recovery key unwraps a different master key".to_string(),
+            ));
         }
 
+        provider.upload(&temp_path, config.to_bytes()?).await?;
+        if let Err(error) = provider.rename(&config_path, &backup_path).await {
+            let _ = provider.delete(&temp_path).await;
+            return Err(error);
+        }
+        if let Err(error) = provider.rename(&temp_path, &config_path).await {
+            let restore = provider.rename(&backup_path, &config_path).await;
+            return match restore {
+                Ok(_) => Err(error),
+                Err(restore_error) => Err(Error::Storage(format!(
+                    "migration commit failed ({error}); rollback failed ({restore_error})"
+                ))),
+            };
+        }
+
+        let committed = match provider.download(&config_path).await {
+            Ok(bytes) => VaultConfig::from_bytes(&bytes),
+            Err(error) => Err(error),
+        };
+        if let Err(verify_error) = committed.and_then(|saved| {
+            validate_v1_1_invariants(&saved)?;
+            saved.verify_password(password)?.ok_or_else(|| {
+                Error::Vault("Committed config failed authentication".to_string())
+            })?;
+            Ok(())
+        }) {
+            let _ = provider.delete(&config_path).await;
+            if let Err(restore_error) = provider.rename(&backup_path, &config_path).await {
+                return Err(Error::Storage(format!(
+                    "committed config verification failed ({verify_error}); rollback failed ({restore_error})"
+                )));
+            }
+            return Err(verify_error);
+        }
+
+        if let Err(error) = provider.delete(&backup_path).await {
+            warn!("Migration committed but backup cleanup failed: {}", error);
+        }
         info!("Migration completed successfully to version {}", target);
-        Ok(())
+        Ok(MigrationOutcome {
+            config,
+            recovery_words,
+        })
     }
 
-    /// Backup the vault config file.
-    fn backup_config(&self, vault_path: &Path) -> Result<()> {
-        let config_path = vault_path.join(CONFIG_FILENAME);
-        let backup_path = vault_path.join(CONFIG_BACKUP_FILENAME);
-
-        if config_path.exists() {
-            std::fs::copy(&config_path, &backup_path)
-                .map_err(|e| Error::Vault(format!("Failed to backup config: {}", e)))?;
-            info!("Config backed up successfully");
+    async fn recover_interrupted(
+        &self,
+        provider: &dyn StorageProvider,
+        config_path: &VaultPath,
+        backup_path: &VaultPath,
+        temp_path: &VaultPath,
+    ) -> Result<()> {
+        let backup_exists = provider.exists(backup_path).await?;
+        let config_exists = provider.exists(config_path).await?;
+        if backup_exists && !config_exists {
+            provider.rename(backup_path, config_path).await?;
+        } else if backup_exists {
+            return Err(Error::Vault(
+                "Unresolved migration backup exists; refusing to overwrite it".to_string(),
+            ));
         }
-
-        Ok(())
-    }
-
-    /// Restore vault config from backup.
-    fn restore_config(&self, vault_path: &Path, config: &mut VaultConfig) -> Result<()> {
-        let backup_path = vault_path.join(CONFIG_BACKUP_FILENAME);
-
-        if backup_path.exists() {
-            let backup_bytes = std::fs::read(&backup_path)
-                .map_err(|e| Error::Vault(format!("Failed to read backup: {}", e)))?;
-            let backup_config = VaultConfig::from_bytes(&backup_bytes)?;
-            *config = backup_config;
-
-            // Restore the config file as well.
-            let config_path = vault_path.join(CONFIG_FILENAME);
-            std::fs::copy(&backup_path, &config_path)
-                .map_err(|e| Error::Vault(format!("Failed to restore config file: {}", e)))?;
-
-            info!("Config restored from backup");
+        if provider.exists(temp_path).await? {
+            provider.delete(temp_path).await?;
         }
-
-        Ok(())
-    }
-
-    /// Save config to the vault path.
-    fn save_config(&self, vault_path: &Path, config: &VaultConfig) -> Result<()> {
-        let config_path = vault_path.join(CONFIG_FILENAME);
-        let config_bytes = config.to_bytes()?;
-        std::fs::write(&config_path, config_bytes)
-            .map_err(|e| Error::Vault(format!("Failed to save config: {}", e)))?;
         Ok(())
     }
 }
@@ -250,6 +275,11 @@ pub fn check_migration_needed(config: &VaultConfig) -> MigrationStatus {
     let current = VaultVersion::CURRENT;
 
     if config.version == current {
+        if validate_v1_1_invariants(config).is_err() {
+            return MigrationStatus::Incompatible {
+                version: config.version,
+            };
+        }
         return MigrationStatus::UpToDate;
     }
 
@@ -278,10 +308,22 @@ pub fn check_migration_needed(config: &VaultConfig) -> MigrationStatus {
 // Built-in migrations
 // ---------------------------------------------------------------------------
 
-/// Placeholder migration from v1.0 to v1.1.
-///
-/// This migration does not change vault structure; it simply bumps the version
-/// to validate the migration framework end-to-end.
+fn validate_v1_1_invariants(config: &VaultConfig) -> Result<()> {
+    if config.version != VaultVersion::CURRENT
+        || config.wrapped_master_key.is_none()
+        || config.recovery_wrapped_master_key.is_none()
+        || config.recovery_key_verification.is_none()
+        || config.encrypted_recovery_key.is_none()
+    {
+        return Err(Error::Vault(
+            "vault config does not satisfy v1.1 key-wrapping and recovery invariants".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// Authenticated migration from the legacy password-derived-key format to
+/// independently wrapped password and recovery keys.
 #[allow(non_camel_case_types)]
 struct MigrationV1_0ToV1_1;
 
@@ -295,12 +337,20 @@ impl Migration for MigrationV1_0ToV1_1 {
     }
 
     fn description(&self) -> &str {
-        "Bump vault format version (no structural changes)"
+        "Wrap the legacy master key and configure authenticated recovery"
     }
 
-    fn migrate(&self, _vault_path: &Path, config: &mut VaultConfig) -> Result<()> {
-        config.version = self.target_version();
-        Ok(())
+    fn migrate(
+        &self,
+        config: &mut VaultConfig,
+        password: &[u8],
+    ) -> Result<Option<Zeroizing<String>>> {
+        if config.version != self.source_version() || !config.is_legacy_format() {
+            return Err(Error::Vault(
+                "v1.0 migration requires an authenticated legacy config".to_string(),
+            ));
+        }
+        config.migrate_to_v1_1(password).map(Some)
     }
 }
 
@@ -309,7 +359,6 @@ mod tests {
     use super::*;
     use axiomvault_common::VaultId;
     use axiomvault_crypto::KdfParams;
-    use tempfile::TempDir;
 
     fn make_test_config(version: VaultVersion) -> VaultConfig {
         let id = VaultId::new("test-vault").unwrap();
@@ -320,14 +369,6 @@ mod tests {
         let mut config = creation.config;
         config.version = version;
         config
-    }
-
-    fn setup_vault_dir(config: &VaultConfig) -> TempDir {
-        let dir = TempDir::new().unwrap();
-        let config_path = dir.path().join(CONFIG_FILENAME);
-        let config_bytes = config.to_bytes().unwrap();
-        std::fs::write(&config_path, config_bytes).unwrap();
-        dir
     }
 
     #[test]
@@ -378,71 +419,165 @@ mod tests {
         assert!(registry.find_path(&v1_0, &v2_0).is_none());
     }
 
-    #[test]
-    fn test_migration_v1_0_to_v1_1() {
-        let mut config = make_test_config(VaultVersion { major: 1, minor: 0 });
-        let dir = setup_vault_dir(&config);
+    #[tokio::test]
+    async fn test_migration_v1_0_to_v1_1() {
+        let password = b"test";
+        let mut legacy = make_test_config(VaultVersion { major: 1, minor: 0 });
+        legacy.wrapped_master_key = None;
+        legacy.recovery_wrapped_master_key = None;
+        legacy.recovery_key_verification = None;
+        legacy.encrypted_recovery_key = None;
+        let original_master_key = legacy.verify_password(password).unwrap().unwrap();
+        let provider = axiomvault_storage::MemoryProvider::new();
+        provider
+            .upload(
+                &axiomvault_common::VaultPath::parse(CONFIG_FILENAME).unwrap(),
+                legacy.to_bytes().unwrap(),
+            )
+            .await
+            .unwrap();
         let registry = MigrationRegistry::with_defaults();
         let target = VaultVersion { major: 1, minor: 1 };
 
-        registry.migrate(dir.path(), &mut config, &target).unwrap();
+        let outcome = registry
+            .migrate(&provider, password, &target)
+            .await
+            .unwrap();
 
-        assert_eq!(config.version, target);
-
-        // Verify config was persisted.
-        let config_path = dir.path().join(CONFIG_FILENAME);
-        let saved_bytes = std::fs::read(&config_path).unwrap();
-        let saved_config = VaultConfig::from_bytes(&saved_bytes).unwrap();
-        assert_eq!(saved_config.version, target);
-
-        // Backup should have been cleaned up.
-        let backup_path = dir.path().join(CONFIG_BACKUP_FILENAME);
-        assert!(!backup_path.exists());
+        assert_eq!(outcome.config.version, target);
+        assert!(outcome.config.wrapped_master_key.is_some());
+        assert!(outcome.config.recovery_wrapped_master_key.is_some());
+        let recovery_words = outcome
+            .recovery_words
+            .expect("migration must return recovery words");
+        let reopened_master_key = outcome
+            .config
+            .verify_password(password)
+            .unwrap()
+            .expect("password must reopen migrated vault");
+        assert_eq!(
+            reopened_master_key.as_bytes(),
+            original_master_key.as_bytes()
+        );
+        let recovery_key =
+            axiomvault_crypto::recovery::RecoveryKey::from_mnemonic(&recovery_words).unwrap();
+        let recovered_master_key = outcome
+            .config
+            .verify_recovery_key(&recovery_key)
+            .unwrap()
+            .expect("recovery words must reopen migrated vault");
+        assert_eq!(
+            recovered_master_key.as_bytes(),
+            original_master_key.as_bytes()
+        );
     }
 
-    #[test]
-    fn test_migration_already_at_target() {
-        let mut config = make_test_config(VaultVersion { major: 1, minor: 1 });
-        let dir = setup_vault_dir(&config);
+    #[tokio::test]
+    async fn test_migration_already_at_target() {
+        let config = make_test_config(VaultVersion { major: 1, minor: 1 });
+        let provider = axiomvault_storage::MemoryProvider::new();
+        provider
+            .upload(
+                &VaultPath::parse(CONFIG_FILENAME).unwrap(),
+                config.to_bytes().unwrap(),
+            )
+            .await
+            .unwrap();
         let registry = MigrationRegistry::with_defaults();
         let target = VaultVersion { major: 1, minor: 1 };
 
-        registry.migrate(dir.path(), &mut config, &target).unwrap();
-        assert_eq!(config.version, target);
+        let outcome = registry.migrate(&provider, b"test", &target).await.unwrap();
+        assert_eq!(outcome.config.version, target);
+        assert!(outcome.recovery_words.is_none());
     }
 
-    #[test]
-    fn test_migration_no_path_fails() {
-        let mut config = make_test_config(VaultVersion { major: 1, minor: 0 });
-        let dir = setup_vault_dir(&config);
+    #[tokio::test]
+    async fn test_migration_no_path_fails() {
+        let config = make_test_config(VaultVersion { major: 1, minor: 0 });
+        let provider = axiomvault_storage::MemoryProvider::new();
+        provider
+            .upload(
+                &VaultPath::parse(CONFIG_FILENAME).unwrap(),
+                config.to_bytes().unwrap(),
+            )
+            .await
+            .unwrap();
         let registry = MigrationRegistry::with_defaults();
-        // No migration registered for 1.0 -> 1.5
         let target = VaultVersion { major: 1, minor: 5 };
 
-        let result = registry.migrate(dir.path(), &mut config, &target);
+        let result = registry.migrate(&provider, b"test", &target).await;
         assert!(result.is_err());
     }
 
-    #[test]
-    fn test_backup_and_restore() {
-        let config = make_test_config(VaultVersion { major: 1, minor: 0 });
-        let dir = setup_vault_dir(&config);
+    #[tokio::test]
+    async fn interrupted_commit_restores_backup_before_migrating() {
+        let mut config = make_test_config(VaultVersion { major: 1, minor: 0 });
+        config.wrapped_master_key = None;
+        config.recovery_wrapped_master_key = None;
+        config.recovery_key_verification = None;
+        config.encrypted_recovery_key = None;
+        let provider = axiomvault_storage::MemoryProvider::new();
+        provider
+            .upload(
+                &VaultPath::parse(CONFIG_BACKUP_FILENAME).unwrap(),
+                config.to_bytes().unwrap(),
+            )
+            .await
+            .unwrap();
         let registry = MigrationRegistry::with_defaults();
 
-        // Backup.
-        registry.backup_config(dir.path()).unwrap();
-        let backup_path = dir.path().join(CONFIG_BACKUP_FILENAME);
-        assert!(backup_path.exists());
-
-        // Restore.
-        let mut restored_config = make_test_config(VaultVersion {
-            major: 99,
-            minor: 0,
-        });
-        registry
-            .restore_config(dir.path(), &mut restored_config)
+        let outcome = registry
+            .migrate(&provider, b"test", &VaultVersion::CURRENT)
+            .await
             .unwrap();
-        assert_eq!(restored_config.version, config.version);
+        assert_eq!(outcome.config.version, VaultVersion::CURRENT);
+        assert!(provider
+            .exists(&VaultPath::parse(CONFIG_FILENAME).unwrap())
+            .await
+            .unwrap());
+        assert!(!provider
+            .exists(&VaultPath::parse(CONFIG_BACKUP_FILENAME).unwrap())
+            .await
+            .unwrap());
+    }
+
+    #[tokio::test]
+    async fn wrong_password_does_not_modify_legacy_config() {
+        let mut legacy = make_test_config(VaultVersion { major: 1, minor: 0 });
+        legacy.wrapped_master_key = None;
+        legacy.recovery_wrapped_master_key = None;
+        legacy.recovery_key_verification = None;
+        legacy.encrypted_recovery_key = None;
+        let original = legacy.to_bytes().unwrap();
+        let provider = axiomvault_storage::MemoryProvider::new();
+        provider
+            .upload(
+                &VaultPath::parse(CONFIG_FILENAME).unwrap(),
+                original.clone(),
+            )
+            .await
+            .unwrap();
+
+        let result = MigrationRegistry::with_defaults()
+            .migrate(&provider, b"wrong password", &VaultVersion::CURRENT)
+            .await;
+
+        assert!(matches!(result, Err(Error::NotPermitted(_))));
+        assert_eq!(
+            provider
+                .download(&VaultPath::parse(CONFIG_FILENAME).unwrap())
+                .await
+                .unwrap(),
+            original
+        );
+        assert!(!provider
+            .exists(&VaultPath::parse(CONFIG_BACKUP_FILENAME).unwrap())
+            .await
+            .unwrap());
+        assert!(!provider
+            .exists(&VaultPath::parse(CONFIG_MIGRATION_FILENAME).unwrap())
+            .await
+            .unwrap());
     }
 
     #[test]

@@ -9,7 +9,7 @@
 //! Database files are created with restrictive permissions (0600) to limit
 //! access to the owning user.
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::sync::Mutex;
@@ -48,18 +48,51 @@ impl LocalIndex {
     /// to prevent other users from reading cached vault metadata.
     pub fn open(db_path: impl AsRef<Path>) -> AppResult<Self> {
         let db_path = db_path.as_ref();
-        let is_new = !db_path.exists() || db_path.to_str() == Some(":memory:");
-        let conn = Connection::open(db_path).map_err(sqlite_err)?;
+
+        #[cfg(not(unix))]
+        if db_path.to_str() != Some(":memory:") {
+            return Err(AppError::Storage(
+                "secure local-index ACL creation is not implemented on this platform".to_string(),
+            ));
+        }
 
         #[cfg(unix)]
-        if is_new && db_path.to_str() != Some(":memory:") {
-            use std::os::unix::fs::PermissionsExt;
-            if let Err(e) =
-                std::fs::set_permissions(db_path, std::fs::Permissions::from_mode(0o600))
-            {
-                tracing::warn!("Failed to set restrictive permissions on index db: {}", e);
+        if db_path.to_str() != Some(":memory:") {
+            use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+
+            // `mode` applies at the atomic create boundary, so the database is
+            // never observable with broader permissions even before repair.
+            let file = std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .mode(0o600)
+                .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+                .open(db_path)
+                .map_err(|e| AppError::Storage(format!("Failed to securely open index db: {e}")))?;
+            drop(file);
+
+            std::fs::set_permissions(db_path, std::fs::Permissions::from_mode(0o600))
+                .map_err(|e| AppError::Storage(format!("Failed to secure index db: {e}")))?;
+            let mode = std::fs::metadata(db_path)
+                .map_err(|e| AppError::Storage(format!("Failed to verify index db: {e}")))?
+                .permissions()
+                .mode()
+                & 0o777;
+            if mode != 0o600 {
+                return Err(AppError::Storage(format!(
+                    "Unsafe index db permissions after repair: {mode:o}"
+                )));
             }
         }
+
+        let conn = Connection::open_with_flags(
+            db_path,
+            OpenFlags::SQLITE_OPEN_READ_WRITE
+                | OpenFlags::SQLITE_OPEN_CREATE
+                | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+        )
+        .map_err(sqlite_err)?;
 
         conn.execute_batch(
             r#"
@@ -274,6 +307,39 @@ impl LocalIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn open_repairs_unsafe_permissions_on_existing_database() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("index.sqlite");
+        std::fs::write(&path, []).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        let _index = LocalIndex::open(&path).unwrap();
+
+        assert_eq!(
+            std::fs::metadata(path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn open_rejects_symlink_database_path() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let victim = dir.path().join("victim");
+        std::fs::write(&victim, b"do not modify").unwrap();
+        let path = dir.path().join("index.sqlite");
+        symlink(&victim, &path).unwrap();
+
+        assert!(LocalIndex::open(&path).is_err());
+        assert_eq!(std::fs::read(victim).unwrap(), b"do not modify");
+    }
 
     #[test]
     fn test_index_operations() {
