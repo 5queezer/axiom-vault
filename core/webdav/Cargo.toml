@@ -26,6 +26,10 @@ tracing.workspace = true
 # Utils
 chrono.workspace = true
 percent-encoding.workspace = true
+base64.workspace = true
+rand.workspace = true
+subtle.workspace = true
+zeroize.workspace = true
 
 [dev-dependencies]
 axiomvault-crypto = { path = "../crypto" }

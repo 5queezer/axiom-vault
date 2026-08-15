@@ -370,17 +370,21 @@ dependencies = [
  "axiomvault-storage",
  "axiomvault-vault",
  "axum",
+ "base64",
  "chrono",
  "http",
  "http-body-util",
  "hyper",
  "percent-encoding",
+ "rand 0.10.2",
  "reqwest 0.13.4",
  "serde_json",
+ "subtle",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "zeroize",
 ]
 
 [[package]]

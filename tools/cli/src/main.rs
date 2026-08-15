@@ -416,7 +416,7 @@ enum Commands {
         target: Option<usize>,
     },
 
-    /// Serve vault contents over WebDAV on the loopback interface.
+    /// Serve vault contents over authenticated WebDAV on the loopback interface.
     Webdav {
         /// Path to the vault.
         #[arg(short, long)]
@@ -2437,6 +2437,9 @@ async fn cmd_webdav(path: &Path, port: u16) -> Result<()> {
     let url = server.url();
 
     println!("WebDAV server running at {}/", url);
+    println!("Username: {}", server.credential().username());
+    println!("Password: {}", server.credential().password());
+    println!("This random credential is valid only for this server session.");
     println!("Press Ctrl+C to stop.");
 
     server

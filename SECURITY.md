@@ -24,13 +24,15 @@ There is no bug bounty program at this time. We will credit reporters in release
 
 - **Disk attacker (stolen device).** The vault master key is never stored in plaintext. It is wrapped (encrypted) under a key-encryption key (KEK) derived from the user's password via Argon2id with a per-vault random salt. Sensitive types in memory derive `Zeroize`/`ZeroizeOnDrop` and are wiped when they go out of scope.
 
-- **Network eavesdropper.** All cloud API traffic uses TLS (via `rustls`). The local FUSE mount is process-local and does not expose a network service.
+- **Network eavesdropper.** All cloud API traffic uses TLS (via `rustls`). The local FUSE mount is process-local and does not expose a network service. The optional WebDAV server is restricted by the library to loopback IP addresses and requires a cryptographically random, per-server HTTP Basic credential for every request other than capability discovery (`OPTIONS`).
 
 - **Partial cloud data loss.** Cloud RAID modes (mirror and erasure coding via Reed-Solomon) replicate data across multiple storage providers for redundancy.
 
 ### What we do NOT protect against
 
 - **Local malware with root/admin access.** An attacker with full system access can read process memory, inject code, or intercept FUSE operations. This is out of scope for AxiomVault.
+
+- **A local process that obtains the active WebDAV credential.** Loopback binding is not an OS-user security boundary. The CLI intentionally displays the session credential once so the user can configure a WebDAV client; protect terminal output and process memory. The credential is never persisted, is replaced whenever the server is restarted, and is redacted from debug output.
 
 - **Memory forensics on a running system.** We zeroize sensitive data eagerly, but we cannot guarantee all copies are erased. The compiler may optimize away zeroization in some cases, and secrets may leak to swap or core dumps. Use full-disk encryption as defense in depth.
 
