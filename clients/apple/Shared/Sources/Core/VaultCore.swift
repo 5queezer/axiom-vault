@@ -409,11 +409,18 @@ class VaultCore {
         }
     }
 
-    func runMigration(path: String, password: String) throws {
+    /// Runs an authenticated migration and returns newly generated recovery
+    /// words exactly once. The caller must present and confirm them.
+    func runMigration(path: String, password: String) throws -> String? {
         let result = axiom_vault_migrate(path, password)
         if result != 0 {
             throw VaultError.operationFailed(getLastError())
         }
+        guard let words = axiom_vault_take_migration_recovery_words() else {
+            return nil
+        }
+        defer { axiom_recovery_words_free(words) }
+        return String(cString: words)
     }
 
     func healthCheck(path: String, password: String? = nil) throws -> String {

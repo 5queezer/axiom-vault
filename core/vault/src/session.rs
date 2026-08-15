@@ -305,9 +305,11 @@ impl VaultSession {
         Ok(())
     }
 
-    /// Save the current tree state to storage (encrypted).
-    pub async fn save_tree(&self) -> Result<()> {
-        let tree = self.tree.read().await;
+    /// Persist a supplied tree snapshot to storage (encrypted).
+    ///
+    /// Callers can build and validate a candidate tree without exposing it
+    /// in-memory, then publish it only after this write succeeds.
+    pub(crate) async fn save_tree_snapshot(&self, tree: &VaultTree) -> Result<()> {
         let tree_json = tree.to_json()?;
 
         let tree_key = self.master_key()?.derive_file_key(TREE_KEY_CONTEXT);
@@ -317,6 +319,12 @@ impl VaultSession {
         let tree_path = VaultPath::parse(META_DIRNAME)?.join(TREE_FILENAME)?;
         self.provider.upload(&tree_path, encrypted).await?;
         Ok(())
+    }
+
+    /// Save the current tree state to storage (encrypted).
+    pub async fn save_tree(&self) -> Result<()> {
+        let tree = self.tree.read().await;
+        self.save_tree_snapshot(&tree).await
     }
 }
 
