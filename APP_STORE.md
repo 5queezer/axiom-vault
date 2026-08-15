@@ -1,5 +1,11 @@
 # App Store Metadata — AxiomVault
 
+> [!WARNING]
+> **Draft only — not approved for submission.** The Apple client and its
+> biometric, File Provider, export, and remote-sync workflows have not completed
+> release qualification. Revalidate every claim against a shipped build before
+> copying this text into App Store Connect.
+
 ## App Identity
 
 | Field | Value |
@@ -20,19 +26,24 @@ Your data is encrypted on-device using **XChaCha20-Poly1305**, one of the strong
 
 ### Why AxiomVault?
 
-- 🔐 **Military-grade encryption** — XChaCha20-Poly1305 with Argon2 key derivation
+- 🔐 **Authenticated encryption** — XChaCha20-Poly1305 with Argon2id key derivation
 - 📵 **Fully offline** — works without an internet connection; your data never leaves your device unless you choose
 - 🚫 **Zero knowledge** — we have no servers and no access to your data. Ever.
-- 🔑 **Biometric unlock** — Face ID / Touch ID for quick, secure vault access
-- ☁️ **Optional Google Drive sync** — encrypted sync; plaintext never leaves your device
+- 🔑 **Biometric unlock (planned)** — Face ID / Touch ID integration is not yet release-qualified
+- ☁️ **Google Drive integration (experimental)** — bidirectional sync is incomplete
 - 📁 **File vault** — store documents, photos, notes, and any file type
 - 🗂️ **Folder organisation** — create a nested folder structure inside your vault
 
 ### How it works
 
-AxiomVault creates an encrypted container on your device. Every file you add is encrypted before storage. When you unlock with your password or Face ID, files are decrypted in memory only — they never exist unencrypted on disk outside the vault.
+AxiomVault creates an encrypted container on your device. Every file added to
+the vault is encrypted before vault storage. Explicit export and operating-system
+integration workflows can write plaintext to a destination selected by the user.
 
-Google Drive sync (optional) uploads already-encrypted vault chunks. Even if your Drive account were compromised, your data remains unreadable without your password.
+Google Drive cloud-vault support is experimental. Do not publish a compromise-
+resistance or bidirectional-sync claim until credential handling, remote-download
+persistence, rollback detection, and multi-device convergence have passed the
+release security gates.
 
 ### Privacy commitment
 
@@ -122,14 +133,13 @@ Recommended screenshot sets (6.5" + 5.5"):
 
 ---
 
-## Release Notes (v0.1.0 — Initial Release)
+## Draft Release Notes (do not publish until the features pass release gates)
 
 ```
-AxiomVault is now available on the App Store!
+AxiomVault initial release candidate:
 
 • Create encrypted vaults secured with XChaCha20-Poly1305
-• Unlock with Face ID or your master password
+• Unlock with your master password
 • Organise files in nested folders within your vault
-• Optional Google Drive sync (encrypted — plaintext never leaves your device)
 • Zero data collection — your files, your keys, your privacy
 ```

@@ -37,19 +37,30 @@ AxiomVault encrypts your files locally before they touch any cloud service. A si
 | Key hierarchy | Blake2b-derived file keys, directory keys, and index keys |
 | Memory safety | Automatic zeroization, constant-time comparisons, no plaintext logging |
 
-### Platform Features
+### Platform Status
 
-| Feature | CLI | Desktop | macOS | iOS | Android |
-|---------|:---:|:-------:|:-----:|:---:|:-------:|
-| Create / unlock vault | x | x | x | x | x |
-| Browse files | x | x | x | x | x |
-| Add files & folders | x | x | x | x | x |
-| Extract / export | x | x | x | x | x |
-| Drag & drop | | x | x | x | |
-| FUSE mount | x | x | | | |
-| File Provider | | | x | x | |
-| Google Drive sync | x | x | x | x | x |
-| Change password | x | x | x | x | x |
+Legend: **Available** is implemented and covered by the relevant core tests;
+**Experimental** is implemented but not yet release-qualified end to end;
+**Scaffold** has UI or integration code but is not a complete user workflow.
+
+| Feature | CLI | Linux | macOS | iOS | Android |
+|---------|:---:|:-----:|:-----:|:---:|:-------:|
+| Create / unlock local vault | Available | Experimental | Experimental | Experimental | Experimental |
+| Browse files | Available | Experimental | Experimental | Experimental | Experimental |
+| Add files & folders | Available | Experimental | Experimental | Experimental | Scaffold |
+| Extract / export | Available | Experimental | Experimental | Experimental | Scaffold |
+| Drag & drop | — | Experimental | Experimental | — | — |
+| FUSE mount | — | — | — | — | — |
+| File Provider integration | — | — | Scaffold | Scaffold | — |
+| Google Drive cloud vault | Experimental | — | Scaffold | Scaffold | Scaffold |
+| Bidirectional remote sync | Incomplete | Incomplete | Incomplete | Incomplete | Incomplete |
+| Change password | Available | Experimental | Experimental | Experimental | Experimental |
+
+The repository contains FUSE, sync, File Provider, and mobile integration
+building blocks, but their presence does not mean the corresponding client
+workflow is complete. In particular, remote downloads are not yet persisted
+into a local vault, and the released CLI/Linux binaries do not expose a FUSE
+mount command.
 
 ### Cloud Storage
 
@@ -57,11 +68,12 @@ AxiomVault encrypts your files locally before they touch any cloud service. A si
 - **Local filesystem** &mdash; for offline or self-hosted storage
 - iCloud, Dropbox, OneDrive &mdash; planned ([#60](https://github.com/5queezer/axiom-vault/issues/60))
 
-### Sync Engine
+### Sync Engine (incomplete)
 
-- On-demand or periodic background sync
-- Conflict detection via ETags with configurable resolution (keep both, prefer local, prefer remote, manual)
-- Exponential backoff retry
+- Staging, scheduling, ETag conflict detection, and exponential-backoff retry
+  are implemented in the core crate.
+- Remote-download persistence and end-to-end multi-device convergence are not
+  complete. Do not rely on the current sync commands for backup or replication.
 
 ## Quick Start
 
@@ -133,7 +145,7 @@ axiomvault gdrive-open --folder-id YOUR_FOLDER_ID \
     --tokens ~/gdrive-tokens.json
 ```
 
-### Sync
+### Sync (experimental; remote downloads are not persisted)
 
 ```bash
 axiomvault sync --vault-path ~/my-vault --strategy keep-both
@@ -178,7 +190,7 @@ axiom-vault/
 │   ├── vault/            # Vault engine, config, tree index
 │   ├── storage/          # Storage provider trait + Google Drive
 │   ├── sync/             # Sync engine, conflict resolution
-│   ├── fuse/             # FUSE virtual filesystem
+│   ├── fuse/             # Experimental FUSE implementation (not client-wired)
 │   ├── ffi/              # C-ABI bindings for mobile (cbindgen)
 │   └── common/           # Shared types
 ├── clients/
@@ -193,7 +205,7 @@ axiom-vault/
 
 ```
 vault-root/
-├── vault.config          # Encrypted metadata (salt, KDF params, version)
+├── vault.config          # Plaintext envelope metadata; keys are wrapped
 ├── d/                    # Encrypted file content
 └── m/
     └── tree.json         # Encrypted directory tree index
@@ -207,7 +219,10 @@ vault-root/
 - **Chunk ordering protection** &mdash; chunk index is authenticated to prevent reordering
 - **Memory safety** &mdash; `Zeroize` + `ZeroizeOnDrop` on all key types, `subtle` for constant-time ops
 - **No plaintext in logs** &mdash; keys and sensitive data are redacted in `Display` impls
-- **Quantum-resistant vault encryption** &mdash; AxiomVault uses quantum-resistant client-side encryption for vault contents and encrypted filenames, based on 256-bit symmetric AEAD encryption and password/recovery-key based key wrapping. Password-protected vault strength remains bounded by the user's password entropy, so use a strong password or the high-entropy recovery key for post-quantum-strength access. This claim excludes TLS, OAuth, and cloud-provider identity layers.
+- **256-bit symmetric vault encryption** &mdash; vault contents and filenames use
+  XChaCha20-Poly1305 with password/recovery-key based key wrapping. Overall
+  security is still bounded by password strength, endpoint security, OAuth,
+  cloud-provider identity, and the documented early-development limitations.
 
 ## Development
 
